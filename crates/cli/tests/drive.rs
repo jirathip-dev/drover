@@ -157,7 +157,7 @@ fn start_spawns_the_next_queued_issue() {
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["start"], "{out}");
     assert!(out.starts_with("sendmeter #12 start: "), "{out}");
-    assert_ne!(started("sendmeter-impl-12"), [] as [std::string::String; 0]);
+    assert_ne!(started("sendmeter-impl-12"), <[std::string::String; 0]>::default());
     assert_eq!(state(&c), "impl");
     let wt = c.worktrees.join("sendmeter/issue-12");
     idle(&c, &fake(&[("sendmeter-impl-12", "working", &wt.to_string_lossy())]));
@@ -182,7 +182,7 @@ fn review_spawns_rev_at_the_pushed_head() {
         rev.display()
     );
     assert!(r.called(&add), "{:?}", r.calls.borrow());
-    assert_ne!(started("sendmeter-rev-12-r1"), [] as [std::string::String; 0]);
+    assert_ne!(started("sendmeter-rev-12-r1"), <[std::string::String; 0]>::default());
     assert_eq!(state(&c), "review(1)");
     let r = fake(&[
         ("sendmeter-impl-12", "idle", &wt.to_string_lossy()),
@@ -758,13 +758,13 @@ fn drive_now_on_the_board_is_paired_only_and_toasts_its_line() {
     assert!(post("127.0.0.1:7777", "").starts_with("HTTP/1.1 401"));
     let cookie = pair(&s, &c, "", c.now);
     assert!(post("evil.example", &cookie).starts_with("HTTP/1.1 403"));
-    assert_eq!(started(""), [] as [std::string::String; 0]);
+    assert_eq!(started(""), <[std::string::String; 0]>::default());
     let res = post("127.0.0.1:7777", &cookie);
     assert!(
         res.starts_with("HTTP/1.1 303") && res.contains("sendmeter%3A%20started%20%2312"),
         "{res}"
     );
-    assert_ne!(started("sendmeter-impl-12"), [] as [std::string::String; 0]);
+    assert_ne!(started("sendmeter-impl-12"), <[std::string::String; 0]>::default());
     let drive = get(&s)["fleets"][0]["drive"].clone();
     let line = drive["line"].as_str().unwrap_or_default();
     assert_eq!(
@@ -895,7 +895,7 @@ fn a_conflicting_pr_after_pass_gets_update_rounds_then_needs_human() {
     for (i, (v, p)) in [("FAIL", "a1"), ("FAIL", "b2")].into_iter().enumerate() {
         ev(
             &c,
-            11 + i as u64,
+            11 + u64::try_from(i).unwrap(),
             "verdict",
             json!({"verdict": v, "sha": sha(p), "body": v}),
         );
@@ -1089,7 +1089,7 @@ fn a_serial_busy_item_is_skipped_and_keeps_its_place() {
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["start", "start", "start"], "{out}");
     assert!(out.contains("sendmeter #1 start: REFUSED SERIAL_BUSY"), "{out}");
-    assert_eq!(started("sendmeter-impl-1"), [] as [std::string::String; 0]);
+    assert_eq!(started("sendmeter-impl-1"), <[std::string::String; 0]>::default());
     assert_eq!((state_of(&c, 2), state_of(&c, 3)), ("impl".into(), "impl".into()));
     assert_eq!(
         run(&c, &Fake::default(), &["next", "sendmeter"]),
@@ -2615,7 +2615,7 @@ fn a_done_reviewer_in_the_way_is_superseded_and_the_review_spawns() {
     let sup = all.iter().find(|e| e.kind == "supersede").expect(&out);
     assert_eq!(sup.str("agent"), Some("sendmeter-rev-12-r1"));
     assert!(sh().called("kill", "sendmeter-rev-12-r1"), "{:?}", r.calls.borrow());
-    assert_ne!(started("sendmeter-rev-12-r1"), [] as [std::string::String; 0]);
+    assert_ne!(started("sendmeter-rev-12-r1"), <[std::string::String; 0]>::default());
     assert_eq!(state(&c), "review(1)");
 }
 
@@ -2626,7 +2626,7 @@ fn a_working_reviewer_in_the_way_still_waits() {
     assert_eq!(steps, ["review"], "{out}");
     assert!(out.contains("REFUSED LANE_LIVE: live agent(s)"), "{out}");
     assert!(!read(&c.state).unwrap().iter().any(|e| e.kind == "supersede"));
-    assert_eq!(started(""), [] as [std::string::String; 0]);
+    assert_eq!(started(""), <[std::string::String; 0]>::default());
     assert_eq!(state(&c), "impl");
 }
 
@@ -2755,7 +2755,7 @@ fn an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it() {
     let (code, out) = run(&c, &Fake::default(), &["queue", "sendmeter", "ls"]);
     assert!(code == 0 && out.contains("parked: host mini is down"), "{out}");
     let r = fake(NONE).reply("git -C", "");
-    assert_eq!(drive(&c, &r).1, [] as [std::string::String; 0]);
+    assert_eq!(drive(&c, &r).1, <[std::string::String; 0]>::default());
     assert!(started("").is_empty(), "a parked issue is skipped");
 
     let s = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
@@ -2789,7 +2789,7 @@ fn an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it() {
     assert_eq!(kinds, [("parked", Some("owner")), ("unparked", Some("owner"))]);
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["start"], "{out}");
-    assert_ne!(started("sendmeter-impl-12"), [] as [std::string::String; 0]);
+    assert_ne!(started("sendmeter-impl-12"), <[std::string::String; 0]>::default());
 }
 
 #[test]

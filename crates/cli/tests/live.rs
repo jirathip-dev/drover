@@ -245,7 +245,7 @@ fn an_answer_is_refused_shed_reports_no_menu() {
         let res = req(&s, "POST", "/answer", &format!("agent={agent}&choice=1"), &ck);
         assert!(res.contains("REFUSED BAD_VALUE: no menu"), "{res}");
     }
-    assert_eq!(r.keys(), [] as [serde_json::Value; 0]);
+    assert_eq!(r.keys(), <[serde_json::Value; 0]>::default());
     let v = needs(&s, &ck, T);
     let b = card(&v, "sendmeter-impl-12").unwrap_or_else(|| panic!("{v}"));
     assert_eq!((&b["menu"], &b["push"]), (&json!(null), &json!(true)), "{b}");

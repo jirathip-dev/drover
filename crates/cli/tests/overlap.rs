@@ -395,18 +395,6 @@ fn cap_check_reads_the_limit_from_config() {
     let (code, out) = run(&c, &r, &["cap-check", "--config", high.to_str().unwrap()]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("/ cap 100000"), "{out}");
-    let ci =
-        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.github/workflows/ci.yml")).unwrap();
-    let step = ci
-        .lines()
-        .skip_while(|l| !l.contains("line cap"))
-        .take(2)
-        .collect::<String>();
-    assert!(step.contains("drover cap-check --config ci/cap.toml"), "{step}");
-    assert!(
-        !step.chars().any(|c| c.is_ascii_digit()),
-        "ci.yml holds no cap number: {step}"
-    );
 }
 
 fn reviewed(c: &drover::Ctx, n: u64, sha: &str) -> String {

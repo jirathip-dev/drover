@@ -29,7 +29,7 @@ fn the_chat_tab_is_linear_in_the_log_and_cached_by_its_last_seq() {
     log.push(
         json!({"ts": NOW, "fleet": "sendmeter", "type": "thread-msg", "thread": "t1", "from": "t2", "text": "handed"}),
     );
-    let got = log.len() as u64;
+    let got = u64::try_from(log.len()).unwrap();
     log.push(
         json!({"ts": NOW, "fleet": "sendmeter", "type": "thread-handoff", "thread": "t1", "from": "t1", "to": "t3",
         "title": "on", "text": "on", "forwards": got}),

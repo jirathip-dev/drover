@@ -47,7 +47,7 @@ fn on_an_overloaded_host_a_listing_that_never_returns_still_marks_the_disk_not_a
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     let t = std::time::Instant::now();
     assert!(hung(&dir, Duration::from_millis(100), move |_| {
-        let _ = rx.recv();
+        rx.recv().ok();
         None
     }));
     assert!(
@@ -69,7 +69,7 @@ fn the_refusal_names_the_listings_time_and_the_cpu_idle_and_no_command() {
     let dir = tmpdir("overloaded-text").to_string_lossy().into_owned();
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     assert!(hung(&dir, Duration::ZERO, move |_| {
-        let _ = rx.recv();
+        rx.recv().ok();
         None
     }));
     let o = Real.run("git", &argv(&["-C", &dir, "status"])).unwrap();

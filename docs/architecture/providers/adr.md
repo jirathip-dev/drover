@@ -22,7 +22,7 @@ crates/core/src/harness/ (now providers/) already held a 40-method `Harness` tra
 | Hermes by name | `lib.rs` (`Ctx.hermes`, `FLEET_HERMES_PROFILES`), `cli.rs:2089`, `doctor.rs:229-238`, `spawn.rs:89-93`, `timer.rs:397`, `events.rs:305`, `serve.rs:3255` |
 | AI co-author list | `hook.rs:782` |
 | ~33 comment lines naming a provider | 15 files; the #316 grep skips `//` lines |
-| CI check covers only claude/anthropic, `crates/*/src`, comments exempt | `.github/workflows/ci.yml:48` |
+| CI check covers only claude/anthropic, `crates/*/src`, comments exempt | `.github/workflows/ci.yml` (before #1587) |
 
 ## Options
 

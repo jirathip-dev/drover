@@ -51,7 +51,7 @@ fn hang(root: &Path) -> std::sync::mpsc::Sender<()> {
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     let dir = root.to_string_lossy().into_owned();
     assert!(drover::runner::hung(&dir, Duration::ZERO, move |_| {
-        let _ = rx.recv();
+        rx.recv().ok();
         None
     }));
     tx

@@ -44,7 +44,7 @@ fn largest(sh: &FakeShed, lanes: u64) -> Vec<String> {
         sh.lane(&agent, "idle", &format!("/wt/{agent}"));
         sh.screen(&agent, "⏺ Working on it\n\n❯ \n");
     }
-    for i in 0..10_000 - log.len() as u64 {
+    for i in 0..10_000 - u64::try_from(log.len()).unwrap() {
         log.push(ev(
             NOW - 5_000 + i / 10,
             Some(1 + i % lanes),

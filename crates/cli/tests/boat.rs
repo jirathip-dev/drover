@@ -385,7 +385,7 @@ fn bootstrap_and_survey_of_a_running_host_rewrite_a_moved_address() {
     let conf = || std::fs::read_to_string(c.home.join(".ssh/config.d/herdsman")).unwrap();
     let pin = c.home.join(".ssh/herdsman/boat1.known");
     std::fs::write(bin.join("endpoint"), "10.0.0.8:2200").unwrap();
-    let _ = drover::cloud::bootstrap(&c, &cfg, &r, "boat1", &mut Vec::new());
+    drover::cloud::bootstrap(&c, &cfg, &r, "boat1", &mut Vec::new()).ok();
     assert!(
         conf().contains("  HostName 10.0.0.8\n  User user\n  Port 2200\n"),
         "{}",
@@ -407,7 +407,7 @@ fn bootstrap_and_survey_of_a_running_host_rewrite_a_moved_address() {
     drover::hosts::survey(&c, &cfg, &r, true);
     assert!(conf().contains("HostName 10.0.0.9\n"), "{}", conf());
     assert!(std::fs::read_to_string(&pin).unwrap().contains("AAAAboatkey"));
-    let _ = drover::cloud::bootstrap(&c, &cfg, &r, "boat1", &mut Vec::new());
+    drover::cloud::bootstrap(&c, &cfg, &r, "boat1", &mut Vec::new()).ok();
     assert!(conf().contains("HostName 10.0.0.10\n"), "{}", conf());
     assert_eq!(
         std::fs::read_to_string(&pin).unwrap(),

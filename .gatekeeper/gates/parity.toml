@@ -1,0 +1,8 @@
+about = "each docs/parity.md row's test exists; a parity test or row the base had is gone only with `dropped q<N>` (#1094)"
+fix = "add the row's test, or mark the row `dropped q<N>` with the owner's decision"
+budget_secs = 30
+paths = ["docs/parity.md", "crates/cli/tests/**", "scripts/ui-audit.sh", "assets/ui-audit.js", "scripts/parity-check.sh"]
+run = '''
+set -- {--base}
+scripts/parity-check.sh "${2:-HEAD^1}"
+'''
