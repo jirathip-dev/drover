@@ -149,17 +149,10 @@ fn two_orchestrators_on_one_fleet_both_act_each_named_in_the_log_and_the_gates_s
     let c = two("orch-two");
     let sh = FakeShed::attached(&c);
     let r = Fake::default();
-    let new = |o: &[&str]| run(&c, &r, &[&["thread", "new", "sendmeter", "Plan"], o].concat());
-    assert_eq!(new(&["--orchestrator", "ada"]), (0, "t1\n".into()));
-    assert_eq!(new(&["--orchestrator", "bob"]), (0, "t2\n".into()));
-    assert_eq!(new(&[]).1, "t3\n", "unnamed: the first whose fleets cover it");
-    let (code, out) = run(&c, &r, &["thread", "new", "all", "Plan", "--orchestrator", "ada"]);
-    assert_eq!(code, 3, "Ada's fleets do not cover `all`: {out}");
-    let of: Vec<_> = kinds(&c, "thread-new")
-        .iter()
-        .map(|t| t.str("orchestrator").map(String::from))
-        .collect();
-    assert_eq!(of, [Some("ada".into()), Some("bob".into()), Some("ada".into())]);
+    for (id, o) in [("t1", "ada"), ("t2", "bob"), ("t3", "ada")] {
+        let d = json!({"thread": id, "title": "Plan", "orchestrator": o});
+        append(&c.state, &Event::new(NOW, "sendmeter", None, "thread-new", d)).unwrap();
+    }
 
     for (id, n) in [("ada", "12"), ("bob", "13")] {
         let (code, out) = as_orch(&c, &r, id, &["queue", "sendmeter", "add", n]);
@@ -209,7 +202,7 @@ fn renaming_an_orchestrator_changes_every_label_and_no_other_config() {
     );
     let c = ctx(&tmpdir("orch-rename"), &cfg);
     let r = Fake::default();
-    assert_eq!(run(&c, &r, &["thread", "new", "sendmeter", "Grill"]).1, "t1\n");
+    assert_eq!(old_thread(&c, "sendmeter", "Grill"), "t1");
     assert_eq!(run(&c, &r, &["thread", "reply", "t1", "Which scope?"]).0, 0);
     let ask = ["ask", "sendmeter", "-", "How fast?", "--option", "a", "--thread", "t1"];
     assert_eq!(run(&c, &r, &ask).1, "q1\n");

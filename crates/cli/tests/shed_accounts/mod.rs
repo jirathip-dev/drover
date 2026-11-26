@@ -129,10 +129,7 @@ fn a_limited_account_gives_each_thread_one_row_starts_no_orchestrator_and_alerts
     let date = format!("date -r {reset} +%a %H:%M");
     let f = acp_fake(&["echo", "claude-agent-acp"]).reply(&date, "Tue 12:00");
     for (t, title) in [("t1", "One"), ("t2", "Two")] {
-        assert_eq!(
-            run(&c, &Fake::default(), &["thread", "new", "sendmeter", title]).1,
-            format!("{t}\n")
-        );
+        assert_eq!(old_thread(&c, "sendmeter", title), t);
         run(&c, &b.cli(&f), &["thread", "say", t, "hi"]);
         let row = "claude account work hit its usage limit until Tue 12:00; your message is kept. New threads will fail too until then.";
         assert_eq!(rows(&c, t), [row], "{t}");
@@ -161,7 +158,7 @@ fn a_limited_account_gives_each_thread_one_row_starts_no_orchestrator_and_alerts
 fn a_live_orchestrator_moved_to_another_account_shows_one_row() {
     let b = FakeShed::new();
     let c = acp_ctx("acct-moved", &acp_config(&b.sock, "claude"));
-    assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "One"]).0, 0);
+    old_thread(&c, "sendmeter", "One");
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let labels = json!({"fleet": "sendmeter", "issue": "-", "role": "orchestrator", "thread": "t1"});
     let ev = |seq: u64, account: &str, was: Option<&str>, why: &str| -> shed::proto::Event {

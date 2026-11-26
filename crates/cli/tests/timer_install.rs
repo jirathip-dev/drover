@@ -18,7 +18,7 @@ fn timer_install_logs_who_ran_it() {
     let r = Fake::default();
     std::env::remove_var("DROVER_LANE");
     std::env::remove_var("DROVER_THREAD");
-    assert_eq!(run(&c, &r, &["thread", "new", "sendmeter", "Timer"]).1, "t1\n");
+    assert_eq!(old_thread(&c, "sendmeter", "Timer"), "t1");
 
     assert_eq!(run(&c, &r, &["timer", "install", "--no-load"]).0, 0);
     let e = &installs(&c)[0];

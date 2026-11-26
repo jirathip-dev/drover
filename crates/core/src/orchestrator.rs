@@ -75,8 +75,12 @@ fn hold(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str, mut extra: Value) -> Res
     if id.is_empty() || id.len() > 128 || !id.chars().all(ok) {
         return refused("BAD_VALUE", "thread: a cooee thread id (letters, digits, `-_.:`)");
     }
-    if find(&working(&ctx.state)?, id).is_ok() {
-        return refused("BAD_VALUE", format!("{id} is drover's own thread"));
+    let events = working(&ctx.state)?;
+    if find(&events, id).is_ok() && !archived(&events, id) {
+        return refused(
+            "BAD_VALUE",
+            format!("{id} is drover's own open thread: `drover thread archive {id}`, then attach it"),
+        );
     }
     extra.put("thread", json!(id));
     let t = Event::new(ctx.now, fleet, None, "orchestrator-attached", extra);
@@ -213,14 +217,12 @@ fn assign(cfg: &Config, repo: &str, want: Option<&str>) -> Result<String> {
     }
 }
 
-/// `drover thread new <fleet|all> <title> [--harness <h>]`: its id. the thread keeps its harness (`harness`, else the default's) for good.
-pub fn new(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, (harness, req): Opt2) -> Result<String> {
-    make(ctx, cfg, repo, title, (harness, None), req)
-}
-
-/// `new`, the thread talking to orchestrator `orch` (`assign`).
-pub fn new_with(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, o: Opt2) -> Result<String> {
-    make(ctx, cfg, repo, title, o, None)
+/// `drover thread new` and [New]: refused `THREADS_CUT`; a chat starts in a client and attaches.
+pub fn new(repo: &str) -> Result<String> {
+    refused(
+        "THREADS_CUT",
+        format!("drover makes no new thread: start a chat in a client and attach it (`drover attach {repo}`)"),
+    )
 }
 
 /// The thread a `new` with request id `req` in `repo` made under `[limits] thread_resend_minutes` ago.
@@ -389,7 +391,7 @@ fn desk(ctx: &Ctx, cfg: &Config, events: &[Event], repo: &str) -> Result<String>
     if let Some(d) = crate::thread::Registry::read(events).desk(repo) {
         return Ok(d.into());
     }
-    let id = new(ctx, cfg, repo, "Desk", (None, None))?;
+    let id = make(ctx, cfg, repo, "Desk", (None, None), None)?;
     let d = json!({"thread": id, "profile": repo, "desk": true});
     emit(&ctx.state, cfg, Event::new(ctx.now, repo, None, "thread-facts", d))?;
     Ok(id)
@@ -1256,6 +1258,25 @@ pub fn ls(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: Option<&str>, as_
             s("name"),
             s("state")
         )?;
+    }
+    Ok(())
+}
+
+/// `check`: each open drover thread's one closing row, where its work goes now.
+pub fn closing(ctx: &Ctx, cfg: &Config, events: &[Event]) -> Result<()> {
+    for t in threads(events) {
+        let id = t.str("thread").unwrap_or_default();
+        let done = |e: &Event| e.val("closing") == true;
+        if archived(events, id) || attached(events, id).is_some() || of(events, id).any(done) {
+            continue;
+        }
+        let text = format!(
+            "drover makes no new threads, and D4 ends this one: `drover thread archive {id}`, then attach {id} in a \
+             client (`drover attach {} {id}`) to carry on; the issues it filed follow it, its history stays readable",
+            t.fleet
+        );
+        let d = json!({"thread": id, "from": "system", "text": text, "closing": true, "noreply": true});
+        emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))?;
     }
     Ok(())
 }

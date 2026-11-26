@@ -16,10 +16,7 @@ fn setup(name: &str, extra: u64) -> drover::Ctx {
     let r = Fake::default();
     for i in 1..=27 {
         let title = format!("Thread {i}");
-        assert_eq!(
-            run(&c, &r, &["thread", "new", "sendmeter", &title]).1,
-            format!("t{i}\n")
-        );
+        assert_eq!(old_thread(&c, "sendmeter", &title), format!("t{i}"));
     }
     let ev = |k: &str, d: Value| append(&c.state, &Event::new(T, "sendmeter", None, k, d)).unwrap();
     for i in 1..=extra {

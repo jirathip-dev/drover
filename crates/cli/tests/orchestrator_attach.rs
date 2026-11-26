@@ -339,3 +339,53 @@ fn said_logs_an_owner_line_once_and_answer_typed_takes_it() {
     let d = events.iter().rfind(|e| e.kind == "decision").unwrap();
     assert_eq!((d.str("choice"), d.str("by")), (Some("full"), Some("owner (typed)")));
 }
+
+#[test]
+fn attach_adopts_an_archived_drover_thread_and_the_issues_it_filed_route_to_the_chat() {
+    let (c, b, r) = chat("attach-adopt");
+    let on = b.on(&r);
+    assert_eq!(old_thread(&c, "sendmeter", "Old work"), "t1");
+    let ev = |n: u64, kind: &str, d: Value| {
+        drover::events::append(&c.state, &drover::events::Event::new(T, "sendmeter", Some(n), kind, d)).unwrap();
+    };
+    ev(12, "issue-filed", json!({"filed_in": "t1"}));
+    let (code, out) = run(&c, &on, &["attach", "sendmeter", "t1"]);
+    assert!(code == 3 && out.contains("drover thread archive t1"), "{out}");
+    assert_eq!(run(&c, &on, &["thread", "archive", "t1"]).0, 0);
+    let (code, out) = run(&c, &on, &["attach", "sendmeter", "t1"]);
+    assert_eq!(code, 0, "{out}");
+    ev(12, "merged", json!({}));
+    let rows = call(&Server::new(&c, &on, None), &bearer(), ("GET", "/api/v1/thread/t1/rows"), "");
+    let merged = rows["rows"].as_array().unwrap().iter().find(|r| r["kind"] == "merged").cloned();
+    assert_eq!(
+        merged.map(|m| (m["issue"].clone(), m["to"].clone())),
+        Some((json!(12), json!({"k": "thread", "id": "t1"}))),
+        "{rows}"
+    );
+}
+
+#[test]
+fn check_logs_one_closing_row_in_each_open_drover_thread() {
+    let (c, b, r) = chat("attach-closing");
+    let on = b.on(&r);
+    for t in ["Open", "Archived", "Adopted"] {
+        old_thread(&c, "sendmeter", t);
+    }
+    for t in ["t2", "t3"] {
+        assert_eq!(run(&c, &on, &["thread", "archive", t]).0, 0);
+    }
+    assert_eq!(run(&c, &on, &["attach", "sendmeter", "t3"]).0, 0);
+    for _ in 0..2 {
+        assert_eq!(run(&c, &on, &["check"]).0, 0);
+    }
+    let closing: Vec<_> = read(&c.state)
+        .unwrap()
+        .iter()
+        .filter(|e| e.kind == "thread-msg" && e.val("closing") == true)
+        .map(|e| (e.str("thread").map(String::from), e.str("text").map(String::from)))
+        .collect();
+    assert_eq!(closing.len(), 1, "{closing:?}");
+    let (thread, text) = closing[0].clone();
+    assert_eq!(thread.as_deref(), Some("t1"));
+    assert!(text.unwrap().contains("drover attach sendmeter t1"));
+}

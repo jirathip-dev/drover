@@ -473,12 +473,6 @@ impl super::Server<'_> {
     }
 }
 
-fn first(text: &str) -> String {
-    let l = text.lines().find(|l| !l.trim().is_empty()).unwrap_or_default().trim();
-    let cut: String = l.chars().take(60).collect();
-    cut.replace(char::is_control, " ") + or(l.chars().count() > 60, "…", "")
-}
-
 pub fn file(ctx: &Ctx, events: &[Event], id: &str, name: &str, demo: bool) -> Option<std::path::PathBuf> {
     let f = of(events, id).rev().flat_map(files_of).find(|f| f["name"] == name);
     let p = std::path::Path::new(f.and_then(|f| f["path"].as_str())?);
@@ -521,16 +515,7 @@ pub fn post(
                 return Ok(format!("{t} started"));
             }
             let id = if new {
-                conductor::role(&cfg, g("repo"))?;
-                conductor::text_ok(text)?;
-                conductor::files_ok(&files)?;
-                conductor::new(
-                    ctx,
-                    &cfg,
-                    g("repo"),
-                    &first(text),
-                    (Some(g("harness")).filter(|h| !h.is_empty()), Some(g("req"))),
-                )?
+                conductor::new(g("repo"))?
             } else {
                 conductor::find(&events, id)?;
                 id.to_string()

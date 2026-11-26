@@ -179,8 +179,7 @@ fn screen(s: &Server, method: &str, path: &str, body: &str, extra: &str) -> (u16
 #[test]
 fn an_open_ask_row_opens_its_choice_recommended_first_and_an_answered_one_offers_none() {
     let c = ctx(&tmpdir("events-asks"), CONFIG);
-    let (code, out) = run(&c, &Fake::default(), &["thread", "new", "sendmeter", "scope"]);
-    assert_eq!((code, out.trim()), (0, "t1"));
+    assert_eq!(old_thread(&c, "sendmeter", "scope"), "t1");
     let at = |ago, issue, kind: &str, d: Value| Event::new(NOW - ago, "sendmeter", issue, kind, d);
     for e in [
         at(

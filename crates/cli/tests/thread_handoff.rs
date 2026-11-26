@@ -17,10 +17,7 @@ fn acp_setup(name: &str, b: &FakeShed) -> drover::Ctx {
     let mut c = ctx(&tmpdir(name), &cfg);
     c.exe = env!("CARGO_BIN_EXE_drover").into();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill #12"]).1,
-        "t1\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Grill #12"), "t1");
     c
 }
 
@@ -166,10 +163,7 @@ fn a_handoff_to_a_repo_without_a_orchestrator_logs_nothing() {
 fn a_handoff_to_an_existing_thread_appends_to_it_and_types_into_its_awake_orchestrator() {
     let b = FakeShed::new();
     let c = acp_setup("handoff-reuse", &b);
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Search"]).1,
-        "t2\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Search"), "t2");
     b.add(
         "orchestrator-t2",
         json!({"fleet": "sendmeter", "role": "orchestrator", "thread": "t2"}),
@@ -214,14 +208,8 @@ fn a_handoff_to_an_existing_thread_appends_to_it_and_types_into_its_awake_orches
 fn a_forward_marks_the_received_row_and_a_handoff_after_the_owner_wrote_does_not() {
     let b = FakeShed::new();
     let c = acp_setup("handoff-forward", &b);
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Test"]).1,
-        "t2\n"
-    );
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Search"]).1,
-        "t3\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Test"), "t2");
+    assert_eq!(old_thread(&c, "sendmeter", "Search"), "t3");
     let f = acp();
     let r = b.cli(&f);
     assert_eq!(
@@ -272,10 +260,7 @@ fn an_issue_filed_and_an_ask_answered_in_the_target_each_add_one_row_to_the_sour
     let b = FakeShed::new();
     let c = acp_setup("handoff-flow", &b);
     assert_eq!(to_new(&c, &b.cli(&acp()), "sendmeter", "Rate limits", "go"), "t2");
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Unlinked"]).1,
-        "t3\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Unlinked"), "t3");
     let before = show(&c, "t1");
 
     let cmd = "gh issue create -R acme/x -t \"Rate-limit /v1/search\" -F -";
@@ -322,7 +307,7 @@ fn an_issue_filed_and_an_ask_answered_in_the_target_each_add_one_row_to_the_sour
 }
 
 #[test]
-fn a_orchestrators_thread_new_is_refused_naming_handoff_and_the_owners_still_works() {
+fn a_orchestrators_thread_new_is_refused_naming_handoff_and_the_owners_is_refused_threads_cut() {
     let b = FakeShed::new();
     let c = acp_setup("handoff-perm", &b);
     let (code, out) = bin(&c, Some("t1"), &["thread", "new", "sendmeter", "Side quest"], "");
@@ -331,18 +316,20 @@ fn a_orchestrators_thread_new_is_refused_naming_handoff_and_the_owners_still_wor
         "{code} {out}"
     );
     assert_eq!(kinds(&c, "thread-new").len(), 1);
-    assert_eq!(
-        bin(&c, None, &["thread", "new", "sendmeter", "Side quest"], ""),
-        (0, "t2\n".into())
+    let (code, out) = bin(&c, None, &["thread", "new", "sendmeter", "Side quest"], "");
+    assert!(
+        code == 3 && out.contains("REFUSED THREADS_CUT") && out.contains("drover attach sendmeter"),
+        "{code} {out}"
     );
-    assert_eq!(to_new(&c, &b.cli(&acp()), "all", "Cross-repo", "both fleets"), "t3");
-    assert_eq!(kinds(&c, "thread-new")[2].fleet, "all");
+    assert_eq!(kinds(&c, "thread-new").len(), 1, "no thread logged");
+    assert_eq!(to_new(&c, &b.cli(&acp()), "all", "Cross-repo", "both fleets"), "t2");
+    assert_eq!(kinds(&c, "thread-new")[1].fleet, "all");
     let usage = run(&c, &Fake::default(), &["help", "--agent"]).1;
     assert!(
         usage.contains("`drover thread handoff <FROM> <TO> <TITLE> <TEXT>`"),
         "{usage}"
     );
-    let brief = std::fs::read_to_string(c.state.with_file_name("orchestrator").join("t3/.brief.md")).unwrap();
+    let brief = std::fs::read_to_string(c.state.with_file_name("orchestrator").join("t2/.brief.md")).unwrap();
     assert!(brief.contains("drover thread handoff <thread> <repo|t<n>>"), "{brief}");
 }
 
@@ -475,10 +462,7 @@ fn items(s: &Server, cookie: &str, now: u64, t: &str) -> Vec<serde_json::Value> 
 fn a_handoff_to_a_repo_goes_at_once_to_its_desk_thread_and_files_no_ask() {
     let b = FakeShed::new();
     let c = acp_setup("handoff-desk", &b);
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Search"]).1,
-        "t2\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Search"), "t2");
     let r = acp();
     let cli = b.cli(&r);
     assert_eq!(to_new(&c, &cli, "sendmeter", "Facets", "add facets"), "t3");
@@ -511,10 +495,7 @@ fn a_move_redelivers_a_desk_handoff_marks_the_first_copy_forwarded_and_flows_bac
     let f = acp();
     let cli = b.cli(&f);
     assert_eq!(to_new(&c, &cli, "sendmeter", "Facets", "add facets"), "t2");
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Search"]).1,
-        "t3\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Search"), "t3");
     let first = kinds(&c, "thread-handoff").pop().unwrap();
     let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
@@ -604,10 +585,7 @@ fn a_repos_threads_list_newest_active_first_with_newest_on_the_first() {
             now: c.now + n * 60,
             ..c.clone()
         };
-        assert_eq!(
-            run(&at, &Fake::default(), &["thread", "new", "sendmeter", t]).1,
-            format!("t{n}\n")
-        );
+        assert_eq!(old_thread(&at, "sendmeter", t), format!("t{n}"));
         assert_eq!(
             run(&at, &Fake::default(), &["thread", "reply", &format!("t{n}"), "on it"]).0,
             0

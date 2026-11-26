@@ -1705,15 +1705,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     ThreadCmd::New { .. } if crate::config::env("DROVER_THREAD").is_some_and(|t| !t.is_empty()) => {
                         gate::refused("USE_HANDOFF", "an orchestrator starts threads with `thread handoff`")?;
                     }
-                    ThreadCmd::New {
-                        repo,
-                        title,
-                        harness,
-                        orchestrator,
-                    } => {
-                        let o = (harness.as_deref(), orchestrator.as_deref());
-                        let id = crate::orchestrator::new_with(ctx, &cfg, &repo, &title, o)?;
-                        writeln!(out, "{id}")?;
+                    ThreadCmd::New { repo, .. } => {
+                        crate::orchestrator::new(&repo)?;
                     }
                     ThreadCmd::Handoff { from, to, title, text } => {
                         let to = crate::orchestrator::handoff(ctx, &cfg, r, [&from, &to, &title, &text])?;

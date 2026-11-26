@@ -20,10 +20,7 @@ fn config(dir: &std::path::Path) -> String {
 fn setup(name: &str) -> drover::Ctx {
     let d = tmpdir(name);
     let c = ctx(&d, &config(&d));
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill #12"]).1,
-        "t1\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Grill #12"), "t1");
     c
 }
 
@@ -37,10 +34,7 @@ fn acp_setup(name: &str, b: &FakeShed) -> drover::Ctx {
     let mut c = ctx(&d, &cfg);
     c.exe = env!("CARGO_BIN_EXE_drover").into();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill #12"]).1,
-        "t1\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Grill #12"), "t1");
     c
 }
 
@@ -272,13 +266,11 @@ fn a_thread_needs_a_orchestrator_or_impl_role_and_spawn_never_starts_one() {
     let c = ctx(&tmpdir("orchestrator-none"), &no_impl);
     let b = FakeShed::new();
     b.attach(&c);
-    assert_eq!(run(&c, &Fake::default(), &["thread", "new", "all", "Cross-repo"]).0, 0);
+    old_thread(&c, "all", "Cross-repo");
     let (code, out) = run(&c, &Fake::default(), &["thread", "say", "t1", "hi"]);
     assert!(code == 3 && out.contains("REFUSED NO_ORCHESTRATOR"), "{out}");
     let (code, out) = run(&c, &Fake::default(), &["spawn", "sendmeter", "12", "orchestrator"]);
     assert!(code == 3 && out.contains("REFUSED BAD_VALUE"), "{out}");
-    let (code, out) = run(&c, &Fake::default(), &["thread", "new", "nope", "x"]);
-    assert_eq!(code, 1, "{out}");
 }
 
 fn system_rows(c: &drover::Ctx) -> Vec<String> {

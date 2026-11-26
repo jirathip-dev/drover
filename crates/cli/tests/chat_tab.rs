@@ -85,18 +85,9 @@ fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_th
     let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let res = req(
-        &s,
-        "POST",
-        "/thread",
-        "op=new&repo=sendmeter&text=Grill+%2312",
-        &cookie,
-        T,
-    );
-    assert!(
-        res.starts_with("HTTP/1.1 200 OK") && body(&res) == "t1 started\n",
-        "{res}"
-    );
+    old_thread(&c, "sendmeter", "Grill #12");
+    let res = req(&s, "POST", "/thread", "op=say&t=t1&text=Grill+%2312", &cookie, T);
+    assert!(res.starts_with("HTTP/1.1 200 OK") && body(&res) == "sent\n", "{res}");
     assert!(f.called(START_T1), "{:?}", f.calls.borrow());
     assert!(b.has("orchestrator-t1"));
     let ask = [
@@ -178,10 +169,7 @@ fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_th
 fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     let b = FakeShed::new();
     let c = acp_setup("chat-img", &b);
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
-        "t1\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Look"), "t1");
     let f = acp();
     let cli = b.cli(&f);
     assert_eq!(
@@ -266,10 +254,7 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
 #[test]
 fn a_reply_file_from_a_lane_worktree_is_copied_into_the_thread_folder() {
     let c = setup("chat-wt-file");
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
-        "t1\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Look"), "t1");
     let design = c.worktrees.join("sendmeter/issue-12/docs/design/inbox");
     std::fs::create_dir_all(&design).unwrap();
     let png = design.join("inbox-390.png");
@@ -311,10 +296,7 @@ fn url_enc(s: &str) -> String {
 fn a_device_that_is_not_paired_reads_the_thread_but_cannot_write() {
     let b = FakeShed::new();
     let c = acp_setup("chat-guest", &b);
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).1,
-        "t1\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Grill"), "t1");
     let ask = [
         "ask",
         "sendmeter",
@@ -354,10 +336,7 @@ fn a_large_attachment_arrives_whole_over_the_socket() {
     use std::io::{Read, Write};
     let b = leaked();
     let c = acp_setup("chat-big", b);
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
-        "t1\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Look"), "t1");
     assert_eq!(run(&c, &b.cli(&acp()), &["thread", "say", "t1", "hi"]).0, 0);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -475,10 +454,7 @@ fn a_message_is_answered_once_logged_and_typed_into_the_conductor_after() {
     use std::io::{Read, Write};
     let b = leaked();
     let c = acp_setup("chat-async", b);
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
-        "t1\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Look"), "t1");
     assert_eq!(
         run(&c, &b.cli(&acp()), &["thread", "say", "t1", "hi"]).0,
         0,
@@ -538,10 +514,7 @@ fn a_message_is_answered_once_logged_and_typed_into_the_conductor_after() {
 fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
     let b = FakeShed::new();
     let c = acp_setup("chat-retry", &b);
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
-        "t1\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Look"), "t1");
     let down = Fake::default();
     let on = b.on(&down);
     let s = Server::new(&c, &on, Some(ADDR.into()));
@@ -587,10 +560,7 @@ fn long(name: &str, n: u64, now: u64) -> (drover::Ctx, String) {
 }
 
 fn fill(c: drover::Ctx, n: u64, now: u64) -> (drover::Ctx, String) {
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Long"]).1,
-        "t1\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Long"), "t1");
     for i in 1..=n {
         let d = serde_json::json!({"thread": "t1", "from": "conductor", "text": format!("m{i}")});
         let e = drover::events::Event::new(T + i, "sendmeter", None, "thread-msg", d);
@@ -645,7 +615,7 @@ fn log(c: &drover::Ctx) -> String {
 }
 
 #[test]
-fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_retitles_it() {
+fn the_boards_new_is_refused_threads_cut_and_thread_title_retitles_an_old_thread() {
     let b = FakeShed::new();
     let c = acp_setup("chat-first", &b);
     let f = acp();
@@ -670,28 +640,11 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
         "an empty thread is never logged: {}",
         log(&c)
     );
-    let res = req(
-        &s,
-        "POST",
-        "/thread",
-        "op=new&repo=sendmeter&text=Grill+me+on+%2312%0Athe+land+mode+part",
-        &cookie,
-        T,
-    );
-    assert_eq!(body(&res), "t1 started\n", "{res}");
-    let events = drover::events::read(&c.state).unwrap();
-    let new = events.iter().find(|e| e.kind == "thread-new").unwrap();
-    assert_eq!(new.str("title"), Some("Grill me on #12"));
-    let msgs: Vec<_> = events.iter().filter(|e| e.kind == "thread-msg").collect();
-    assert_eq!(msgs.len(), 1, "{}", log(&c));
-    assert_eq!(msgs[0].str("text"), Some("Grill me on #12\nthe land mode part"));
-    let md = c.state.with_file_name("orchestrator").join("t1/.thread.md");
-    assert_eq!(
-        std::fs::read_to_string(md).unwrap(),
-        "owner: Grill me on #12\nthe land mode part\n",
-        "the conductor gets the message only"
-    );
-    assert!(f.called(START_T1), "{:?}", f.calls.borrow());
+    let res = req(&s, "POST", "/thread", "op=new&repo=sendmeter&text=Grill+me+on+%2312", &cookie, T);
+    assert!(body(&res).contains("REFUSED THREADS_CUT"), "{res}");
+    assert!(!log(&c).contains("thread-"), "[New] logs nothing: {}", log(&c));
+    assert!(!f.called("shed run"), "{:?}", f.calls.borrow());
+    old_thread(&c, "sendmeter", "Grill me on #12");
     let (code, out) = run(&c, &r, &["thread", "title", "t1", "Land mode for #12"]);
     assert_eq!(code, 0, "{out}");
     let t = drover::events::read(&c.state)
@@ -723,23 +676,6 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
     for bad in ["two\nlines", " "] {
         assert_ne!(run(&c, &r, &["thread", "title", "t1", bad]).0, 0, "{bad:?}");
     }
-    let long = "word ".repeat(30);
-    let res = req(
-        &s,
-        "POST",
-        "/thread",
-        &format!("op=new&repo=sendmeter&text={}", long.replace(' ', "+")),
-        &cookie,
-        T + 9,
-    );
-    assert_eq!(body(&res), "t2 started\n", "{res}");
-    let t2 = drover::events::read(&c.state)
-        .unwrap()
-        .to_vec()
-        .into_iter()
-        .rfind(|e| e.kind == "thread-new")
-        .unwrap();
-    assert_eq!(t2.str("title").unwrap(), format!("{}…", &long[..60]));
 }
 
 #[test]
@@ -752,15 +688,16 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let png = url_enc(&B64.encode(b"\x89PNG one"));
+    old_thread(&c, "sendmeter", "hi");
     let res = req(
         &s,
         "POST",
         "/thread",
-        &format!("op=new&repo=sendmeter&text=hi&name=a.png&data={png}"),
+        &format!("op=say&t=t1&text=hi&name=a.png&data={png}"),
         &cookie,
         T,
     );
-    assert_eq!(body(&res), "t1 started\n", "{res}");
+    assert_eq!(body(&res), "sent\n", "{res}");
     let dir = c.state.with_file_name("orchestrator").join("t1");
     let files = |d: &std::path::Path| {
         let mut v = vec![];
@@ -854,7 +791,7 @@ fn a_restored_thread_starts_its_orchestrator_again() {
     let c = setup("chat-archive-shed");
     let b = FakeShed::attached(&c);
     let r = Fake::default();
-    assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).0, 0);
+    old_thread(&c, "sendmeter", "Look");
     assert_eq!(run(&c, &r, &["thread", "say", "t1", "hi"]).0, 0);
     assert!(b.has("orchestrator-t1"), "{:?}", b.methods());
     assert_eq!(run(&c, &r, &["thread", "archive", "t1"]).0, 0);
@@ -893,20 +830,17 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
         let data: Vec<String> = (0..n).map(|i| url_enc(&B64.encode(format!("png {i}")))).collect();
         format!("name={}&data={}", names.join("%2F"), data.join("%2C"))
     };
+    assert_eq!(old_thread(&c, "sendmeter", "Look"), "t1");
     let res = req(
         &s,
         "POST",
         "/thread",
-        &format!("op=new&repo=sendmeter&text=x&{}", many(11)),
+        &format!("op=say&t=t1&text=x&{}", many(11)),
         &cookie,
         T,
     );
     assert!(body(&res).contains("at most 10 files a message"), "{res}");
-    assert!(!log(&c).contains("thread-new"), "no thread: {}", log(&c));
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
-        "t1\n"
-    );
+    assert!(!log(&c).contains("thread-msg"), "no message: {}", log(&c));
     assert_eq!(
         run(&c, &cli, &["thread", "say", "t1", "hi"]).0,
         0,
@@ -1031,10 +965,7 @@ fn until(f: impl Fn() -> bool) -> bool {
 fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now() {
     let b = leaked();
     let c = acp_setup("chat-queue", b);
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
-        "t1\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Look"), "t1");
     assert_eq!(
         run(&c, &b.cli(&acp()), &["thread", "say", "t1", "hi"]).0,
         0,
@@ -1121,10 +1052,7 @@ fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now
 fn a_finished_turns_commands_fold_and_the_live_turns_stay_open() {
     let b = FakeShed::new();
     let c = acp_setup("chat-fold", &b);
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
-        "t1\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Look"), "t1");
     let cmd = |n: &str| {
         let d = serde_json::json!({"thread": "t1", "cmd": format!("drover brief sendmeter {n}")});
         drover::events::append(
@@ -1180,10 +1108,7 @@ fn a_finished_turns_commands_fold_and_the_live_turns_stay_open() {
 fn a_stream_with_a_thread_open_stamps_its_watch_file() {
     use std::io::{Read, Write};
     let c = setup("chat-watch");
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
-        "t1\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Look"), "t1");
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()

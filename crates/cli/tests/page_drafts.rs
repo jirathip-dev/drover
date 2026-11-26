@@ -417,7 +417,7 @@ fn a_settled_config_run_or_secret_card_leaves_the_cards_and_the_thread_at_once()
         std::fs::write(&file, format!("{cur}# {line}\n")).unwrap();
         cli(&["config", "propose", "t1", file.to_str().unwrap()])
     };
-    cli(&["thread", "new", "sendmeter", "Models"]);
+    old_thread(&c, "sendmeter", "Models");
     assert_eq!((propose("one"), propose("two")), ("c1\n".into(), "c2\n".into()));
     for why in ["run one", "run two"] {
         let args = [

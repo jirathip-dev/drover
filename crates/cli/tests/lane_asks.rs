@@ -85,7 +85,7 @@ fn setup(name: &str, extra: &str, threads: &[&str]) -> (drover::Ctx, FakeShed) {
     webpush::subscribe(&c.state, &f, "Mac", 1, None).unwrap();
     as_owner();
     for t in threads {
-        assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", t]).0, 0);
+        old_thread(&c, "sendmeter", t);
     }
     let d = json!({"role": "impl", "agent": LANE, "pane": LANE});
     append(&c.state, &Event::new(NOW - 60, "sendmeter", Some(36), "spawn", d)).unwrap();
@@ -334,53 +334,6 @@ fn the_owner_changes_a_orchestrator_answer_within_30_minutes_only() {
     let (code, out) = run(&at(&c, late), &sh.cli(&host()), &["answer", "sendmeter", "q2", "1"]);
     assert!(code == 3 && out.contains("REFUSED ALREADY_ANSWERED"), "{out}");
     assert_eq!(sh.sent(LANE), typed_before, "the refused answer reaches no lane");
-}
-
-#[test]
-fn a_lane_ask_filed_before_its_repo_has_a_thread_is_routed_to_the_first_thread_opened() {
-    let _env = env();
-    let (c, sh) = setup("lane-ask-late-thread", "", &[]);
-    assert_eq!(lane_ask(&c, &sh, "Split it?"), "q1");
-    assert_eq!(lane_ask(&c, &sh, "Split the tests too?"), "q2");
-    as_owner();
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Split it?"]).0,
-        0
-    );
-    let quote = "Keep the old sender behind a flag until the owner says so.";
-    let (code, out) = orchestrator_answer(&c, &sh, "t1", "q1", "2", quote);
-    assert_eq!((code, out.as_str()), (0, "sendmeter q1: no -> sendmeter-impl-36\n"));
-    let rows: Vec<_> = kinds(&c, "thread-msg")
-        .iter()
-        .filter(|e| e.str("lane_ask").is_some())
-        .map(|e| (e.str("thread").map(String::from), e.str("lane_ask").map(String::from)))
-        .collect();
-    assert_eq!(
-        rows,
-        [
-            (Some("t1".into()), Some("q1".into())),
-            (Some("t1".into()), Some("q2".into()))
-        ]
-    );
-    let line = "yes, split the tests too";
-    let d = json!({"thread": "t1", "from": "owner", "text": line});
-    append(&c.state, &Event::new(NOW + 10, "sendmeter", None, "thread-msg", d)).unwrap();
-    as_orchestrator("t1");
-    let (code, out) = run(
-        &c,
-        &sh.cli(&host()),
-        &["answer", "sendmeter", "q2", "1", "--typed", line],
-    );
-    as_owner();
-    assert_eq!((code, out.as_str()), (0, "sendmeter q2: yes -> sendmeter-impl-36\n"));
-    assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Next"]).0, 0);
-    assert_eq!(
-        kinds(&c, "thread-msg")
-            .iter()
-            .filter(|e| e.str("thread") == Some("t2"))
-            .count(),
-        0
-    );
 }
 
 #[test]

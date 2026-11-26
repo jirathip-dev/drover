@@ -103,6 +103,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     if let Err(e) = &local {
         crate::stderr!("drover check: the agent list failed ({e}); skipping lane checks");
     }
+    crate::orchestrator::closing(ctx, cfg, &events)?;
     let agents: Option<Vec<Session>> =
         (local.as_ref().ok()).map(|a| a.iter().filter(|s| s.running() && s.lane()).cloned().collect());
     if let Some(a) = &agents {

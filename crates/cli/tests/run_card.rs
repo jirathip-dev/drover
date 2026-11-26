@@ -14,10 +14,7 @@ fn setup(name: &str, extra: &str) -> drover::Ctx {
         &d,
         &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n{extra}"),
     );
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Ops"]).1,
-        "t1\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Ops"), "t1");
     c
 }
 

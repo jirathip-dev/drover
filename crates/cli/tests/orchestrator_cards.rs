@@ -59,10 +59,7 @@ fn setup(name: &str, role_extra: &str, extra: &str) -> drover::Ctx {
     let d = tmpdir(name);
     let cfg = format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n{role_extra}\n{extra}");
     let c = ctx(&d, &cfg);
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).1,
-        "t1\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Grill"), "t1");
     c
 }
 
@@ -76,10 +73,7 @@ fn acp_setup(name: &str, role_extra: &str, extra: &str, b: &FakeShed) -> drover:
     let mut c = ctx(&d, &cfg);
     c.exe = env!("CARGO_BIN_EXE_drover").into();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).1,
-        "t1\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Grill"), "t1");
     c
 }
 

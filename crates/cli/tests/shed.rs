@@ -1134,10 +1134,7 @@ fn at(c: &drover::Ctx, now: u64) -> drover::Ctx {
 fn a_shed_acp_fleets_thread_runs_its_orchestrator_as_an_acp_session_that_sleeps_and_restarts() {
     let b = FakeShed::new();
     let c = acp_ctx("acp-orchestrator", &acp_config(&b.sock, "claude"));
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill #12"]).1,
-        "t1\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Grill #12"), "t1");
     let f = acp_fake(&["echo", "claude-agent-acp"]);
     let cli = b.cli(&f);
     let (code, out) = run(&c, &cli, &["thread", "say", "t1", "what should #12 cover?"]);
@@ -1246,7 +1243,7 @@ fn a_shed_acp_fleets_thread_runs_its_orchestrator_as_an_acp_session_that_sleeps_
 fn an_acp_orchestrator_runs_under_the_orchestrator_guard() {
     let b = FakeShed::new();
     let c = acp_ctx("acp-orchestrator-guard", &acp_config(&b.sock, "claude"));
-    run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]);
+    old_thread(&c, "sendmeter", "Grill");
     let ef = acp_fake(&["env"]);
     let cli = b.cli(&ef);
     assert_eq!(run(&c, &cli, &["thread", "say", "t1", "hi"]).0, 0);
@@ -1296,7 +1293,7 @@ fn an_unguardable_acp_orchestrator_refuses_with_a_system_line_and_never_falls_ba
     let b = FakeShed::new();
     let c = ctx(&tmpdir("acp-orchestrator-nohook"), &acp_config(&b.sock, "claude"));
     std::fs::remove_dir_all(c.config.with_file_name("claude")).unwrap();
-    run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]);
+    old_thread(&c, "sendmeter", "Grill");
     let f = acp_fake(&["env"]);
     let cli = b.cli(&f);
     let (code, out) = run(&c, &cli, &["thread", "say", "t1", "hi"]);
@@ -2304,7 +2301,7 @@ fn clean_removes_exited_shed_terminals_of_merged_lanes_only() {
 fn hung_orchestrator(name: &str) -> (drover::Ctx, FakeShed) {
     let b = FakeShed::new();
     let c = acp_ctx(name, &acp_config(&b.sock, "claude"));
-    run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]);
+    old_thread(&c, "sendmeter", "Grill");
     assert_eq!(
         run(&c, &b.cli(&acp_fake(&["echo"])), &["thread", "say", "t1", "hi"]).0,
         0

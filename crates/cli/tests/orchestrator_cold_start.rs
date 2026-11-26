@@ -20,7 +20,7 @@ fn setup(name: &str, b: &FakeShed) -> drover::Ctx {
     c.exe = env!("CARGO_BIN_EXE_drover").into();
     let f = Fake::default();
     assert_eq!(run(&c, &f, &["profiles", "sync"]).0, 0);
-    assert_eq!(run(&c, &f, &["thread", "new", "sendmeter", "Look"]).1, "t1\n");
+    assert_eq!(old_thread(&c, "sendmeter", "Look"), "t1");
     let ask = [
         "ask",
         "sendmeter",

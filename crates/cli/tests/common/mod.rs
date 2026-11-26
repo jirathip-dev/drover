@@ -891,3 +891,13 @@ pub fn cpu_ms() -> f64 {
     let tv = |s: i64, us: i64| f64::from(u32::try_from(s).unwrap()) * 1e3 + f64::from(u32::try_from(us).unwrap()) / 1e3;
     tv(u[0], u[1]) + tv(u[2], u[3])
 }
+
+/// A drover thread from before the freeze (`thread new` is refused `THREADS_CUT`): its `thread-new` logged; its id.
+pub fn old_thread(c: &Ctx, repo: &str, title: &str) -> String {
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let made = drover::events::working(&c.state).map_or(0, |e| e.iter().filter(|e| e.kind == "thread-new").count());
+    let id = format!("t{}", made + 1);
+    let d = serde_json::json!({"thread": id, "title": title});
+    drover::events::emit(&c.state, &cfg, drover::events::Event::new(c.now, repo, None, "thread-new", d)).unwrap();
+    id
+}

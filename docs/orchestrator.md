@@ -4,7 +4,7 @@ Talk to a **orchestrator** through drover itself. A **thread** belongs to one fl
 to `all` for cross-cutting work. Each thread is talked through by one orchestrator lane.
 
 ```sh
-drover thread new acme "Grill #12"          # prints t1
+drover thread new acme "Grill #12"          # refused THREADS_CUT (#1772): start a chat in a client, `drover attach acme`
 drover thread say t1 "what should #12 cover?"
 drover thread show t1 [--json]              # the conversation; marks it read
 drover thread ls [FLEET] [--json]           # per repo: title, last message, unread •, awake/asleep
@@ -133,7 +133,9 @@ and restores the terminal. The lane hook refuses it (`OWNER_ONLY`).
   link exists, the target's filed issues (`gh issue create`: `filed #<n>: <title>`, or the title alone) and answered
   thread asks (`answered <id>: <question> → <answer>`) each post one line back into the source. Any orchestrator may
   hand off to any repo; an orchestrator's plain `thread new` refuses `USE_HANDOFF`, so every thread an orchestrator starts is
-  logged with its source. The owner's `thread new` (CLI or board) is unchanged.
+  logged with its source. The owner's `thread new` (CLI or board [New]) refuses `THREADS_CUT` (#1772): drover makes no
+  new thread. Each open thread gets one closing row from `check` (`thread-msg` `{closing: true}`): archive it, then attach
+  its id in a client; `orchestrator-attach` takes an archived drover thread's id, and the issues it filed route there.
 - **Commands:** the lane hook logs each `drover` or `gh` command the orchestrator runs (`thread-cmd`, not `thread
   reply`); the board shows them as closed tool rows.
 

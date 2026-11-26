@@ -99,81 +99,13 @@ fn chat_defaults_come_from_the_chat_table_else_the_conductor_role() {
 }
 
 #[test]
-fn thread_new_harness_is_recorded_and_its_conductor_starts_on_it() {
-    let b = FakeShed::new();
-    let c = acp_ctx("pick-new", "[chat]\nharness = \"claude\"\n", &b);
-    let (code, out) = run(
-        &c,
-        &Fake::default(),
-        &["thread", "new", "sendmeter", "Grill", "--harness", "claude"],
-    );
-    assert_eq!((code, out.as_str()), (0, "t1\n"));
-    let (code, out) = run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Plain"]);
-    assert_eq!((code, out.as_str()), (0, "t2\n"));
-    let news = kind(&c, "thread-new");
-    assert_eq!(
-        (news[0].str("harness"), news[1].str("harness")),
-        (Some("claude"), Some("claude"))
-    );
-    let (code, out) = run(
-        &c,
-        &Fake::default(),
-        &["thread", "new", "sendmeter", "X", "--harness", "codex"],
-    );
-    assert!(code == 3 && out.contains("REFUSED BAD_VALUE"), "{out}");
-    std::fs::write(&c.config, acp_config("[chat]\nharness = \"claude\"\n", &b)).unwrap();
-    let f = acp();
-    let cli = b.cli(&f);
-    assert_eq!(run(&c, &cli, &["thread", "say", "t1", "hi"]).0, 0);
-    let st = &kind(&c, "orchestrator-start")[0];
-    assert_eq!(
-        (st.str("harness"), st.str("model"), st.str("runtime")),
-        (Some("claude"), Some("opus"), Some("shed-acp"))
-    );
-    assert_eq!(f.count("shed run --acp claude-acp"), 1, "{:?}", f.calls.borrow());
-    let r = b.on(&cli);
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let page = chat(&s, &cookie);
-    let chip = &page["repos"][0]["harness"];
-    assert_eq!(
-        (&chip["name"], &chip["all"]),
-        (&json!("harness"), &json!(["claude"])),
-        "the empty thread's chip: {page}"
-    );
-    assert!(
-        chip["cur"].is_null() || chip["cur"] == "claude",
-        "preset to the default: {page}"
-    );
-    let res = req(
-        &s,
-        "/thread",
-        "op=new&repo=sendmeter&harness=claude&text=Board",
-        &cookie,
-    );
-    assert!(res.ends_with("t3 started\n"), "{res}");
-    assert_eq!(kind(&c, "thread-new")[2].str("harness"), Some("claude"));
-    assert_eq!(
-        f.count("shed run --acp claude-acp --policy allow --name orchestrator-t3"),
-        1
-    );
-    let page = chat(&s, &cookie);
-    let t3 = thread(&page, "t3");
-    assert_eq!(t3["title"], "Board");
-    assert!(
-        t3["ds"].as_str().unwrap().starts_with("sendmeter · claude · opus"),
-        "{t3}"
-    );
-}
-
-#[test]
 fn the_conductors_instructions_reach_the_thread_brief() {
     let notes = tmpdir("pick-notes").join("AGENTS.md");
     std::fs::write(&notes, "Always grill scope first.\n").unwrap();
     let extra = format!("[conductor]\ninstructions = \"{}\"\n", notes.display());
     let b = FakeShed::new();
     let c = acp_ctx("pick-reach", &extra, &b);
-    assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).0, 0);
+    old_thread(&c, "sendmeter", "Grill");
     let f = acp();
     let (code, out) = run(&c, &b.cli(&f), &["thread", "say", "t1", "hi"]);
     assert_eq!(code, 0, "{out}");
@@ -199,8 +131,7 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_restarts_on_it() {
     let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let res = req(&s, "/thread", "op=new&repo=sendmeter&text=Grill", &cookie);
-    assert!(res.ends_with("t1 started\n"), "{res}");
+    old_thread(&c, "sendmeter", "Grill");
     let page = chat(&s, &cookie);
     let chips = &thread(&page, "t1")["chips"];
     assert_eq!(
@@ -311,7 +242,7 @@ fn the_model_chip_offers_the_models_list_and_a_pick_from_it_is_taken() {
         <[&str; 0]>::default()
     );
     let c = ctx(&tmpdir("pick-listed"), &listed("\"opus\", \"fable\""));
-    assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).0, 0);
+    old_thread(&c, "sendmeter", "Grill");
     pick_fable(&c);
     assert_eq!(kind(&c, "thread-model")[0].str("model"), Some("fable"));
 }
@@ -323,7 +254,7 @@ fn a_pick_dropped_from_the_models_list_is_refused_on_send_and_the_message_stays(
     let mut c = ctx(&tmpdir("pick-dropped"), &listed("\"opus\", \"fable\""));
     c.exe = env!("CARGO_BIN_EXE_drover").into();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).0, 0);
+    old_thread(&c, "sendmeter", "Grill");
     pick_fable(&c);
     std::fs::write(&c.config, listed("\"opus\"")).unwrap();
     let f = acp();

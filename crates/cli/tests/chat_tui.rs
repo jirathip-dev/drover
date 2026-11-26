@@ -16,10 +16,7 @@ fn setup(name: &str, b: &FakeShed) -> drover::Ctx {
     let mut c = ctx(&tmpdir(name), &cfg);
     c.exe = env!("CARGO_BIN_EXE_drover").into();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Board 502"]).1,
-        "t1\n"
-    );
+    assert_eq!(old_thread(&c, "sendmeter", "Board 502"), "t1");
     c
 }
 
@@ -252,10 +249,7 @@ fn keys_answer_the_open_ask_and_settle_a_card_and_an_expired_card_is_refused_as_
 fn it_wraps_and_never_cuts_at_40x18_splits_at_120x40_and_never_panics_on_a_tiny_or_resized_screen() {
     let b = FakeShed::new();
     let c = setup("chat-tui-sizes", &b);
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "all", "Docs: issue names"]).1,
-        "t2\n"
-    );
+    assert_eq!(old_thread(&c, "all", "Docs: issue names"), "t2");
     let long = "Tonight's self-update swapped the binary at 09:30 and serve's restart failed. Its log:\n```\n09:30:12 error: Address already in use\n```";
     run(&c, &Fake::default(), &["thread", "reply", "t1", long]);
     let ask = [

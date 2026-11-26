@@ -77,8 +77,9 @@ fn a_fleet_without_a_orchestrator_role_starts_one_on_its_impl_role_from_the_boar
     let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let res = req(&s, "/thread", "op=new&repo=sendmeter&text=Grill+%2312", &cookie);
-    assert!(res.ends_with("\r\n\r\nt1 started\n"), "{res}");
+    old_thread(&c, "sendmeter", "Grill #12");
+    let res = req(&s, "/thread", "op=say&t=t1&text=Grill+%2312", &cookie);
+    assert!(res.ends_with("\r\n\r\nsent\n"), "{res}");
     let st = &starts(&c)[0];
     assert_eq!((st.str("harness"), st.str("model")), (Some("claude"), Some("opus")));
     let lane = profile.join("settings.json");
@@ -135,8 +136,9 @@ fn a_orchestrator_choice_in_config_writes_its_table_after_a_backup_and_the_next_
         (set.str("role"), set.str("key"), set.str("new")),
         (Some("orchestrator"), Some("model"), Some("sonnet"))
     );
-    let res = req(&s, "/thread", "op=new&repo=sendmeter&text=Next", &cookie);
-    assert!(res.ends_with("t1 started\n"), "{res}");
+    old_thread(&c, "sendmeter", "Next");
+    let res = req(&s, "/thread", "op=say&t=t1&text=Next", &cookie);
+    assert!(res.ends_with("sent\n"), "{res}");
     assert_eq!(starts(&c)[0].str("model"), Some("sonnet"));
     let lane = c
         .config

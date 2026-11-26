@@ -725,7 +725,7 @@ fn the_composer_docks_below_the_messages_in_webkit_empty_and_with_4_lines_at_390
 fn cards(name: &str) -> drover::Ctx {
     let c = recorded(name);
     let f = Fake::default();
-    assert_eq!(run(&c, &f, &["thread", "new", "sendmeter", "Ops"]).1, "t4\n");
+    assert_eq!(old_thread(&c, "sendmeter", "Ops"), "t4");
     let file = c.config.with_file_name("proposed.toml");
     let old = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(&file, old.replacen("model = \"opus\"", "model = \"sonnet\"", 1)).unwrap();

@@ -19,8 +19,7 @@ fn setup(name: &str, b: &FakeShed) -> drover::Ctx {
     c.exe = env!("CARGO_BIN_EXE_drover").into();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     for t in ["t1", "t2"] {
-        let (_, out) = run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Work"]);
-        assert_eq!(out, format!("{t}\n"));
+        assert_eq!(old_thread(&c, "sendmeter", "Work"), t);
     }
     let spawn = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"});
     append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", spawn)).unwrap();
