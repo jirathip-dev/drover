@@ -344,7 +344,12 @@ pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: 
             let lines = both.map(|(l, args)| (l, install(ctx, cfg, r, l, args, load)));
             installed(ctx, cfg, &lines)?;
             let retired = load.then(|| remove(ctx, r, FAST, true)).filter(|l| l.starts_with('✓'));
-            lines.map(|l| l.1).into_iter().chain(retired).collect::<Vec<_>>().join("\n")
+            lines
+                .map(|l| l.1)
+                .into_iter()
+                .chain(retired)
+                .collect::<Vec<_>>()
+                .join("\n")
         }
         "remove" => (both.iter().map(|(l, args)| remove(ctx, r, l, every(args))))
             .chain(Some(remove(ctx, r, FAST, true)).filter(|l| l.starts_with('✓')))
@@ -367,7 +372,9 @@ fn remove(ctx: &Ctx, r: &dyn Runner, label: &str, every: bool) -> String {
         return format!("= no {label} job");
     }
     exec(r, &ctl(ctx, label, every)[2]).ok();
-    files.iter().for_each(|f| drop(std::fs::remove_file(&f.0)));
+    for f in &files {
+        std::fs::remove_file(&f.0).ok();
+    }
     format!("✓ removed {label}")
 }
 

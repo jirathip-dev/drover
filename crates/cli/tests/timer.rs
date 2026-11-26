@@ -702,7 +702,11 @@ fn install_loads_the_service_in_place_of_the_fast_job() {
     let calls = r.calls.borrow().join("\n");
     let ran = |a: &str, b: &str| calls.lines().any(|l| l.contains(a) && l.contains(b));
     assert!(ran(LOAD, "dev.drover.service"), "{calls}");
-    let off = if MAC { "launchctl bootout" } else { "systemctl --user disable --now" };
+    let off = if MAC {
+        "launchctl bootout"
+    } else {
+        "systemctl --user disable --now"
+    };
     assert!(ran(off, "dev.drover.fast"), "{calls}");
     assert!(!job(&c, "dev.drover.fast").exists(), "{out}");
     assert!(out.ends_with("✓ removed dev.drover.fast\n"), "{out}");
@@ -714,12 +718,23 @@ fn doctor_shows_the_service_missing_then_running() {
     let c = ctx(&tmpdir("timer-service-doctor"), CONFIG);
     let _sh = FakeShed::attached(&c);
     let r = host(Fake::default()).reply(LOAD, "");
-    let line = |out: &str| out.lines().find(|l| l.contains(" service — ")).unwrap_or_default().to_string();
+    let line = |out: &str| {
+        out.lines()
+            .find(|l| l.contains(" service — "))
+            .unwrap_or_default()
+            .to_string()
+    };
     let (_, out) = run(&c, &r, &["doctor"]);
-    assert!(line(&out).starts_with("✗ service — not running → drover timer install"), "{out}");
+    assert!(
+        line(&out).starts_with("✗ service — not running → drover timer install"),
+        "{out}"
+    );
     assert_eq!(run(&c, &r, &["timer", "install"]).0, 0);
     let (_, out) = run(&c, &r, &["doctor"]);
-    assert!(line(&out).starts_with("✗ service — not running"), "a dead socket: {out}");
+    assert!(
+        line(&out).starts_with("✗ service — not running"),
+        "a dead socket: {out}"
+    );
     let sock = std::os::unix::net::UnixListener::bind(drover::service::sock(&c)).unwrap();
     std::thread::spawn(move || {
         for s in sock.incoming().flatten() {

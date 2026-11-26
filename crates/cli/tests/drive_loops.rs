@@ -256,5 +256,9 @@ fn a_tick_skips_a_fleet_the_live_service_drove_within_the_tick_interval() {
     std::fs::write(&last, (c.now - 400).to_string()).unwrap();
     let (code, out) = run_only(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
-    assert_eq!(r.count(detached), 1, "older than the tick interval: the tick drives it: {out}");
+    assert_eq!(
+        r.count(detached),
+        1,
+        "older than the tick interval: the tick drives it: {out}"
+    );
 }
