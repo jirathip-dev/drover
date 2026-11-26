@@ -1119,6 +1119,14 @@ fn start(
     if let Some((code, why)) = offline.clone().filter(|_| !o.dry_run) {
         return refused(code, why);
     }
+    if on.machine.is_some() && offline.is_none() && !o.dry_run {
+        let exe = home(vec![ctx.exe.clone()]).remove(0);
+        ok(
+            r,
+            &exe,
+            &["profiles", "sync", "--profile", &p.profile, "--role", p.family],
+        )?;
+    }
     p.account = on.machine.is_none().then(|| cfg.account(fleet, role));
     let acp = acp_cmd(ctx, r, &p, &acp_id, hm.filter(|_| on.machine.is_some()))?;
     if let Some(a) = p.account.as_ref().filter(|_| !o.dry_run) {
@@ -1433,14 +1441,6 @@ fn start(
     }
     h.prepare(ctx, &on, &p)?;
     write_acp_mcp(&on, &p, &acp)?;
-    if on.machine.is_some() {
-        let exe = home(vec![ctx.exe.clone()]).remove(0);
-        ok(
-            r,
-            &exe,
-            &["profiles", "sync", "--profile", &p.profile, "--role", p.family],
-        )?;
-    }
     let _secrets = deliver(ctx, &on, &p)?;
     if p.sandbox.is_some() {
         let rules = serde_json::to_string_pretty(&crate::sandbox::settings(ctx, f, &p, on.machine.is_none()))?;
