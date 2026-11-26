@@ -99,7 +99,9 @@ pub fn vendors(cfg: &Config) -> Vec<(String, String)> {
 pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, via: &str) -> Result<String> {
     let boot = ("gh-token".to_string(), GH_TOKEN.to_string());
     let found = all(cfg).into_iter().chain([boot]).find(|s| s.0 == name);
-    if let (None, Some((provider, account))) = (&found, name.split_once('/')) {
+    let word = |w: &str| !w.is_empty() && w.chars().all(|c| c.is_ascii_alphanumeric() || "-_".contains(c));
+    let acct = name.split_once('/').filter(|(p, a)| word(p) && word(a));
+    if let (None, Some((provider, account))) = (&found, acct) {
         return login(ctx, cfg, r, (provider, account), via);
     }
     let Some((_, line)) = found else {
