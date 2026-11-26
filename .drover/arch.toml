@@ -23,6 +23,9 @@ generated = [
     "docs/config/limits.md",
     "fleet.example.toml",
     "docs/flow.md",
+    "crates/cli/tests/golden/private-names/names",
+    "crates/cli/tests/golden/private-names/lines.md",
+    "crates/cli/tests/golden/private-names/expect",
 ]
 generate = "sh scripts/arch-gen.sh"
 append_only = ["crates/cli/tests/golden/contract/v1/*.keys"]
@@ -90,12 +93,6 @@ glob = "*.md"
 [comments]
 policy = "strict"
 except = ["assets/types/**", "web/dist/**"]
-
-[docs]
-paths = ["docs/**/*.md", "README.md"]
-watch = ["crates/core/src/cli.rs", "crates/core/src/config.rs", "crates/core/src/config/limit_docs.rs", "crates/server/src/api.rs"]
-cli = true
-skip = [".drover/**", "roles/usage-tail.md", "scripts/test-shards.txt"]
 
 [[ban]]
 pattern = "claude"

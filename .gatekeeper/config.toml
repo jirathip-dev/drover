@@ -1,15 +1,11 @@
 packs = ["core", "rust", "ts"]
 integration = "staging"
 
-[pin]
-version = "1.1.0"
-x86_64-unknown-linux-gnu = "5cc4e98a0140ee0e190752bd141d74cf7790c943e7846078fbba4dddeaca85e4"
-aarch64-apple-darwin = "61be2d06fb38d761348f289c4b5c8e1c43be4b346c3fc00f22b5019e2fa9d959"
-
 [cache]
 
-[tools]
-drover = "scripts/drover.sh"
+[docs]
+watch = ["crates/core/src/cli.rs", "crates/core/src/config.rs", "crates/core/src/config/limit_docs.rs", "crates/server/src/api.rs"]
+skip = [".drover/**", "roles/usage-tail.md", "scripts/test-shards.txt"]
 
 [ts]
 projects = ["web"]
@@ -32,3 +28,8 @@ platform = "linux"
 
 [legs.ui-webkit]
 platform = "linux"
+
+[pin]
+version = "1.5.0"
+aarch64-apple-darwin = "8feed2b1fb09133a0a1bf6e3497d0dc5ca0645e7c260276d2cd1392391ad08bd"
+x86_64-unknown-linux-gnu = "8aa0ad6c8be69335f30d1a1c67fe7720c4a3b9a0da040bba664daeea2f79264c"

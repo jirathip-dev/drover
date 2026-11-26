@@ -6,6 +6,6 @@ paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "assets
 run = '''
 set -eu
 rm -rf target/demo-site
-DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl {tool:drover} serve --export target/demo-site --demo
+DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl cargo run --quiet --locked --bin drover -- serve --export target/demo-site --demo
 if grep -rnE '[A-Za-z0-9-]\.ts\.net|telegram:-?[0-9]|/Users/' target/demo-site/; then exit 1; fi
 '''

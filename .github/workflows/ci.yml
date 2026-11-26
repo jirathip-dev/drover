@@ -10,6 +10,6 @@ permissions:
 
 jobs:
   gates:
-    uses: jirathip-dev/gatekeeper/.github/workflows/gates.yml@c76c64fa790a1a5e5e608c25139960e74db8b44d # v1.1.0
+    uses: jirathip-dev/gatekeeper/.github/workflows/gates.yml@06e8d388ab1ff2baece5dfe881f2cd1c1dcba9d7 # v1.5.0
     secrets:
       private-names: ${{ secrets.PRIVATE_NAMES }}

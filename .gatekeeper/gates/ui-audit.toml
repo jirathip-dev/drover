@@ -6,7 +6,7 @@ setup = ["rust", "node"]
 run = '''
 if [ -z "${CI:-}" ]; then echo "CI's ui leg runs it"; exit 0; fi
 set -eu
-DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl {tool:drover} serve --export site --demo
+DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl cargo run --quiet --locked --bin drover -- serve --export site --demo
 LIFEBOAT_SITE="$PWD/site" cargo test --locked --test lifeboat the_page_for_the_ui_audit
 status=0
 scripts/chrome.sh scripts/ui-audit.sh site ui-390 || status=$?
