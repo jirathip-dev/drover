@@ -91,7 +91,6 @@ impl Server<'_> {
                 let main = h.is_none_or(|h| h.machine.is_none());
                 let kind = match h {
                     _ if main => "main host",
-                    Some(h) if h.cloud.is_some() => "cloud host",
                     _ => "remote host",
                 };
                 let lanes = crate::hosts::lanes_on(&cfg, &ev, &name).len();

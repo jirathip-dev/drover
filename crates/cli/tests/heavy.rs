@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 const JOB: &str = "echo $$ > \"pid-$1\"; echo \"start $1\" >> log; for i in $(seq 200); do [ -f \"go-$1\" ] || [ ! -f \"$0\" ] && break; sleep 0.05; done; [ -f \"go-$1\" ] || exit 1; echo \"end $1\" >> log\n";
 
-const IDLE: &str = "load_per_cpu = 1000.0\nmin_free_gb = 0.0\nmin_free_mem_gb = 0.0\n";
+const IDLE: &str = "min_cpu_idle = -1.0\nmin_free_gb = 0.0\nmin_free_mem_gb = 0.0\n";
 
 fn lane(host: &str) -> PathBuf {
     host_with(IDLE, host)
@@ -168,7 +168,7 @@ fn extra_commands_wait_first_come_first_served_and_all_finish() {
         "{l}"
     );
     assert_eq!(l.matches("end ").count(), 4);
-    assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0]);
+    assert_eq!(tickets(&d), <[drover::heavy::Ticket; 0]>::default());
 }
 
 #[test]
@@ -259,7 +259,7 @@ fn hold_runs_its_command_and_returns_its_exit_code() {
     assert_eq!(hold(&d, "1", &["true"]).status().unwrap().code(), Some(0));
     let seven = hold(&d, "1", &["sh", "-c", "exit 7"]).status().unwrap();
     assert_eq!(seven.code(), Some(7));
-    assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0]);
+    assert_eq!(tickets(&d), <[drover::heavy::Ticket; 0]>::default());
 }
 
 #[test]
@@ -278,10 +278,10 @@ fn hold_with_every_slot_taken_gives_up_with_75_and_the_reason() {
 
 #[test]
 fn hold_on_a_host_over_its_admission_limits_gives_up_with_75_and_the_reason() {
-    let d = host_with("load_per_cpu = -1.0\nmin_free_gb = 0.0\nmin_free_mem_gb = 0.0\n", "");
+    let d = host_with("min_cpu_idle = 101.0\nmin_free_gb = 0.0\nmin_free_mem_gb = 0.0\n", "");
     let why = refused(&d);
-    assert!(why.contains("HOST_BUSY") && why.contains("load/cpu"), "{why}");
-    assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0]);
+    assert!(why.contains("HOST_BUSY") && why.contains("cpu idle"), "{why}");
+    assert_eq!(tickets(&d), <[drover::heavy::Ticket; 0]>::default());
 }
 
 #[test]
@@ -367,11 +367,12 @@ fn a_routed_kind_becomes_the_remote_wrapper_with_its_config() {
         lint.ends_with("'heavy' 'lint' '--max' '2' '--wait' '30' '--' 'sh lint.sh a'"),
         "an unrouted kind: {lint}"
     );
-    for never in [
-        "git log -1 && sh test.sh a",
-        "npx nx affected -t sh test.sh",
-        "sh test.sh a < input",
-    ] {
+    let split = wrapped(&d, "git log -1 && sh test.sh a");
+    assert!(
+        split.starts_with("git log -1 && ") && split.contains("'--remote' 'linux'"),
+        "{split}"
+    );
+    for never in ["npx nx affected -t sh test.sh", "sh test.sh a < input"] {
         let w = wrapped(&d, never);
         assert!(w.contains("'heavy' 'test'") && !w.contains("--remote"), "{never}: {w}");
     }
@@ -399,7 +400,7 @@ fn the_remote_code_passes_through_without_a_local_run() {
             .unwrap();
         assert_eq!(st.code(), Some(code));
         assert_eq!(log(&d), "", "never run here");
-        assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0], "no slot held");
+        assert_eq!(tickets(&d), <[drover::heavy::Ticket; 0]>::default(), "no slot held");
         let args = std::fs::read_to_string(d.join("runners.log")).unwrap();
         let want = format!("run --tag linux --dir {top} --wait 5 --setup make deps --env CARGO_BUILD_JOBS --out target/shots -- bash -c sh test.sh a\n");
         assert_eq!(args, want);
@@ -462,4 +463,273 @@ fn config_load_refuses_a_routed_pattern_that_hits_the_never_routed_list() {
             "{e}"
         );
     }
+}
+
+fn gated() -> PathBuf {
+    let d = lane("");
+    let cfg = std::fs::read_to_string(d.join("fleet.toml")).unwrap();
+    let cfg = cfg
+        .replace(
+            "test = [\"*test.sh*\"]\n",
+            "test = [\"*test.sh*\"]\ncargo = [\"sh test.sh*\"]\n",
+        )
+        .replace(
+            "\n[hosts.mini]",
+            "\n[fleet.sendmeter.remote.cargo]\ntag = \"linux\"\n\n[hosts.mini]",
+        );
+    std::fs::write(d.join("fleet.toml"), cfg).unwrap();
+    d
+}
+
+fn routed_hold(d: &Path, path: &str, cmd: &[&str]) -> Command {
+    let mut c = hold(d, "1", cmd);
+    c.env("GITHUB_REPOSITORY", "jirathip-dev/sendmeter").env("PATH", path);
+    c
+}
+
+#[test]
+fn a_routed_fleets_hold_runs_on_the_build_machine_and_holds_no_slot() {
+    for code in [0, 3] {
+        let d = gated();
+        let path = fake_runners(&d, Some(code));
+        let st = routed_hold(&d, &path, &["sh", "test.sh", "h"]).status().unwrap();
+        assert_eq!(st.code(), Some(code));
+        assert_eq!(log(&d), "", "never run here");
+        assert_eq!(tickets(&d), <[drover::heavy::Ticket; 0]>::default(), "no slot held");
+        let here = d.canonicalize().unwrap();
+        let args = std::fs::read_to_string(d.join("runners.log")).unwrap();
+        assert_eq!(
+            args,
+            format!(
+                "run --tag linux --dir {} -- bash -c 'sh' 'test.sh' 'h'\n",
+                here.display()
+            )
+        );
+    }
+    let d = gated();
+    let path = fake_runners(&d, Some(5));
+    let mut c = routed_hold(&d, &path, &["sh", "test.sh", "h"]);
+    c.env_remove("GITHUB_REPOSITORY")
+        .env("DROVER_LANE", "sendmeter:24:impl");
+    assert_eq!(c.status().unwrap().code(), Some(5), "a lane's hold routes by its fleet");
+    assert_eq!(log(&d), "");
+}
+
+#[test]
+fn a_routed_hold_on_a_reserved_code_runs_here_in_a_slot_and_says_why() {
+    let d = gated();
+    let path = fake_runners(&d, Some(75));
+    let mut child = routed_hold(&d, &path, &["sh", "test.sh", "h"])
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let mut err = child.stderr.take().unwrap();
+    let job = Job(Some(child));
+    until("h's start", || log(&d).contains("start h"));
+    let t = tickets(&d);
+    assert_eq!(
+        (t[0].lane.as_str(), t[0].kind.as_str(), t[0].running),
+        ("ci:sendmeter", "ci", true)
+    );
+    go(&d, "h");
+    finish(vec![job]);
+    let mut said = String::new();
+    std::io::Read::read_to_string(&mut err, &mut said).unwrap();
+    assert_eq!(said.trim(), "runners: exit 75, running here");
+    assert!(d.join("runners.log").exists());
+}
+
+#[test]
+fn a_hold_never_routes_a_never_routed_command_or_an_unrouted_fleets() {
+    let d = gated();
+    let path = fake_runners(&d, Some(0));
+    let st = routed_hold(&d, &path, &["git", "--version"]).status().unwrap();
+    assert_eq!(st.code(), Some(0));
+    assert!(!d.join("runners.log").exists(), "git never leaves this host");
+    let d = lane("");
+    let path = fake_runners(&d, Some(0));
+    let st = routed_hold(&d, &path, &["sh", "-c", "exit 7"]).status().unwrap();
+    assert_eq!(st.code(), Some(7));
+    assert!(!d.join("runners.log").exists());
+}
+
+#[test]
+fn a_routed_fleets_gate_checks_go_to_the_build_machine_under_the_cargo_kind() {
+    let d = gated();
+    Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&d)
+        .status()
+        .unwrap();
+    let w = wrapped(&d, "just check");
+    assert!(
+        w.contains("'heavy' 'cargo'") && w.contains("'--remote' 'linux'") && w.ends_with("'--' 'just check'"),
+        "{w}"
+    );
+    let d = lane("");
+    assert_eq!(
+        hook(&d, "just check"),
+        "",
+        "an unrouted fleet's gate check is unchanged"
+    );
+}
+
+#[test]
+fn a_gatekeeper_check_never_goes_to_a_build_machine() {
+    let d = gated();
+    let gate = "./.gatekeeper/run check --gate core/fmt";
+    assert_eq!(hook(&d, gate), "", "the hook leaves it on the lane's host");
+    std::fs::create_dir_all(d.join(".gatekeeper")).unwrap();
+    std::fs::write(d.join(".gatekeeper/run"), "#!/bin/sh\nexit 6\n").unwrap();
+    Command::new("chmod")
+        .args(["755"])
+        .arg(d.join(".gatekeeper/run"))
+        .status()
+        .unwrap();
+    let path = fake_runners(&d, Some(0));
+    let st = routed_hold(&d, &path, &["./.gatekeeper/run", "check"])
+        .status()
+        .unwrap();
+    assert_eq!(st.code(), Some(6), "it ran here");
+    assert!(!d.join("runners.log").exists(), "never sent to runners run");
+}
+
+fn cargo_routed() -> (PathBuf, String, String) {
+    let (d, top) = routed();
+    let cfg = std::fs::read_to_string(d.join("fleet.toml")).unwrap();
+    let route = "\n[fleet.sendmeter.remote.cargo]\ntag = \"linux\"\n\n[hosts.mini]";
+    std::fs::write(d.join("fleet.toml"), cfg.replace("\n[hosts.mini]", route)).unwrap();
+    let path = fake_runners(&d, Some(3));
+    let cargo = d.join("bin/cargo");
+    std::fs::write(&cargo, "#!/bin/sh\necho \"cargo-here $*\"\n").unwrap();
+    Command::new("chmod").args(["755"]).arg(&cargo).status().unwrap();
+    (d, top, path)
+}
+
+fn run_line(d: &Path, path: &str, cmd: &str) -> (Option<i32>, String, String) {
+    let out = in_lane("bash", d)
+        .env("PATH", path)
+        .args(["-c", &wrapped(d, cmd)])
+        .output()
+        .unwrap();
+    let s = |b: Vec<u8>| String::from_utf8(b).unwrap();
+    (out.status.code(), s(out.stdout), s(out.stderr))
+}
+
+#[test]
+fn a_mixed_line_routes_its_build_and_runs_the_rest_here() {
+    let (d, top, path) = cargo_routed();
+    let git = |a: &[&str]| assert!(Command::new("git").args(a).current_dir(&d).status().unwrap().success());
+    std::fs::write(d.join("a.txt"), "one\n").unwrap();
+    git(&["add", "a.txt"]);
+    git(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "a"]);
+    std::fs::write(d.join("a.txt"), "two\n").unwrap();
+    let o = tmpdir("heavy-out");
+    let got = o.join("got");
+    let line = format!("cargo test -p x > {}; git diff --stat", got.display());
+    let (code, out, _) = run_line(&d, &path, &line);
+    assert_eq!(code, Some(0));
+    assert!(out.contains("a.txt | 2 +-"), "git diff ran here: {out}");
+    let runners = std::fs::read_to_string(d.join("runners.log")).unwrap();
+    assert_eq!(
+        runners,
+        format!("run --tag linux --dir {top} -- bash -c cargo test -p x\n")
+    );
+    assert!(got.exists(), "the build's redirect is written here");
+    assert_eq!(log(&d), "");
+    let (code, out, _) = run_line(
+        &d,
+        &path,
+        "cargo test -p x && echo after; gh --version > /dev/null || true",
+    );
+    assert_eq!((code, out.contains("after")), (Some(0), false), "{out}");
+    let (code, _, _) = run_line(&d, &path, "git --version > /dev/null && cargo test -p x");
+    assert_eq!(code, Some(3), "the build's exit code is the line's");
+}
+
+#[test]
+fn a_build_fed_by_a_pipe_or_reading_stdin_stays_here_and_says_why() {
+    let (d, _, path) = cargo_routed();
+    std::fs::write(d.join("in"), "").unwrap();
+    for (cmd, why) in [
+        ("echo x | cargo test", "heavy: a pipe in the line, running here"),
+        ("cargo test < in", "heavy: stdin (<) in the line, running here"),
+    ] {
+        let h = hook(&d, cmd);
+        assert!(h.contains("updatedInput"), "{cmd}: {h}");
+        let w = wrapped(&d, cmd);
+        assert!(w.contains("'heavy' 'cargo'") && !w.contains("--remote"), "{cmd}: {w}");
+        let (code, out, err) = run_line(&d, &path, cmd);
+        assert_eq!(code, Some(0), "{cmd}: {err}");
+        assert_eq!(err.trim(), why, "{cmd}");
+        assert!(out.contains("cargo-here test"), "{cmd}: {out}");
+        assert!(!d.join("runners.log").exists(), "{cmd}");
+    }
+}
+
+#[test]
+fn text_in_a_here_doc_or_quotes_is_no_heavy_kind() {
+    let (d, _, _) = cargo_routed();
+    for cmd in [
+        "cat > /dev/null <<'EOF'\nrun cargo test first\ncargo test -p x\nEOF\ngit status",
+        "gh issue create --title t --body 'fix; cargo test -p x'",
+        "echo \"a && cargo test\" # cargo test",
+    ] {
+        assert_eq!(hook(&d, cmd), "", "{cmd}");
+    }
+}
+
+#[test]
+fn the_default_cargo_kind_routes_xtask_and_run() {
+    let (d, top, _) = cargo_routed();
+    for cmd in ["cargo xtask foo", "cargo run -p x"] {
+        let w = wrapped(&d, cmd);
+        let tail = format!("'--remote' 'linux' '--dir' '{top}' '--' '{cmd}'");
+        assert!(w.contains("'heavy' 'cargo'") && w.ends_with(&tail), "{cmd}: {w}");
+    }
+}
+
+#[test]
+fn a_build_heading_a_pipe_or_writing_a_file_runs_on_the_build_machine() {
+    let (d, top, path) = cargo_routed();
+    let o = tmpdir("heavy-out");
+    let got = o.join("got");
+    for cmd in [
+        "cargo test 2>&1 | tail -15".to_string(),
+        format!("cargo test > {} 2>&1; echo done", got.display()),
+    ] {
+        std::fs::remove_file(d.join("runners.log")).ok();
+        let w = wrapped(&d, &cmd);
+        assert!(w.contains("'--remote' 'linux'"), "{cmd}: {w}");
+        let (code, out, err) = run_line(&d, &path, &cmd);
+        assert_eq!(code, Some(0), "{cmd}: {err}");
+        assert!(
+            !out.contains("cargo-here") && !err.contains("running here"),
+            "{cmd}: {out}{err}"
+        );
+        let runners = std::fs::read_to_string(d.join("runners.log")).unwrap();
+        assert_eq!(
+            runners,
+            format!("run --tag linux --dir {top} -- bash -c cargo test\n"),
+            "{cmd}"
+        );
+    }
+    assert!(got.exists(), "the build's redirect is written here");
+}
+
+#[test]
+fn a_routed_build_that_falls_back_says_why_and_logs_it() {
+    let (d, _, _) = cargo_routed();
+    let path = fake_runners(&d, Some(75));
+    let (code, out, err) = run_line(&d, &path, "cargo test -p x");
+    assert_eq!(code, Some(0), "{err}");
+    assert!(out.contains("cargo-here test -p x"), "{out}");
+    assert_eq!(err.trim(), "runners: exit 75, running here");
+    let ev = drover::events::read(&d.join("state/events.jsonl")).unwrap();
+    let here: Vec<_> = ev.iter().filter(|e| e.kind == "heavy-here").collect();
+    assert_eq!(here.len(), 1, "{here:?}");
+    assert_eq!(here[0].str("why"), Some("exit 75"));
+    assert_eq!(here[0].str("cmd"), Some("cargo test -p x"));
+    assert_eq!(here[0].str("kind"), Some("cargo"));
 }

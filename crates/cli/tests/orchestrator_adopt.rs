@@ -12,8 +12,8 @@ const T: u64 = 1_000_000;
 fn acp_setup(name: &str, b: &FakeShed) -> drover::Ctx {
     let d = tmpdir(name);
     let cfg = format!(
-        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
-         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n\n\
+         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n",
         b.sock.display()
     );
     let mut c = ctx(&d, &cfg);

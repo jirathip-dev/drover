@@ -21,14 +21,21 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "ci_stuck_minutes",
         "a ready PR's check still pending this long after its run completed is re-run once, then alerts `ci-stuck`",
     ),
-    ("load_per_cpu", "spawn refuses HOST_BUSY over this load per CPU"),
+    (
+        "ci_flaky_retries",
+        "re-runs of a failed check's jobs a head gets before its red counts, `ci-rerun` why failed (0 = off; a fleet may set its own)",
+    ),
+    (
+        "min_cpu_idle",
+        "spawn refuses HOST_BUSY under this percent of the CPUs idle over a 1 s sample; `[hosts.<n>]` may set its own",
+    ),
     (
         "overload_minutes",
-        "load per CPU over `load_per_cpu` this long alerts `host-overloaded` once, with the 5 busiest processes",
+        "CPU idle under `min_cpu_idle` this long alerts `host-overloaded` once, with the 5 busiest processes",
     ),
     (
         "swapout_rate",
-        "pages swapped out per 2 s sample that count as swapping",
+        "pages swapped out per 2 s sample that count as swapping; `[hosts.<n>]` may set its own",
     ),
     ("min_free_gb", "spawn refuses DISK_LOW under this many GB free on `/`"),
     (
@@ -49,7 +56,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "min_free_mem_gb",
-        "spawn refuses MEM_LOW under this many GB of free + inactive memory",
+        "spawn refuses MEM_LOW under this many GB of free + inactive memory; `[hosts.<n>]` may set its own",
     ),
     ("effort", "default reasoning effort for roles that set none"),
     (
@@ -87,10 +94,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "form_rounds",
         "form-only FAILs per issue that don't count as a review round",
-    ),
-    (
-        "overflow_after_minutes",
-        "every local host refused this long lets placement start a stopped cloud host",
     ),
     (
         "import_max_age_hours",
@@ -194,10 +197,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "the pause between a new database's WAL switch retries",
     ),
     (
-        "cloud_idle_stop_minutes",
-        "a cloud host's `idle_stop_minutes` when it sets none",
-    ),
-    (
         "notify_secs",
         "a notifier command or web push send is killed after this long",
     ),
@@ -220,11 +219,11 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "disk_probe_secs",
-        "a folder listing slower than this on a host under `load_per_cpu` marks its disk as not answering",
+        "a folder listing slower than this on a host over `min_cpu_idle` marks its disk as not answering",
     ),
     (
         "disk_hung_secs",
-        "over `load_per_cpu` a call waits this long for a slow folder listing, then the disk is not answering",
+        "under `min_cpu_idle` a call waits this long for a slow folder listing, then the disk is not answering",
     ),
     (
         "disk_sick_secs",
@@ -262,10 +261,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "orchestrator_change_minutes",
         "an orchestrator's answer may not change one this long after it",
-    ),
-    (
-        "token_refresh_minutes",
-        "`check` pushes a fresh runner registration token to every VM this often",
     ),
     (
         "ask_waiting_minutes",

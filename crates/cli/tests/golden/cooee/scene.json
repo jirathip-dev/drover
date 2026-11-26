@@ -405,10 +405,10 @@
       "type": "scene",
       "weather": {
         "fog": 0,
-        "line": "load 1.20 · mem normal · swap ?",
+        "line": "cpu 40% busy · mem normal · swap ?",
         "sky": "clear",
         "storm": false,
-        "wind": 0.48
+        "wind": 0.47
       }
     }
   ],

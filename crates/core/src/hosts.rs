@@ -528,7 +528,7 @@ impl Runner for Pass<'_> {
     }
 }
 
-/// What the last look at a host saw (`<state dir>/hosts.json`): detected tags and `$HOME` (probed hourly), reachability, load/cpu, free memory and disk in GB.
+/// What the last look at a host saw (`<state dir>/hosts.json`): detected tags and `$HOME` (probed hourly), reachability, CPU idle %, free memory and disk in GB.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable, rename = "HostSeen"))]
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -538,7 +538,7 @@ pub struct Seen {
     pub probed: u64,
     pub seen: u64,
     pub up: bool,
-    pub load: Option<f64>,
+    pub idle: Option<f64>,
     pub mem: Option<f64>,
     pub disk: Option<f64>,
     /// A remote host's failed checks from `health` (`✗` keeps lanes off it, `!` warns), with the probe.
@@ -550,10 +550,6 @@ pub struct Seen {
     /// Memory and disk size in GB (a bar shows the used part).
     pub mem_total: Option<f64>,
     pub disk_total: Option<f64>,
-    /// When it last had a live agent (a cloud host's idle stop).
-    pub busy: u64,
-    /// A cloud host's gh token, as its card says it.
-    pub github: String,
     /// Its set workspace roots.
     pub roots: Vec<crate::roots::Root>,
 }
@@ -599,20 +595,8 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         let on = On::new(r, h.machine.as_deref());
         let s = all.entry(name.clone()).or_default();
         let listed = seen.0.iter().find(|l| l.0 == h.machine).and_then(|l| l.1.clone().ok());
-        let logged_stop = h.cloud.is_some() && crate::cloud::state(&events, name) == "stopped";
-        let stopped = logged_stop && listed.is_none();
-        if let Some(Err(e)) = (logged_stop && !stopped).then(|| crate::cloud::listed_up(ctx, cfg, name)) {
-            crate::stderr!("cloud {name}: {e:#}");
-        }
-        if let Some(Err(e)) = (h.cloud.is_some() && !stopped).then(|| crate::cloud::moved(ctx, cfg, r, name, false)) {
-            crate::stderr!("cloud {name}: {e:#}");
-        }
-        let a = listed
-            .filter(|_| !stopped)
-            .map(|all| all.into_iter().filter(|s| s.running() && s.lane()).collect::<Vec<_>>());
+        let a = listed.map(|all| all.into_iter().filter(|s| s.running() && s.lane()).collect::<Vec<_>>());
         s.up = a.is_some();
-        let live = a.as_ref().is_some_and(|a| !a.is_empty());
-        s.busy = if live { ctx.now } else { s.busy };
         if s.up {
             s.seen = ctx.now;
             let due = refresh || s.probed + 3600 <= ctx.now;
@@ -626,10 +610,6 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
                 .map(|m| crate::proxy::ensure(ctx, cfg, r, (name, m)));
             if due && h.machine.is_some() && h.enabled {
                 s.health = health(ctx, cfg, &on, &tags(h, Some(&*s)), &s.home);
-                if h.watches_token() {
-                    let (card, warn) = crate::cloud::github(&on, ctx.now);
-                    (s.github, ()) = (card, s.health.extend(warn));
-                }
             }
             s.health.retain(|w| !w.starts_with(crate::proxy::DOWN));
             let down = match tunnel {
@@ -643,7 +623,7 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
             }
             let mut hs = host::sample(&on);
             host::pace(&ctx.state, on.machine, &mut hs, ctx.now);
-            (s.load, s.mem, s.mem_total) = (hs.load_per_cpu, hs.free_mem_gb, hs.mem_total_gb);
+            (s.idle, s.mem, s.mem_total) = (hs.cpu_idle, hs.free_mem_gb, hs.mem_total_gb);
             ((s.disk, s.disk_total), s.swap) = (host::df(&on).unzip(), hs.swapout);
             s.pressure = hs.pressure.as_deref().map(level);
             s.roots = crate::roots::rows(cfg, &events, &on, name, &s.home);
@@ -948,8 +928,15 @@ pub fn login_hold<'a>(events: &'a [Event], machine: Option<&str>, (now, retry): 
     let retried = |e: &Event| {
         e.val("proxy").as_bool() == Some(true) && (now < e.ts + retry || proxy_ok(events, e.str("agent")) >= Some(e.ts))
     };
-    let hold = |e: &&Event| ["usage-limit", "signed-out"].contains(&e.kind.as_str()) && mine(e) && !retried(e);
+    let lane = |e: &Event| e.data.get("account").is_none();
+    let hold =
+        |e: &&Event| ["usage-limit", "signed-out"].contains(&e.kind.as_str()) && mine(e) && lane(e) && !retried(e);
     events.iter().skip(from).rfind(hold)?.str("reason")
+}
+
+/// Spawn `sp`'s lane runs on a shed account (an ACP lane on the main host): `account.ls` holds it, never its banner.
+pub fn on_account(sp: &Event) -> bool {
+    sp.str("account").is_some()
 }
 
 /// When the token proxy last relayed a good answer to lane `agent` after it signed out.
@@ -998,18 +985,19 @@ pub fn gate(ctx: &Ctx, cfg: &Config, on: &On) -> (Host, Option<(&'static str, St
     if on.machine.is_none() {
         host::window(&ctx.state, &mut hs);
     }
-    let mem = cfg.limits.min_free_mem_gb;
+    let lim = cfg.limits_on(on.machine);
+    let mem = lim.min_free_mem_gb;
     if let Some(gb) = hs.free_mem_gb.filter(|g| *g < mem) {
         let why = format!("only {gb:.1} GB of memory free (floor {mem} GB); a lane needs about 0.5–1.5 GB");
         return (hs, Some(("MEM_LOW", format!("{why}; retry when a lane finishes"))));
     }
-    let load = hs.load_per_cpu.is_some_and(|x| x > cfg.limits.load_per_cpu);
+    let load = hs.cpu_idle.is_some_and(|x| x < lim.min_cpu_idle);
     let hog = || {
         let dirs = lane_dirs(&crate::events::read(&ctx.state).unwrap_or_default(), on.machine);
         let (lane, share, top) = host::lane_cpu(on, &dirs).into_iter().next()?;
         Some(format!("; {lane} holds {share:.0}% ({top})"))
     };
-    let busy = host::admit(&hs, &cfg.limits).err();
+    let busy = host::admit(&hs, &lim).err();
     let busy = busy.map(|w| ("HOST_BUSY", w + &load.then(hog).flatten().unwrap_or_default()));
     (hs, busy)
 }
@@ -1138,8 +1126,7 @@ pub type Lane<'a> = (&'a str, u64, &'a str);
 fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str, Option<&str>), pre: Pre) -> Placed {
     let on = On::new(r, machine);
     let mut seen = cached(ctx).remove(name).unwrap_or_default();
-    let cloud = crate::cloud::held(ctx, cfg, name);
-    if machine.is_some() && seen.home.is_empty() && cloud.is_none() {
+    if machine.is_some() && seen.home.is_empty() {
         seen.home = probe(&on).map(|p| p.1).unwrap_or_default();
     }
     let home = machine.and(Some(seen.home.clone()).filter(|h| !h.is_empty()));
@@ -1157,9 +1144,8 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
     let reach = format!("can't reach {}:", f.repo);
     let sick = (seen.health.iter()).find(|w| w.starts_with('✗') && (!w.starts_with("✗ git ") || w.contains(&reach)));
     let mut full = false;
-    let (hs, refusal) = match cloud.map_or_else(|| crate::session::live_on(&on).map_err(|_| None), |c| Err(Some(c))) {
-        Err(Some(c)) => (Host::default(), Some(c)),
-        Err(None) => (Host::default(), Some(("HOST_OFFLINE", "unreachable".to_string()))),
+    let (hs, refusal) = match crate::session::live_on(&on) {
+        Err(_) => (Host::default(), Some(("HOST_OFFLINE", "unreachable".to_string()))),
         Ok(_) if sick.is_some() => (Host::default(), sick.map(|w| ("NO_HOST", format!("unhealthy: {w}")))),
         Ok(agents) => {
             let cap = cfg.hosts.get(name).and_then(|h| h.max_working);
@@ -1175,7 +1161,7 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
         rank: (
             refusal.is_some(),
             full,
-            hs.load_per_cpu.unwrap_or(0.0),
+            -hs.cpu_idle.unwrap_or(100.0),
             -hs.free_mem_gb.unwrap_or(0.0),
         ),
         refusal: refusal.map(|(c, w)| (c, format!("{name}: {w}"))),
@@ -1527,42 +1513,17 @@ pub fn place(
         return refused(code, whys.join(", "));
     }
     let mut on: Vec<Placed> = each(open, |(n, h)| at(ctx, cfg, f, r, (n, h.machine.as_deref()), pre));
-    if on
-        .iter()
-        .all(|p| p.refusal.as_ref().is_some_and(|r| r.0 == "CLOUD_BUDGET"))
-    {
+    if on.is_empty() {
         let has = if needs.is_empty() {
             "enabled host".into()
         } else {
             format!("host with {}", needs.join(", "))
         };
-        let cloud = (cfg.hosts.values().any(|h| h.cloud.is_some())).then_some(" (cloud host stopped or over budget)");
-        let cloud = cloud.unwrap_or_default();
-        return refused("NO_HOST", format!("no {has}{cloud}"));
+        return refused("NO_HOST", format!("no {has}"));
     }
     on.sort_by(|a, b| a.rank.partial_cmp(&b.rank).unwrap_or(Equal));
-    let local = |p: &Placed| cfg.hosts.get(&p.name).is_some_and(|h| h.cloud.is_none());
-    let held = held_for(ctx, on.iter().filter(|p| local(p)).all(|p| p.refusal.is_some()));
-    let wake = held >= cfg.limits.overflow_after_minutes * 60 || !on.iter().any(local);
-    let free = |p: &Placed| p.refusal.is_none() && !p.rank.1;
-    let up = (!on.iter().any(|p| local(p) && free(p)))
-        .then(|| on.iter().position(free))
-        .flatten();
-    let i = up.or_else(|| {
-        (!wake && !on.first().is_some_and(local))
-            .then(|| on.iter().position(local))
-            .flatten()
-    });
-    let mut p = on.remove(i.unwrap_or(0));
-    let busy = on.iter().filter(|p| local(p)).find_map(|p| p.refusal.as_ref());
-    let busy = busy.map_or_else(|| "every local host at max_working".into(), |(c, w)| format!("{c} {w}"));
-    let why = match (on.iter().any(local), up) {
-        (true, Some(_)) => format!("{busy}; {} is up with room", p.name),
-        (true, None) => format!("overflow: every local host busy {} min", held / 60),
-        (false, ..) if needs.is_empty() => "no local host fits".into(),
-        (false, ..) => format!("needs {}: no local host has it", needs.join(", ")),
-    };
-    p.why = webkit.or((!local(&p)).then_some(why));
+    let mut p = on.remove(0);
+    p.why = webkit;
     Ok(Some(p))
 }
 
@@ -1581,38 +1542,6 @@ fn left<'a>(events: &'a [Event], fleet: &str, issue: u64) -> Option<&'a str> {
     let mine = crate::events::of_issue(events, fleet, issue);
     let since = mine.into_iter().rev().take_while(|e| e.kind != "spawn");
     since.into_iter().find(|e| e.kind == "stall-move")?.str("from")
-}
-
-fn held_for(ctx: &Ctx, held: bool) -> u64 {
-    let p = ctx.state.with_file_name("held-since");
-    let s = std::fs::read_to_string(&p).unwrap_or_default();
-    let mut n = s.split_whitespace().map(|w| w.parse::<u64>().ok());
-    let since = match (n.next().flatten(), n.next().flatten()) {
-        (Some(a), Some(b)) if ctx.now.saturating_sub(b) <= 900 => a,
-        _ => ctx.now,
-    };
-    if held {
-        std::fs::write(&p, format!("{since} {}", ctx.now))
-    } else {
-        std::fs::remove_file(&p)
-    }
-    .ok();
-    ctx.now.saturating_sub(since) * u64::from(held)
-}
-
-/// Start the stopped cloud host `place` picked (not on a dry run), then place on it afresh.
-pub fn wake(ctx: &Ctx, cfg: &Config, r: &dyn Runner, f: (&Fleet, bool), p: Option<Placed>) -> Result<Option<Placed>> {
-    match p {
-        Some(p) if !f.1 && p.refusal.as_ref().is_some_and(|x| x.0 == "CLOUD_STOPPED") => {
-            crate::cloud::start(ctx, cfg, r, &p.name)?;
-            let why = p.why.clone();
-            Ok(Some(Placed {
-                why,
-                ..at(ctx, cfg, f.0, r, (&p.name, p.machine.as_deref()), (&[], None))
-            }))
-        }
-        p => Ok(p),
-    }
 }
 
 /// `a` with this host's `$HOME` moved to the lane host's `home` (a remote lane's profile, prompt and env paths).
@@ -1649,11 +1578,10 @@ pub fn evacuate(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) ->
         return Ok(());
     }
     let view = crate::link::view::View::load(ctx, cfg)?;
-    for (name, h) in cfg.hosts.iter().filter(|h| h.1.machine.is_some()) {
+    for (name, _) in cfg.hosts.iter().filter(|h| h.1.machine.is_some()) {
         let events = working(&ctx.state)?;
-        let stopped = h.cloud.is_some() && crate::cloud::state(&events, name) == "stopped";
         let offline = facts::host(view.link(name), view.at(None), &cfg.limits, ctx.now).0 == facts::Host::Offline;
-        if stopped || !offline || !facts::silent(view.link(name), &cfg.limits, ctx.now) {
+        if !offline || !facts::silent(view.link(name), &cfg.limits, ctx.now) {
             continue;
         }
         let mut moved = vec![];
@@ -1743,7 +1671,7 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
         words.extend(probed.map(|m| format!(" · {}", probe::why_down(ctx, r, m))));
         let t = tags(h, Some(&s)).join(",");
         let built = there.and_then(|m| crate::release::sha_of(view.as_ref()?.build(Some(m))?));
-        let (l, m, d, k, ls) = (n(s.load, 2), n(s.mem, 1), n(s.disk, 0), lanes.len(), lanes.join(" "));
+        let (l, m, d, k, ls) = (n(s.idle, 0), n(s.mem, 1), n(s.disk, 0), lanes.len(), lanes.join(" "));
         let v = match built.as_deref().unwrap_or_default() {
             "" => String::new(),
             x if x == env!("DROVER_SHA") => format!(" · drover {x} ✓"),
@@ -1751,7 +1679,7 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
         };
         writeln!(
             out,
-            "{name} · {words} · tags {t}{v} · load/cpu {l} · mem {m} GB · disk {d} GB free · {k} lane(s) {ls} · seen {} ago",
+            "{name} · {words} · tags {t}{v} · cpu idle {l}% · mem {m} GB · disk {d} GB free · {k} lane(s) {ls} · seen {} ago",
             age(ctx.now.saturating_sub(s.seen))
         )?;
     }
@@ -1814,7 +1742,7 @@ pub fn cards<'a>(cfg: &'a Config, r: &dyn Runner) -> Vec<(String, Option<&'a Hos
 pub struct Row {
     pub ts: u64,
     pub host: String,
-    pub load_cpu: Option<f64>,
+    pub cpu_idle: Option<f64>,
     pub pressure: Option<u8>,
     pub swap_out: Option<f64>,
     pub mem_free_gb: Option<f64>,
@@ -1826,10 +1754,10 @@ pub struct Row {
 }
 
 impl Row {
-    /// Key `k` (load, swap, mem, disk, pressure, lanes): its value, and true when low is bad (free space).
+    /// Key `k` (idle, swap, mem, disk, pressure, lanes): its value, and true when low is bad (free CPU or space).
     pub fn get(&self, k: &str) -> (Option<f64>, bool) {
         match k {
-            "load" => (self.load_cpu, false),
+            "idle" => (self.cpu_idle, true),
             "swap" => (self.swap_out, false),
             "mem" => (self.mem_free_gb, true),
             "disk" => (self.disk_free_gb, true),
@@ -1886,7 +1814,7 @@ fn row(ts: u64, host: &str, s: &Seen, (lanes, procs): (usize, Option<[u64; 5]>))
     Row {
         ts,
         host: host.into(),
-        load_cpu: q(s.load, 100.0),
+        cpu_idle: q(s.idle, 1.0),
         pressure: s.pressure,
         swap_out: q(s.swap, 1.0),
         mem_free_gb: q(s.mem, 10.0),
@@ -1901,7 +1829,7 @@ pub fn sample(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Resu
     let mut hs = host::sample(r);
     host::pace(&ctx.state, None, &mut hs, ctx.now);
     let s = Seen {
-        load: hs.load_per_cpu,
+        idle: hs.cpu_idle,
         mem: hs.free_mem_gb,
         disk: host::free_gb(r),
         pressure: hs.pressure.as_deref().map(level),
@@ -1952,7 +1880,6 @@ fn ranges(rows: &[Row], (h, k, now, all): (&str, &str, u64, bool), f: &dyn Fn((f
 /// `ranges` of the values, as few decimals as the row has.
 pub fn series(rows: &[Row], h: &str, k: &str, now: u64, all: bool) -> String {
     let p = match k {
-        "load" => 2,
         "mem" | "disk" => 1,
         _ => 0,
     };

@@ -121,7 +121,7 @@ fn a_tick_past_its_budget_skips_the_rest_says_so_and_ends() {
     assert_eq!(code, 0, "{out}");
     assert!(r.timeouts().len() <= 1, "only the sweep tries air: {:#?}", r.timeouts());
     assert!(
-        out.contains("tick: past its 0 s budget; skipped: clean, lesson, triage"),
+        out.contains("tick: past its 0 s budget; skipped: clean, jobs, soak"),
         "{out}"
     );
     assert!(!c.state.with_file_name("clean.at").exists(), "no clean: {out}");
@@ -165,7 +165,7 @@ fn a_tick_past_its_budget_still_pushes_a_remote_lanes_commits_every_pass() {
             "pass {pass}: {out}"
         );
         assert!(
-            out.contains("tick: past its 0 s budget; skipped: clean, lesson, triage, deps, soak, hotspots, compact"),
+            out.contains("tick: past its 0 s budget; skipped: clean, jobs, soak, hotspots, compact"),
             "pass {pass}: {out}"
         );
     }

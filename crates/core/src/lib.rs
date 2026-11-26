@@ -4,6 +4,7 @@ macro_rules! stderr {
 }
 
 pub mod access;
+pub mod accounts;
 pub mod action;
 pub mod amend;
 pub mod arch;
@@ -15,11 +16,8 @@ pub mod check;
 mod cli;
 pub mod clock;
 pub mod clone;
-pub mod cloud;
-pub mod compact;
 pub mod config;
 pub mod db;
-pub mod deps;
 pub mod design;
 pub mod devices;
 pub mod diagram;
@@ -38,6 +36,7 @@ pub mod host;
 pub mod hosts;
 pub mod hotspots;
 pub mod hygiene;
+pub mod jobs;
 pub mod land;
 pub mod lanes;
 pub mod lesson;
@@ -57,10 +56,10 @@ pub mod queue;
 pub mod release;
 pub mod rename;
 pub mod report;
+pub mod reroot;
 pub mod respawn;
 pub mod roots;
 pub mod runner;
-pub mod runners;
 pub mod sandbox;
 pub mod secret;
 pub mod service;
@@ -76,6 +75,7 @@ pub mod stall;
 pub mod starts;
 pub mod status;
 pub mod term;
+pub mod thread;
 pub mod timer;
 pub mod top;
 pub mod triage;
@@ -437,7 +437,7 @@ pub fn ask(
         .rsplit(':')
         .next()
         .is_some_and(|r| !r.is_empty() && !orchestrator::is_role(r));
-    let routed = orchestrator::route(cfg, &events, fleet).filter(|_| from_lane && thread.is_none());
+    let routed = crate::thread::route::route(cfg, &events, fleet).filter(|_| from_lane && thread.is_none());
     if from_lane && thread.is_none() {
         d.put("lane_ask", json!(true));
     }
@@ -449,9 +449,9 @@ pub fn ask(
         .pop()
         .context("ask not logged")?;
     let id = ev.str("id").unwrap_or_default();
-    if let Some(t) = routed.filter(|t| orchestrator::attached(&events, t).is_none()) {
-        if let Err(e) = orchestrator::lane_ask(ctx, cfg, r, t, &ev) {
-            orchestrator::to_owner(ctx, cfg, t, &ev, None, &format!("orchestrator not reached: {e:#}"))?;
+    if let Some(t) = routed {
+        if let Err(e) = crate::thread::route::lane_ask(ctx, cfg, r, t, &ev) {
+            crate::thread::route::to_owner(ctx, cfg, t, &ev, None, &format!("orchestrator not reached: {e:#}"))?;
         }
     }
     Ok(writeln!(out, "{id}")?)
@@ -481,7 +481,7 @@ pub fn orchestrator_answer(
     let events = working(&ctx.state)?;
     let by = format!("orchestrator-{t}");
     let ask = the_ask(&events, (fleet, id), &|e| in_thread(e, &by))?;
-    let mine = orchestrator::routed_to(&events, ask).is_some() || crate::design::is_ask(ask);
+    let mine = crate::thread::route::routed_to(&events, ask).is_some() || crate::design::is_ask(ask);
     if !mine && ask.data.get("extend").is_none() {
         return gate::refused("OWNER_ASK", format!("{id} was routed to no thread; ask the owner"));
     }
@@ -513,7 +513,7 @@ pub fn orchestrator_answer(
     if !why.is_empty() {
         let opts = ask.val("options").as_array().into_iter().flatten();
         let rec = (opts.zip(1..)).find(|o| o.0 == text).map(|o| o.1);
-        orchestrator::to_owner(ctx, cfg, t, ask, rec, why)?;
+        crate::thread::route::to_owner(ctx, cfg, t, ask, rec, why)?;
         return gate::refused("OWNER_ASK", format!("{why}; ask the owner"));
     }
     answer_with(ctx, cfg, r, out, ask, choice, (&by, None), (Some(&quote), None))
@@ -593,7 +593,7 @@ pub fn answer_typed(
         .filter(|e| is(e, "needs-decision") || is(e, "ask-owner"))
         .flat_map(|e| {
             let own = on.filter(|_| crate::design::is_ask(e));
-            let routed = orchestrator::routed_to(&events, e);
+            let routed = crate::thread::route::routed_to(&events, e);
             e.str("thread").into_iter().chain(own).chain(routed).map(|t| (t, e.seq))
         })
         .collect();
@@ -629,7 +629,7 @@ pub fn answer_typed(
     }
     let typed_in = |e: &Event| {
         let own = on.filter(|_| crate::design::is_ask(e));
-        let routed = orchestrator::routed_to(&events, e);
+        let routed = crate::thread::route::routed_to(&events, e);
         let t = |m: &&&Event| [e.str("thread"), own, routed].contains(&m.str("thread"));
         said.iter().filter(t).any(|m| m.seq > e.seq)
     };
@@ -735,8 +735,7 @@ pub(crate) fn answer_with(
             && !orchestrator(by)
             && ctx.now < d.ts + cfg.limits.orchestrator_change_minutes * 60
     };
-    let handoff = ask.data.get("handoff").is_some();
-    if let Some(d) = last.filter(|d| !handoff && d.str("by") != Some("default") && !change(d)) {
+    if let Some(d) = last.filter(|d| d.str("by") != Some("default") && !change(d)) {
         return gate::refused(
             "ALREADY_ANSWERED",
             format!(
@@ -750,21 +749,6 @@ pub(crate) fn answer_with(
     if text.trim().is_empty() || text.chars().any(char::is_control) || text.chars().count() > 2000 {
         let why = "an answer is an option number or one line of text, at most 2,000 chars";
         return gate::refused("BAD_VALUE", why);
-    }
-    if handoff {
-        let (to, fresh) = orchestrator::land(ctx, cfg, r, ask, choice)?;
-        let text = match last.and_then(|d| d.str("choice")) {
-            Some(first) if !fresh => first,
-            _ => text,
-        };
-        if fresh {
-            let d = with_via(
-                json!({"id": id, "ask_seq": ask.seq, "choice": text, "by": by, "to": to}),
-                via,
-            );
-            emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "decision", d))?;
-        }
-        return Ok(writeln!(out, "{fleet} {id}: {text} -> {to}")?);
     }
     let design = crate::design::is_ask(ask);
     if design {
@@ -821,7 +805,7 @@ pub(crate) fn answer_with(
     if let Some(t) = ask.str("thread").filter(|_| by != TYPED) {
         let agent = orchestrator::say(ctx, cfg, r, (t, &msg, &[]), (by, true))?;
         let q = ask.str("question").unwrap_or_default();
-        orchestrator::flow(ctx, cfg, t, &format!("answered {id}: {q} → {text}"))?;
+        crate::thread::route::flow(ctx, cfg, t, &format!("answered {id}: {q} → {text}"))?;
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {agent}")?);
     }
     if design {

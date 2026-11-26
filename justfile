@@ -3,35 +3,13 @@
 types:
     cargo test -p drover-server --features ts export_bindings
 
+# Every gate CI runs (the core, rust and ts packs and .gatekeeper/gates/), the same as `drover turn done` (#1587).
+check:
+    ./.gatekeeper/run check
+
 # #1147: every generated file (.drover/arch.toml `generated`); arch-check runs it and fails on a difference.
-gen: types
-    npm --prefix web ci --no-audit --no-fund
-    npm --prefix web run build
-    cargo run -q --locked -p drover -- diagram > docs/workflow.md
-    BLESS=1 cargo test -q --locked -p drover --test brief_golden
-    BLESS=1 cargo test -q --locked -p drover --test flow_table
-    cargo run -q --locked -p drover -- config show --md > docs/config/limits.md
-    find fleet.example.d -type f | LC_ALL=C sort | xargs cat > fleet.example.toml
-
-# #375: no board TS under assets/ (but assets/types/) declares its own copy of a generated type.
-types-lint:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    names=$(grep -oE '^export type [A-Za-z]+' assets/types/api.d.ts | cut -d' ' -f3 | paste -sd'|' -)
-    bad=$(grep -rnE --include='*.ts' "\b(type|interface|class) ($names)\b" assets | grep -v '^assets/types/' || true)
-    test -z "$bad" || { echo "hand-written copy of a generated type (import it from assets/types/api): $bad"; exit 1; }
-
-# #269: crates/server builds no HTML but the page shell (`page`, its `pairb`, and the export's copy of it): every other
-# Rust string with a tag that has attributes or a closing tag fails; the board (web/) draws the rest from API v1.
-# #725: but the lifeboat (crates/server/src/lifeboat.rs), plain server-rendered HTML by design.
-html-lint:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    tags='p|div|span|b|i|a|button|form|input|details|summary|section|pre|code|h[1-6]|svg|use|small|figure|figcaption|img|ul|li|textarea|select|option|label|br|script|style|link|meta|html|head|body|header|main|nav|template'
-    bad=$(find crates/server/src -name '*.rs' ! -name lifeboat.rs | sort | xargs awk -v t="$tags" '
-      /^[[:space:]]*(pub(\([a-z]+\))? )?fn [a-z_0-9]+/ { match($0, /fn [a-z_0-9]+/); f = substr($0, RSTART + 3, RLENGTH - 3) }
-      $0 ~ ("\"[^\"]*(</(" t ")>|<(" t ") [a-z-]+=)") && f !~ /^(page|pairb|export)$/ { print FILENAME ":" FNR ": " $0 }')
-    test -z "$bad" || { echo "HTML built outside the page shell (draw it in web/ from API v1): $bad"; exit 1; }
+gen:
+    bash scripts/gen.sh
 
 # #680: the deterministic simulation's long batch: `just sim [n]` runs n (default 500) random seeds from DROVER_SIM_FROM
 # (default 1000), each failing seed printed with its trace; replay one with `DROVER_SIM_SEED=<n> cargo test -p

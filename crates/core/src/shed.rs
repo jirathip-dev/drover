@@ -16,7 +16,7 @@ pub fn git() -> String {
 }
 
 /// The oldest shed protocol drover accepts: any shed at or above it passes, whatever its build.
-pub const MIN_PROTOCOL: u32 = 1;
+pub const MIN_PROTOCOL: u32 = 5;
 
 /// The fix a `SHED_VERSION` refusal names: drover never installs shed.
 pub const UPDATE: &str = "update shed (it updates itself from its own releases and hands serve over)";
@@ -119,6 +119,37 @@ pub fn line(r: &dyn Runner, w: &Wire) -> String {
         }
         Err(e) => format!("! shed: {e:#}"),
     }
+}
+
+/// The accounts shed keeps on `w` (`account.ls`).
+pub fn accounts(r: &dyn Runner, w: &Wire) -> Result<Vec<proto::Account>> {
+    let ls = json!(proto::AccountsParams::default());
+    Ok(serde_json::from_value(call(r, w, Method::AccountLs, ls)?)?)
+}
+
+/// Doctor's account rows from `account.ls` on `w`: per agent, its signed-in named accounts or `✗` with the `shed account add` line.
+pub fn account_rows(r: &dyn Runner, w: &Wire, agents: &std::collections::BTreeSet<String>) -> Vec<String> {
+    let all = match accounts(r, w) {
+        Ok(all) => all,
+        Err(e) if format!("{e:#}").starts_with("SHED_VERSION") => return vec![format!("✗ account — {e:#}")],
+        Err(e) => return vec![format!("! account — account.ls: {e:#}")],
+    };
+    let signed = |a: &&proto::Account| {
+        a.name != "default" && matches!(a.state, proto::AccountState::Ready | proto::AccountState::Limited)
+    };
+    agents
+        .iter()
+        .map(|id| {
+            let names: Vec<&str> = (all.iter().filter(|a| a.provider == *id).filter(signed))
+                .map(|a| a.name.as_str())
+                .collect();
+            if names.is_empty() {
+                format!("✗ account {id}: no signed-in named account → shed account add {id} <name>")
+            } else {
+                format!("✓ account {id}: {}", names.join(", "))
+            }
+        })
+        .collect()
 }
 
 fn on_path(r: &dyn Runner) -> Option<Hello> {

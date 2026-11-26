@@ -13,7 +13,7 @@ fn setup(name: &str, config: &str, verdicts: &[(&str, &str)]) -> (std::path::Pat
     append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", spawn)).unwrap();
     for (i, (v, sha)) in verdicts.iter().enumerate() {
         let e = Event::new(
-            20 + i as u64,
+            20 + u64::try_from(i).unwrap(),
             "sendmeter",
             Some(12),
             "verdict",
@@ -961,4 +961,48 @@ fn a_squash_merge_keeps_the_cap_trailer_so_cap_check_passes() {
     let out = String::from_utf8_lossy(&o.stdout);
     assert_eq!(o.status.code(), Some(0), "{body}\n{out}");
     assert!(body.contains("\nCap: 100 → 200 (#12, q7)"), "{body}");
+}
+
+#[test]
+fn a_merge_closes_each_issue_its_pr_body_names_and_skips_one_with_its_own_open_pr() {
+    let (_d, c) = setup("named", CONFIG, &[("PASS", HEAD)]);
+    let _sh = FakeShed::attached(&c);
+    let body = "Closes #12\n- Closes #5\n\nMoot: #6, #7, #8\n";
+    let open = json!({"number": 34, "state": "OPEN", "baseRefName": "staging", "headRefOid": HEAD, "statusCheckRollup": green()});
+    let r = Fake::default()
+        .reply("gh pr view issue-12", &open.to_string())
+        .reply(
+            "gh pr view issue-8",
+            &json!({"number": 41, "state": "OPEN"}).to_string(),
+        )
+        .reply("gh pr merge 34", "")
+        .reply(
+            "gh pr view 34",
+            &json!({"mergeCommit": {"oid": "m3rg3"}, "body": body}).to_string(),
+        )
+        .once("gh issue comment 7", 1, "")
+        .reply("gh issue", "");
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 0, "{out}");
+    let repo = "-R jirathip-dev/sendmeter";
+    assert_eq!(r.count("gh issue comment 12 "), 1, "{:?}", r.calls.borrow());
+    assert!(r.called(&format!(
+        "gh issue comment 5 {repo} --body Closed by PR #34 (#12) → `staging` @ `m3rg3`"
+    )));
+    assert!(r.called(&format!(
+        "gh issue comment 6 {repo} --body Moot by PR #34 (#12) → `staging` @ `m3rg3`"
+    )));
+    assert_eq!(r.count("gh issue comment 7 "), 2, "retried once");
+    assert!(r.called(&format!("gh issue close 5 {repo} --reason completed")));
+    for n in [6, 7] {
+        assert!(
+            r.called(&format!("gh issue close {n} {repo} --reason not planned")),
+            "#{n}"
+        );
+    }
+    assert!(
+        !r.called("gh issue comment 8 ") && !r.called("gh issue close 8 "),
+        "#8 has its own PR"
+    );
+    assert!(out.contains("skipped #8: it has an open PR"), "{out}");
 }

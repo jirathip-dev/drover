@@ -53,7 +53,7 @@ fn ended(j: &Job) -> bool {
 
 pub(super) fn ready(ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<()> {
     let g = |k: &str| f.get(k).map_or("", String::as_str);
-    if !["card", "config"].contains(&g("op")) && g("mtime") != mtime(ctx) {
+    if !["card", "config", "handoff-move"].contains(&g("op")) && g("mtime") != mtime(ctx) {
         return refused(
             "STALE",
             "fleet.toml changed since the page was rendered; reload and retry",
@@ -126,6 +126,11 @@ impl Server<'_> {
                 crate::card::settle_via(ctx, &Config::kept(ctx)?, &self.r, id, act == "approve", sha, via)
             }
             "config" => crate::propose::settle(ctx, &Config::kept(ctx)?, &self.r, id, act == "apply"),
+            "handoff-move" => {
+                let seq = id.parse().map_err(|_| anyhow::anyhow!("no handoff id"))?;
+                crate::orchestrator::move_handoff(ctx, &Config::kept(ctx)?, &self.r, seq, g("to"))
+                    .map(|to| format!("moved to {to}"))
+            }
             _ => self.write(ctx, f),
         }
     }

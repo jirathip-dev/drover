@@ -228,6 +228,10 @@ enum Cmd {
     #[command(about = "Owner only: the orchestrator threads full screen in a terminal; needs no serve")]
     Chat { thread: Option<String> },
     #[command(
+        about = "Attach a terminal chat to a repo, `all` or `none` (optionally an old chat's id): logs the attach, prints the brief path, the settings path and the env lines"
+    )]
+    Attach { repo: String, thread: Option<String> },
+    #[command(
         about = "Orchestrator chat threads per repo (or `all`), each talked through by one orchestrator lane (docs/orchestrator.md)"
     )]
     Thread {
@@ -317,6 +321,8 @@ enum Cmd {
         live: bool,
         fleet: Option<String>,
     },
+    #[command(about = "#1649: the flow table's shadow run beside today's drive")]
+    Flow(crate::flow::shadow::Args),
     #[command(
         about = "Poll `drover pr` with backoff (30 s → 5 min); exit 0 reached, 1 failed check/closed PR, 124 timeout"
     )]
@@ -357,19 +363,15 @@ enum Cmd {
         #[arg(last = true, required = true)]
         cmd: Vec<String>,
     },
-    #[command(
-        about = "File this week's lessons issue, queue it on top and spawn its `lesson` lane (orchestrators and the owner only)"
-    )]
-    #[command(args_conflicts_with_subcommands = true)]
-    Lesson {
-        #[command(subcommand)]
-        cmd: Option<LessonCmd>,
-        fleet: Option<String>,
-    },
-    #[command(about = "#1100: file this week's triage issue and spawn its lane, or a triage lane's verb")]
+    #[command(about = "#419: a lesson lane's verbs: the digest and the lesson checks' promotion")]
+    #[command(subcommand)]
+    Lesson(LessonCmd),
+    #[command(about = "#1100: a triage lane's verbs")]
     Triage(crate::triage::Args),
-    #[command(about = "#1488: file this month's deps issue, queue it and spawn its lane (orchestrators, owner)")]
-    Deps(crate::deps::Args),
+    #[command(
+        about = "#1756: the fleet's scheduled jobs (every, last, next, open issue); with a name, run it now (orchestrators and the owner)"
+    )]
+    Job(crate::jobs::Args),
     #[command(about = "#1648: the nightly soak on `[fleet.<n>.soak]` hosts; an issue per missed target")]
     Soak(crate::soak::Args),
     #[command(about = "Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)")]
@@ -565,14 +567,6 @@ enum Cmd {
         #[arg(long, help = "Remove without asking")]
         apply: bool,
     },
-    #[command(
-        about = "#537: the `[ci_runners]` VMs and their GitHub runners (an orchestrator's `runners` group, its brief names the verbs); each verb logged `runners-*`"
-    )]
-    #[command(hide = true)]
-    Runners {
-        #[command(subcommand)]
-        cmd: RunnersCmd,
-    },
     #[command(about = "Send Esc to an agent's pane (it pauses); logs `stop`")]
     Stop { agent: String },
     #[command(
@@ -617,8 +611,10 @@ enum Cmd {
         #[arg(long, help = "Rebuild the issue, lane and ask tables from every event instead")]
         rebuild: bool,
     },
-    #[command(about = "A repo's fresh start: one root before a cut, one commit per landed PR after it; archive, undo")]
-    Compact(crate::compact::Opts),
+    #[command(
+        about = "Moved to the standalone `compact` binary: this runs it on the fleet's repo, clone, lanes and saved ids, and logs its records"
+    )]
+    Compact(crate::reroot::Opts),
     #[command(about = "The event log in its JSONL format (one event a line, with its seq), for external readers")]
     #[command(hide = true)]
     Events {
@@ -694,7 +690,7 @@ enum ThreadCmd {
         orchestrator: Option<String>,
     },
     #[command(
-        about = "An orchestrator hands off to thread <to> at once, or to a repo (or `all`): the owner taps one of its threads or a new one; linked both ways, <text> wakes its orchestrator as from <from>"
+        about = "An orchestrator hands off to thread <to>, or to a repo's (or `all`'s) desk thread, at once with no tap; linked both ways, <text> wakes its orchestrator as from <from>"
     )]
     Handoff {
         from: String,
@@ -978,19 +974,6 @@ enum HostsCmd {
     )]
     Eject { name: String, root: Option<String> },
     #[command(
-        about = "Owner only: a cloud host's lanes' work to `wip/` first, then its recipe's `destroy`; logs `cloud-stop`"
-    )]
-    #[command(hide = true)]
-    Destroy { name: String },
-    #[command(
-        hide = true,
-        about = "Owner only: install shed, drover, git, gh, the lane providers there over SSH, open its logins, clone its fleets"
-    )]
-    Bootstrap { name: String },
-    #[command(about = "Owner only: a healthy cloud host saved as its recipe's snapshot; logs `cloud-snapshot`")]
-    #[command(hide = true)]
-    Snapshot { name: String },
-    #[command(
         about = "The token proxy's per-lane keys (#637): id, state, lane, host; `revoke <id>` (owner only) ends one at once"
     )]
     Keys {
@@ -1006,41 +989,6 @@ enum KeysCmd {
 }
 
 #[derive(Subcommand)]
-enum RunnersCmd {
-    #[command(about = "The GitHub runners, each VM's state and a health line (`9/9 online`)")]
-    Status,
-    #[command(about = "A fresh registration token and a runner-service restart on that VM")]
-    Revive { vm: String },
-    #[command(
-        about = "Create N VMs to the spec, within `max_vms` and the $/day cap (past it: RUNNERS_CAP, an owner ask)"
-    )]
-    Add {
-        #[arg(default_value_t = 1)]
-        n: u64,
-        #[arg(help = "The owner ask that approved going past the cap")]
-        #[arg(long, value_name = "ID")]
-        approved: Option<String>,
-    },
-    #[command(about = "Drain (no job running), deregister, then delete a VM; or deregister one idle runner by name")]
-    Remove {
-        target: String,
-        #[arg(help = "The owner ask that approved removing the last online VM (RUNNERS_LAST)")]
-        #[arg(long, value_name = "ID")]
-        approved: Option<String>,
-    },
-    #[command(
-        about = "Push a fresh registration token to every VM now (`check` repeats it every 30 min) and report the refresher"
-    )]
-    Tokens,
-    #[command(about = "Stop and deregister this host's self-hosted runners (`local_label`, `local_stop`)")]
-    RetireLocal {
-        #[arg(help = "The owner ask that approved it while VM runners are below expected (RUNNERS_LOW)")]
-        #[arg(long, value_name = "ID")]
-        approved: Option<String>,
-    },
-}
-
-#[derive(Subcommand)]
 enum LessonCmd {
     #[command(
         about = "The fleet's recent mistakes as plain text: rev FAIL findings, the owner's thread lines and `by: owner` events, reverts"
@@ -1050,6 +998,11 @@ enum LessonCmd {
         #[arg(help = "The window in days")]
         #[arg(long, default_value_t = 7)]
         days: u64,
+        #[arg(
+            long,
+            help = "Exit 1 when the window holds this many review FAILs or more (the lesson job's check)"
+        )]
+        min_fails: Option<usize>,
     },
     #[command(
         about = "Promote or retire the lesson checks in a rules file by their history (the lesson lane, in its worktree)"
@@ -1273,6 +1226,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             cmd: ConfigCmd::Show { md: true },
         } => crate::config::show_md(out)?,
         Cmd::Diagram { live, fleet } => crate::diagram::run(ctx, live, fleet.as_deref(), out)?,
+        Cmd::Flow(a) => crate::flow::shadow::cli(ctx, a, out)?,
         Cmd::CapCheck { config, base } => return crate::overlap::cap_check(r, &config, base.as_deref(), out),
         Cmd::Cap { fleet } if fleet == "log" => return crate::overlap::cap_log(r, std::path::Path::new("."), out),
         Cmd::ArchCheck {
@@ -1301,15 +1255,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Hook { role } => run_hook(ctx, r, out, stdin, role.as_deref() == Some("rev"))?,
         Cmd::Statusline => crate::usage::statusline(&crate::config::env("DROVER_LANE").unwrap_or_default(), out),
         Cmd::LaneEvent { kind, data } => lane_event(ctx, &kind, serde_json::from_str(&data)?),
-        Cmd::Heavy(a) => {
-            let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
-            let timeout = |t: &crate::heavy::Ticket, _: &str| {
-                let d = json!({"kind": t.kind, "cmd": t.cmd, "since": t.since});
-                lane_event(ctx, "heavy-timeout", d);
-                None
-            };
-            return a.run(r, &ctx.state.with_file_name("heavy"), lane, timeout);
-        }
+        Cmd::Heavy(a) => return heavy(ctx, r, a),
         Cmd::Hold { wait, cmd } => return crate::heavy::hold(ctx, r, wait, &cmd),
         Cmd::Status(Scope { fleet, json }) => {
             let fleet = fleet.map(|f| crate::rename::current(&ctx.state, &f));
@@ -1473,7 +1419,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             write!(out, "{}", boards.join("\n"))?;
         }
         Cmd::ArchiveEvents { rebuild } => crate::db::archive_events(&ctx.state, ctx.now, rebuild, out)?,
-        Cmd::Compact(o) => crate::compact::cli(ctx, r, out, o)?,
+        Cmd::Compact(o) => crate::reroot::cli(ctx, r, out, o)?,
         Cmd::Report { id } => crate::report::show(ctx, out, id.as_deref())?,
         Cmd::Asks {
             scope: Scope { fleet, json },
@@ -1687,8 +1633,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     thread,
                     ..
                 } => {
-                    let at = lane(&issue)?;
-                    let how = (n, kind.as_str(), thread.as_deref());
+                    let (at, how) = (lane(&issue)?, (n, kind.as_str(), thread.as_deref()));
                     crate::ask(ctx, &cfg, r, out, (&fleet, at), (&question, &options), how)?;
                     at.inspect(|n| kick(&fleet, *n, "ask"));
                 }
@@ -1733,6 +1678,29 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     basis,
                 } => crate::amend::amend(ctx, &cfg, r, out, (&fleet, issue), &basis, &text)?,
                 Cmd::Check => check::check(ctx, &cfg, r, out)?,
+                Cmd::Attach { repo, thread } => {
+                    let id = thread.unwrap_or_else(|| format!("term-{}", ctx.now));
+                    let a = crate::orchestrator::attach(ctx, &cfg, &repo, &id)?;
+                    let brief = crate::orchestrator::dir(ctx, &cfg, &id).join("brief.md");
+                    std::fs::create_dir_all(brief.parent().context("no chat folder")?)?;
+                    let s = |k: &str| {
+                        a.get(k)
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                            .to_string()
+                    };
+                    std::fs::write(&brief, s("brief"))?;
+                    writeln!(out, "brief: {}", brief.display())?;
+                    writeln!(out, "settings: {}", s("settings"))?;
+                    for (k, v) in a
+                        .get("env")
+                        .and_then(serde_json::Value::as_object)
+                        .into_iter()
+                        .flatten()
+                    {
+                        writeln!(out, "{k}={}", v.as_str().unwrap_or_default())?;
+                    }
+                }
                 Cmd::Thread { cmd } => match cmd {
                     ThreadCmd::New { .. } if crate::config::env("DROVER_THREAD").is_some_and(|t| !t.is_empty()) => {
                         gate::refused("USE_HANDOFF", "an orchestrator starts threads with `thread handoff`")?;
@@ -1827,12 +1795,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     Some(HostsCmd::Eject { name, root }) => {
                         return crate::roots::eject(ctx, &cfg, r, out, &name, root.as_deref());
                     }
-                    Some(HostsCmd::Destroy { name }) => {
-                        let wip = crate::cloud::stop(ctx, &cfg, r, &name, "destroy", "owner")?;
-                        writeln!(out, "{name}: destroyed; wip {}", wip.join(" "))?;
-                    }
-                    Some(HostsCmd::Bootstrap { name }) => crate::cloud::bootstrap(ctx, &cfg, r, &name, out)?,
-                    Some(HostsCmd::Snapshot { name }) => crate::cloud::snapshot(ctx, &cfg, r, &name)?,
                     Some(HostsCmd::Keys { cmd: None }) => crate::proxy::list(ctx, out)?,
                     Some(HostsCmd::Keys {
                         cmd: Some(KeysCmd::Revoke { id }),
@@ -1912,16 +1874,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                                 Some(crate::promise::Say::Pass(last).line())
                             }
                         };
-                        let (fleet, issue, since, next_cmd) = (s.fleet, s.issue, s.last_ts, why);
-                        let lane = s.lane.unwrap_or_default();
                         rows.push(crate::waiting::Waiting {
-                            fleet,
-                            issue,
-                            lane,
+                            fleet: s.fleet,
+                            issue: s.issue,
+                            lane: s.lane.unwrap_or_default(),
                             who,
                             what,
-                            since,
-                            next_cmd,
+                            since: s.last_ts,
+                            next_cmd: why,
                             promise: None,
                         });
                     }
@@ -1990,18 +1950,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         }
                     }
                 }
-                Cmd::Runners { cmd } => {
-                    use crate::runners::Verb;
-                    let (verb, id) = match cmd {
-                        RunnersCmd::Status => (Verb::Status, None),
-                        RunnersCmd::Revive { vm } => (Verb::Revive(vm), None),
-                        RunnersCmd::Add { n, approved } => (Verb::Add(n), approved),
-                        RunnersCmd::Remove { target, approved } => (Verb::Remove(target), approved),
-                        RunnersCmd::Tokens => (Verb::Tokens, None),
-                        RunnersCmd::RetireLocal { approved } => (Verb::RetireLocal, approved),
-                    };
-                    crate::runners::run(ctx, &cfg, r, out, verb, id.as_deref())?;
-                }
                 Cmd::Reclaim { apply } => check::reclaim(ctx, &cfg, r, out, stdin, apply)?,
                 Cmd::Stop { agent } => check::stop(ctx, &cfg, r, out, &agent)?,
                 Cmd::Close { agent, host } => check::close(ctx, &cfg, r, out, &agent, host.as_deref())?,
@@ -2050,7 +1998,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     let e = Event::new(ctx.now, &fleet, Some(issue), "fix-done", json!({"why": no_change}));
                     emit(&ctx.state, &cfg, e)?;
                     writeln!(out, "recorded {fleet}#{issue} fix-done: {no_change}")?;
-                    crate::lesson::done(ctx, &cfg, r, out, (&fleet, issue), &no_change)?;
+                    crate::triage::flag_orphans(ctx, &cfg, r, out, (&fleet, issue))?;
+                    crate::jobs::done(ctx, &cfg, r, out, (&fleet, issue), &no_change)?;
                 }
                 Cmd::Turn { state, why } => {
                     let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
@@ -2081,17 +2030,16 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     kick(f, n, "turn");
                 }
                 Cmd::Why { at, json } => crate::why::show(ctx, &cfg, r, out, &at, json)?,
-                Cmd::Lesson {
-                    cmd: Some(LessonCmd::Digest { fleet, days }),
-                    ..
-                } => write!(out, "{}", crate::lesson::digest(ctx, &cfg, r, &fleet, days)?)?,
-                Cmd::Lesson {
-                    cmd: Some(LessonCmd::Apply { fleet, rules }),
-                    ..
-                } => crate::lesson::apply(ctx, &cfg, r, out, &fleet, &crate::repo_path(&rules))?,
-                Cmd::Lesson { fleet, .. } => return crate::lesson::cli(ctx, &cfg, r, out, fleet),
+                Cmd::Lesson(LessonCmd::Digest { fleet, days, min_fails }) => {
+                    let (text, fails) = crate::lesson::digest(ctx, &cfg, r, &fleet, days)?;
+                    write!(out, "{text}")?;
+                    return Ok(i32::from(min_fails.is_some_and(|m| fails >= m)));
+                }
+                Cmd::Lesson(LessonCmd::Apply { fleet, rules }) => {
+                    crate::lesson::apply(ctx, &cfg, r, out, &fleet, &crate::repo_path(&rules))?;
+                }
                 Cmd::Triage(a) => return crate::triage::cli(ctx, &cfg, r, out, a),
-                Cmd::Deps(a) => return crate::deps::cli(ctx, &cfg, r, out, &a.fleet),
+                Cmd::Job(a) => return crate::jobs::cli(ctx, &cfg, r, out, &a),
                 Cmd::Soak(a) => return crate::soak::run(ctx, &cfg, r, out, &a.fleet),
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
@@ -2394,6 +2342,20 @@ fn coauthor_warn(ctx: &Ctx, r: &dyn Runner, dir: &str, rev: &str) {
     lane_event(ctx, "coauthor-trailer", json!({"line": trailer}));
 }
 
+fn heavy(ctx: &Ctx, r: &dyn Runner, a: crate::heavy::Args) -> Result<i32> {
+    let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
+    let timeout = |t: &crate::heavy::Ticket, _: &str| {
+        let d = json!({"kind": t.kind, "cmd": t.cmd, "since": t.since});
+        lane_event(ctx, "heavy-timeout", d);
+        None
+    };
+    let fell = |t: &crate::heavy::Ticket| {
+        let d = json!({"kind": t.kind, "cmd": t.cmd, "why": t.here});
+        lane_event(ctx, "heavy-here", d);
+    };
+    a.run(r, &ctx.state.with_file_name("heavy"), lane, fell, timeout)
+}
+
 fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
     if forward(&runner::argv(&["lane-event", kind, &d.to_string()])).is_some() {
         return;
@@ -2412,8 +2374,8 @@ fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
 }
 
 fn places(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> queue::Places {
-    let st = crate::events::fold(events);
-    let ls = crate::snapshot::lanes(ctx, cfg, (events, &st), &crate::link::sessions(ctx, cfg, r));
+    let sessions = crate::link::sessions(ctx, cfg, r);
+    let ls = crate::events::with_states(events, |st| crate::snapshot::lanes(ctx, cfg, (events, st), &sessions));
     let at = ls.into_iter().map(|l| (l.name, l.place)).collect();
     (at, crate::starts::held_now(ctx, cfg, r))
 }

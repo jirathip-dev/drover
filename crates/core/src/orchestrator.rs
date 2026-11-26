@@ -2,7 +2,7 @@ use crate::config::{expand, Config, Role};
 use crate::events::{self, emit, working, Event, Json};
 use crate::gate::refused;
 use crate::runner::Runner;
-use crate::session::Session;
+use crate::session::{Session, Status};
 use crate::spawn::Plan;
 use crate::{providers, term, Ctx};
 use anyhow::{bail, Context, Result};
@@ -54,7 +54,7 @@ pub fn find<'a>(events: &'a [Event], id: &str) -> Result<&'a Event> {
     }
 }
 
-fn link_of<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
+pub(crate) fn link_of<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
     let link = |e: &&Event| matches!(e.kind.as_str(), "orchestrator-attached" | "orchestrator-detached");
     events.iter().rfind(|e| link(e) && e.str("thread") == Some(id))
 }
@@ -84,14 +84,20 @@ fn hold(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str, mut extra: Value) -> Res
     Ok(t)
 }
 
+/// `POST /api/v1/orchestrator-attach` and `drover attach`: chat `id` on `fleet`, a repo, `all` or `none`; its brief, settings and env.
 pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
-    let f = cfg.fleet(fleet)?;
-    let (_, role) = defaults(cfg, fleet)?;
+    let any = matches!(fleet, "all" | "none");
+    let range = if any {
+        None
+    } else {
+        cfg.fleet(fleet)?.port_range.as_deref()
+    };
+    let (_, role) = defaults(cfg, if any { "all" } else { fleet })?;
     let t = hold(ctx, cfg, fleet, id, json!({}))?;
     let p = role.profile_or("orchestrator");
     let acp = providers::get(&role.harness).acp().unwrap_or(&role.harness);
     let why = crate::spawn::unguarded(ctx, (&p, "orchestrator", &role.harness), acp, false);
-    let port = crate::spawn::lane_port(f.port_range.as_deref(), &format!("{fleet}/orchestrator-{id}"), &[]);
+    let port = crate::spawn::lane_port(range, &format!("{fleet}/orchestrator-{id}"), &[]);
     let settings = providers::profiles_root(ctx).join(&p).join("settings.json");
     let env = json!({"DROVER_LANE": format!("{fleet}:-:orchestrator"), "DROVER_THREAD": id,
         "DROVER_PORT": port.to_string()});
@@ -100,6 +106,27 @@ pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
         json!({"ok": true, "code": "OK", "message": message, "brief": brief::thread(cfg, &t, fleet),
         "settings": settings, "env": env, "guarded": why.is_empty(), "why": why}),
     )
+}
+
+/// `POST /api/v1/thread/<id>/said`: an attached chat's owner line, logged once per `item` for `answer --typed`.
+pub fn said(ctx: &Ctx, cfg: &Config, id: &str, (item, from, text): (&str, &str, &str)) -> Result<String> {
+    if from != "owner" || item.is_empty() {
+        return refused(
+            "BAD_VALUE",
+            "said: an `id` and `from: owner`; the agent's lines stay in the client",
+        );
+    }
+    text_ok(text)?;
+    let events = working(&ctx.state)?;
+    let Some(t) = attached(&events, id) else {
+        return refused("NO_SUCH_THREAD", format!("{id} is no attached chat"));
+    };
+    if of(&events, id).any(|e| e.kind == "thread-msg" && e.str("item") == Some(item)) {
+        return Ok(format!("{item} is logged already"));
+    }
+    let d = json!({"thread": id, "from": "owner", "text": text, "item": item, "via": "client"});
+    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))?;
+    Ok(format!("{item} logged in {id}"))
 }
 
 /// `POST /api/v1/orchestrator-detach`: the link ends (`orchestrator-detached`); `NO_SUCH_THREAD` unless attached.
@@ -238,11 +265,11 @@ fn make(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, (harness, orch): Opt2,
             a.kind == "needs-decision"
                 && a.fleet == repo
                 && a.data.get("lane_ask").is_some()
-                && routed_to(&events, a).is_none()
+                && crate::thread::route::routed_to(&events, a).is_none()
                 && events::closed(&events, a).is_none()
         };
         for a in events.iter().filter(waiting) {
-            route_row(ctx, cfg, &id, a)?;
+            crate::thread::route::route_row(ctx, cfg, &id, a)?;
         }
     }
     Ok(id)
@@ -338,154 +365,97 @@ pub fn upload(ctx: &Ctx, cfg: &Config, id: &str, files: &[(String, Vec<u8>)]) ->
     Ok(out)
 }
 
-/// `thread handoff`: to thread `to` at once, linked; wakes its conductor as `from`. to a repo (or `all`), a choice card in `from` (an owner ask with `handoff`): the repo's threads or a new one; `pick` delivers on the tap.
+/// `thread handoff`: to thread `to`, or to repo `to`'s (or `all`'s) desk thread, at once, linked; wakes its orchestrator as `from`.
 pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]: [&str; 4]) -> Result<String> {
     text_ok(text)?;
     let events = working(&ctx.state)?;
-    let t = find(&events, from)?;
+    find(&events, from)?;
+    let fwd = forwards(&events, from);
+    let to = if is_id(to) {
+        role(cfg, &find(&events, to)?.fleet)?;
+        to.to_string()
+    } else {
+        role(cfg, to)?;
+        title_ok(title)?;
+        desk(ctx, cfg, &events, to)?
+    };
     if to == from {
         return refused("BAD_VALUE", "a thread hands off to another thread");
     }
-    let fwd = forwards(&events, from);
-    if is_id(to) {
-        role(cfg, &find(&events, to)?.fleet)?;
-        return send(ctx, cfg, r, (from, to, to), (title, text), (fwd, None));
-    }
-    role(cfg, to)?;
-    title_ok(title)?;
-    let open = |e: &&Event| e.kind == "thread-new" && e.fleet == to;
-    let mut rows: Vec<(u64, &str)> = (events.iter().filter(open))
-        .filter_map(|e| e.str("thread"))
-        .filter(|id| *id != from && !archived(&events, id))
-        .map(|id| (of(&events, id).map(|e| e.ts).max().unwrap_or(0), id))
-        .collect();
-    rows.sort_by_key(|r| std::cmp::Reverse(r.0));
-    let row = |(ts, id): &(u64, &str)| {
-        let last = items(&events, id).pop().unwrap_or_default();
-        let last = last
-            .at("text")
-            .as_str()
-            .or(last.at("question").as_str())
-            .unwrap_or_default();
-        let topic: String = last
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .chars()
-            .take(60)
-            .collect();
-        let age = events::age(ctx.now.saturating_sub(*ts));
-        let topic = if topic.is_empty() {
-            String::new()
-        } else {
-            format!(" — {topic}")
-        };
-        format!("{} · {id}{topic} ({age} ago)", self::title(&events, id))
-    };
-    let mut opts: Vec<String> = rows.iter().map(row).collect();
-    let mut targets: Vec<&str> = rows.iter().map(|r| r.1).collect();
-    opts.insert(opts.len().min(4), format!("new thread: {title}"));
-    targets.insert(targets.len().min(4), "new");
-    let question = format!("Hand off \"{title}\" to which {to} thread? Nothing is delivered until you tap one.");
-    let d = json!({"question": question, "options": opts, "recommend": null, "kind": "owner", "thread": from,
-        "handoff": {"repo": to, "title": title, "text": text, "targets": targets}, "forwards": fwd});
-    let ev = Event::new(ctx.now, &t.fleet, None, "needs-decision", d);
-    let ev = events::ask(&ctx.state, cfg, vec![ev], None)?.pop();
-    let q = ev.as_ref().and_then(|e| e.str("id")).unwrap_or_default();
-    Ok(format!(
-        "{q}: the owner picks the thread; nothing is delivered until then"
-    ))
+    send(ctx, cfg, r, (from, &to), (title, text), (fwd, None))
 }
 
-/// The owner's tap on a handoff card (`choice`: an option number or its text, or a thread id): delivered there (`new`: a new thread in the card's repo); the target, and whether this tap delivered it. once per card: a tap waits for one in flight and gets the delivered one's target; after a failed delivery it retries that one.
-pub fn land(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, choice: &str) -> Result<(String, bool)> {
-    let (h, from) = (&ask.val("handoff"), ask.str("thread").unwrap_or_default());
-    let id = ask.str("id").unwrap_or_default();
-    let dir = dir(ctx, cfg, from);
-    std::fs::create_dir_all(&dir)?;
-    let lock = std::fs::File::create(dir.join(format!(".handoff-{id}.lock")))?;
-    lock.lock()?;
-    let events = working(&ctx.state)?;
-    let mine = |e: &&Event| e.kind == "thread-handoff" && e.str("thread") == Some(from) && e.str("ask") == Some(id);
-    let failed = |e: &Event| {
-        events
-            .iter()
-            .any(|f| f.kind == "ask-failed" && f.str("id") == Some(id) && f.seq > e.seq)
-    };
-    let (to, sent) = match events.iter().rfind(mine) {
-        Some(e) if !failed(e) => return Ok((e.str("to").unwrap_or_default().into(), false)),
-        Some(e) => {
-            let to = e.str("to").unwrap_or_default();
-            let msg = |m: &&Event| m.kind == "thread-msg" && m.seq > e.seq && m.str("from") == Some(from);
-            let text = (of(&events, to).find(msg))
-                .and_then(|m| m.str("text"))
-                .unwrap_or_default();
-            let line = format!("[{to}] {from}: {text}");
-            (
-                to.to_string(),
-                deliver(ctx, cfg, r, find(&events, to)?, &line).map(|_| to.into()),
-            )
-        }
-        None => {
-            let opts = ask.val("options").as_array().cloned().unwrap_or_default();
-            let n = choice
-                .parse::<usize>()
-                .ok()
-                .or_else(|| opts.iter().position(|o| o == choice).map(|i| i + 1));
-            let to = match n.and_then(|n| h["targets"].get(n.checked_sub(1)?)?.as_str()) {
-                Some(to) => to,
-                None if is_id(choice) && choice != from => find(&events, choice).map(|_| choice)?,
-                None => return refused("BAD_VALUE", "tap a row, or name a thread id"),
-            };
-            let s = |k: &str| h[k].as_str().unwrap_or_default();
-            let send = || {
-                send(
-                    ctx,
-                    cfg,
-                    r,
-                    (from, to, s("repo")),
-                    (s("title"), s("text")),
-                    (None, Some(id)),
-                )
-            };
-            (to.to_string(), role(cfg, s("repo")).and_then(|_| send()))
-        }
-    };
-    if let Err(e) = &sent {
-        let d = json!({"id": id, "ask_seq": ask.seq, "to": to, "reason": format!("{e:#}")});
-        emit(&ctx.state, cfg, Event::new(ctx.now, &ask.fleet, None, "ask-failed", d))?;
-        let text = format!("✗ {id} not delivered to {to}: {e:#}");
-        log(ctx, cfg, find(&events, from)?, "system", (&text, &[]))?;
+fn desk(ctx: &Ctx, cfg: &Config, events: &[Event], repo: &str) -> Result<String> {
+    if let Some(d) = crate::thread::Registry::read(events).desk(repo) {
+        return Ok(d.into());
     }
-    sent.map(|to| (to, true))
+    let id = new(ctx, cfg, repo, "Desk", (None, None))?;
+    let d = json!({"thread": id, "profile": repo, "desk": true});
+    emit(&ctx.state, cfg, Event::new(ctx.now, repo, None, "thread-facts", d))?;
+    Ok(id)
+}
+
+/// The handoff that moved handoff `seq` on, if one did.
+pub fn moved(events: &[Event], seq: u64) -> Option<&Event> {
+    events
+        .iter()
+        .find(|e| e.kind == "thread-handoff" && e.val("moves").as_u64() == Some(seq))
+}
+
+/// [move] on handoff `seq`: delivered again to thread `to` from its sender; its first copy is marked forwarded and that thread's orchestrator told to drop it.
+pub fn move_handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, seq: u64, to: &str) -> Result<String> {
+    let events = working(&ctx.state)?;
+    let Some(h) = events.iter().find(|e| e.seq == seq && e.kind == "thread-handoff") else {
+        return refused("NO_SUCH_HANDOFF", format!("no handoff {seq}"));
+    };
+    let s = |k: &str| h.str(k).unwrap_or_default();
+    if let Some(m) = moved(&events, seq) {
+        let at = m.str("to").unwrap_or_default();
+        if at == to {
+            return Ok(at.into());
+        }
+        return refused(
+            "BAD_VALUE",
+            format!("handoff {seq} moved to {at} already; move that one"),
+        );
+    }
+    if to == s("to") || to == s("from") {
+        return refused(
+            "BAD_VALUE",
+            format!("handoff {seq} is from {} and in {}", s("from"), s("to")),
+        );
+    }
+    role(cfg, &find(&events, to)?.fleet)?;
+    let first = |m: &&Event| m.kind == "thread-msg" && m.seq > seq && m.str("from") == h.str("from");
+    let copy = of(&events, s("to")).find(first).map(|m| m.seq);
+    let sent = send(ctx, cfg, r, (s("from"), to), (s("title"), s("text")), (copy, Some(seq)))?;
+    let line = format!("handoff \"{}\" moved to {to}: don't act on it here", s("title"));
+    crate::thread::route::tell(ctx, cfg, r, s("to"), &line);
+    Ok(sent)
 }
 
 fn send(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
-    (from, to, repo): (&str, &str, &str),
+    (from, to): (&str, &str),
     (title, text): (&str, &str),
-    (fwd, ask): (Option<u64>, Option<&str>),
+    (fwd, moves): (Option<u64>, Option<u64>),
 ) -> Result<String> {
-    let to = if to == "new" {
-        new(ctx, cfg, repo, title, (None, None))?
-    } else {
-        to.into()
-    };
-    let target = format!("{} · {to}", self::title(&working(&ctx.state)?, &to));
+    let events = working(&ctx.state)?;
+    let target = format!("{} · {to}", self::title(&events, to));
     let d = json!({"thread": from, "from": from, "to": to, "title": title, "text": text, "target": target,
-        "forwards": fwd, "ask": ask});
-    let t = find(&working(&ctx.state)?, from)?.fleet.clone();
+        "forwards": fwd, "moves": moves});
+    let t = find(&events, from)?.fleet.clone();
     emit(&ctx.state, cfg, Event::new(ctx.now, &t, None, "thread-handoff", d))?;
     say(
         ctx,
         cfg,
         r,
-        (&to, &format!("handoff to {target}: {text}"), &[]),
+        (to, &format!("handoff to {target}: {text}"), &[]),
         (from, false),
     )?;
-    Ok(to)
+    Ok(to.into())
 }
 
 fn forwards(events: &[Event], from: &str) -> Option<u64> {
@@ -520,96 +490,13 @@ pub fn handoff_text(e: &Event) -> String {
     e.str("target").map_or(title.into(), |t| format!("{title} → {t}"))
 }
 
-/// The thread a lane's ask on `fleet` goes to: `[fleet.<n>] ask_thread`, else the repo's most recently active one (neither archived); none without a conductor role. an attached cooee thread is one of them.
-pub fn route<'a>(cfg: &Config, events: &'a [Event], fleet: &str) -> Option<&'a str> {
-    let own = role(cfg, fleet).is_ok();
-    let chat = |e: &Event| e.str("via") == Some("profile");
-    let repo = |e: &&'a Event| {
-        e.fleet == fleet && (own && e.kind == "thread-new" || e.kind == "orchestrator-attached" && !chat(e))
-    };
-    let ids = events.iter().filter(repo).filter_map(|e| e.str("thread"));
-    let live = |id: &&str| match link_of(events, id) {
-        Some(_) => attached(events, id).is_some_and(|e| e.fleet == fleet),
-        None => !archived(events, id),
-    };
-    let ids: Vec<&str> = ids.filter(live).collect();
-    let pin = cfg.fleet.get(fleet).and_then(|f| f.ask_thread.as_deref());
-    let newest = || ids.iter().max_by_key(|id| of(events, id).map(|e| e.seq).max()).copied();
-    ids.iter().find(|id| Some(**id) == pin).copied().or_else(newest)
-}
-
-/// Lane ask `a` typed into thread `id`'s orchestrator (started or resumed) as a system line the board hides.
-pub fn lane_ask(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, a: &Event) -> Result<String> {
-    let t = find(&working(&ctx.state)?, id)?.clone();
-    let text = route_row(ctx, cfg, id, a)?;
-    deliver(ctx, cfg, r, &t, &format!("[{id}] system: {text}"))
-}
-
-fn route_row(ctx: &Ctx, cfg: &Config, id: &str, a: &Event) -> Result<String> {
-    let s = |k| a.str(k).unwrap_or_default();
-    let rec = a.val("recommend").as_u64();
-    let opts = a.val("options").as_array().into_iter().flatten().zip(1..);
-    let opts: String = opts
-        .map(|(o, n)| {
-            let r = if rec == Some(n) { " (recommended)" } else { "" };
-            format!(" [{n}] {}{r}", o.as_str().unwrap_or_default())
-        })
-        .collect();
-    let at = a.issue.map_or("the fleet".into(), |n| format!("#{n}"));
-    let text = format!(
-        "lane ask {} on {at} from {} ({}): {}{opts}. Answer it only if the issue spec or a past decision settles it: \
-         `drover answer {} {} <n> --basis \"<verbatim spec quote | q<id>>\"`; else run it without --basis and it \
-         goes to the owner.",
-        s("id"),
-        a.str("agent").unwrap_or("a lane"),
-        s("kind"),
-        s("question"),
-        a.fleet,
-        s("id")
-    );
-    let d = json!({"thread": id, "from": "system", "text": text, "lane_ask": a.str("id")});
-    emit(&ctx.state, cfg, Event::new(ctx.now, &a.fleet, None, "thread-msg", d))?;
-    Ok(text)
-}
-
-/// The thread lane ask `a` was routed to: when asked, else its routing row in a thread opened after.
-pub fn routed_to<'a>(events: &'a [Event], a: &'a Event) -> Option<&'a str> {
-    let row = |e: &&Event| e.kind == "thread-msg" && e.fleet == a.fleet && e.str("lane_ask") == a.str("id");
-    a.str("routed")
-        .or_else(|| events.iter().find(row).and_then(|e| e.str("thread")))
-}
-
-/// Lane ask `a` put to the owner as a choice row in thread `id` (once), `rec` (else its own) recommended; it pushes as an ask.
-pub fn to_owner(ctx: &Ctx, cfg: &Config, id: &str, a: &Event, rec: Option<u64>, why: &str) -> Result<()> {
-    let events = working(&ctx.state)?;
-    if of(&events, id).any(|e| e.kind == "ask-owner" && e.str("id") == a.str("id")) {
-        return Ok(());
-    }
-    let rec = rec.or_else(|| a.val("recommend").as_u64());
-    let d = json!({"thread": id, "id": a.str("id"), "question": a.str("question"), "options": a.val("options"),
-        "recommend": rec, "agent": a.str("agent"), "why": why});
-    emit(&ctx.state, cfg, Event::new(ctx.now, &a.fleet, a.issue, "ask-owner", d))
-}
-
 /// An `ask-owner` row's lane ask.
 pub fn lane_of<'a>(events: &'a [Event], e: &Event) -> Option<&'a Event> {
     events::ask_event(events, "needs-decision", &e.fleet, e.str("id").unwrap_or_default())
 }
 
-/// A one-line row from thread `id` into each thread that handed off to it (an issue filed, an ask answered).
-pub fn flow(ctx: &Ctx, cfg: &Config, id: &str, text: &str) -> Result<()> {
-    let events = working(&ctx.state)?;
-    let to_id = |e: &&Event| e.kind == "thread-handoff" && e.str("to") == Some(id);
-    let srcs: std::collections::BTreeSet<_> = events.iter().filter(to_id).filter_map(|e| e.str("from")).collect();
-    for s in srcs {
-        let d = json!({"thread": s, "from": "system", "via": id, "text": text});
-        let e = Event::new(ctx.now, &find(&events, s)?.fleet, None, "thread-msg", d);
-        emit(&ctx.state, cfg, e)?;
-    }
-    Ok(())
-}
-
-fn is_id(s: &str) -> bool {
+/// `s` is a drover thread id (`t<n>`).
+pub fn is_id(s: &str) -> bool {
     s.len() > 1 && s.starts_with('t') && s[1..].bytes().all(|b| b.is_ascii_digit())
 }
 
@@ -630,7 +517,7 @@ pub fn text_ok(text: &str) -> Result<()> {
     Ok(())
 }
 
-fn log(ctx: &Ctx, cfg: &Config, t: &Event, from: &str, (text, files): (&str, &[Value])) -> Result<()> {
+pub(crate) fn log(ctx: &Ctx, cfg: &Config, t: &Event, from: &str, (text, files): (&str, &[Value])) -> Result<()> {
     let mut d = json!({"thread": t.str("thread"), "from": from, "text": text});
     if !files.is_empty() {
         d.put("files", json!(files));
@@ -710,16 +597,6 @@ pub fn say(
     deliver(ctx, cfg, r, &t, &line)
 }
 
-/// A card's settle line into thread `id` as `system`: typed into a drover thread's orchestrator, logged for a cooee chat.
-pub fn tell(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, line: &str) {
-    let chat = working(&ctx.state).ok().and_then(|e| attached(&e, id).cloned());
-    match chat {
-        Some(t) => log(ctx, cfg, &t, "system", (line, &[])),
-        None => say(ctx, cfg, r, (id, line, &[]), ("system", false)).map(drop),
-    }
-    .ok();
-}
-
 thread_local! {
     static LATER: std::cell::RefCell<Option<Vec<(Event, String)>>> = const { std::cell::RefCell::new(None) };
 }
@@ -754,7 +631,11 @@ pub fn post(
 /// `say`'s second half: type `line` into thread `t`'s orchestrator, starting or resuming it first.
 pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Result<String> {
     let id = t.str("thread").unwrap_or_default();
-    let cur = thread_role(cfg, &working(&ctx.state)?, t)?.1;
+    let events = working(&ctx.state)?;
+    if attached(&events, id).is_some() {
+        return Ok(id.into());
+    }
+    let cur = thread_role(cfg, &events, t)?.1;
     let ms = harness_models(cfg, &cur.harness);
     if let Some(m) = cur.model.filter(|m| !ms.is_empty() && !ms.contains(&m.as_str())) {
         let text = format!("model {m} is not one of {ms:?}");
@@ -786,10 +667,32 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
     let id = t.str("thread").unwrap_or_default();
     let events = working(&ctx.state)?;
     let last = of(&events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
-    let agents = crate::session::live_on(r)?;
-    let awake = last
-        .filter(|s| s.kind == "orchestrator-start" && agents.iter().any(|a| Some(a.name.as_str()) == s.str("agent")));
-    let picked = awake.is_some_and(|s| of(&events, id).any(|e| e.kind == "thread-model" && e.seq > s.seq));
+    let own = format!("orchestrator-{id}");
+    let agent = last.and_then(|s| s.str("agent")).unwrap_or(&own);
+    let found = crate::session::get(r, agent)?;
+    if let Some(ended) = found.as_ref().filter(|a| a.status().is_none_or(|s| s == Status::Done)) {
+        let was = ended.status().map_or("exited", Status::word);
+        crate::session::transcript::archive(r, ctx, agent).ok();
+        let w = r.shed().context(crate::config::NO_RUNTIME)?.wire;
+        let target = json!(shed_proto::Target { name: agent.into() });
+        crate::shed::call(r, &w, shed_proto::Method::Kill, target.clone()).ok();
+        crate::shed::call(r, &w, shed_proto::Method::Rm, target)?;
+        return start(ctx, cfg, r, (t, Some(was)), &events, line);
+    }
+    let agents: Vec<Session> = found.into_iter().collect();
+    let begun = of(&events, id).rfind(|e| e.kind == "orchestrator-start");
+    let picked = begun.is_some_and(|s| of(&events, id).any(|e| e.kind == "thread-model" && e.seq > s.seq));
+    if last.is_some_and(|l| l.kind != "orchestrator-start") && !agents.is_empty() && !picked {
+        let mut was = begun.map(|s| s.data.clone()).unwrap_or_default();
+        was.remove("replaced");
+        let mut d = Value::Object(was);
+        d.put("thread", json!(id))
+            .put("agent", json!(agent))
+            .put("resumed", json!(true));
+        started(ctx, cfg, t, d)?;
+        return once(ctx, cfg, r, t, line);
+    }
+    let awake = last.filter(|s| s.kind == "orchestrator-start" && !agents.is_empty());
     let stuck = awake.and(hung(ctx, cfg, &events, &agents, id));
     let Some(s) = awake.filter(|_| !picked && stuck.is_none()) else {
         match (awake, stuck) {
@@ -803,13 +706,14 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
                     Event::new(ctx.now, &t.fleet, None, "orchestrator-sleep", d),
                 )?;
             }
+            (None, _) if !agents.is_empty() => term::close(ctx, r, agent).map(drop)?,
             _ => {}
         }
-        return start(ctx, cfg, r, t, &working(&ctx.state)?, line);
+        return start(ctx, cfg, r, (t, None), &working(&ctx.state)?, line);
     };
     let agent = s.str("agent").unwrap_or_default();
     crate::shed::cli(r, &["send", agent, line])?;
-    held(ctx, cfg, r, t, &events, agents.iter().find(|a| a.name == agent))?;
+    held(ctx, cfg, r, t, &events, agents.first())?;
     Ok(agent.into())
 }
 
@@ -1057,7 +961,14 @@ fn save(ctx: &Ctx, r: &dyn Runner, new: &str) -> Result<Config> {
     Ok(new_cfg)
 }
 
-fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], line: &str) -> Result<String> {
+fn start(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    (t, replaced): (&Event, Option<&str>),
+    events: &[Event],
+    line: &str,
+) -> Result<String> {
     let id = t.str("thread").unwrap_or_default();
     let (fleet, base) = thread_role(cfg, events, t)?;
     let f = cfg.fleet(fleet)?;
@@ -1098,11 +1009,17 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         head,
         lane_key: None,
         sandbox: None,
+        account: Some(cfg.account(fleet, "orchestrator")),
     };
     p.env.insert("DROVER_THREAD".into(), id.into());
     p.env.insert("DROVER_ORCHESTRATOR".into(), id_of(t).into());
     let shed = cfg.shed_for(fleet).context(crate::config::NO_RUNTIME)?;
     let wire = r.shed().map_or(shed.wire.clone(), |w| w.wire);
+    let all = crate::shed::accounts(r, &wire).ok();
+    let hold = (p.account.as_ref()).and_then(|a| crate::accounts::of(all.as_deref()?, &p.harness, a));
+    if let Some(h) = hold {
+        return on_hold(ctx, cfg, r, t, events, &h);
+    }
     let aid = shed.acp.clone().context(crate::config::NO_RUNTIME)?;
     let acp = match crate::spawn::acp_cmd(ctx, r, &p, &aid, None) {
         Ok(cmd) => cmd,
@@ -1139,9 +1056,12 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     b.start(ctx, r, &agent, &labels, &dir.to_string_lossy(), &acp)?;
     let kick = format!("The thread so far is in {}, the last message new.", thread.display());
     let kicked = b.kick_acp(r, &agent, &format!("{}\n\n{kick}\n\n{line}", text.trim_end()))?;
-    let d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed-acp", "harness": p.harness,
+    let mut d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed-acp", "harness": p.harness,
         "model": p.model, "effort": p.effort, "resumed": false,
-        "confirmed": kicked});
+        "confirmed": kicked, "account": p.account.as_ref().map(crate::config::Account::word)});
+    if let Some(was) = replaced {
+        d.put("replaced", json!(was));
+    }
     started(ctx, cfg, t, d)
 }
 
@@ -1342,6 +1262,7 @@ pub fn ls(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: Option<&str>, as_
 
 /// `check`: each awake conductor whose thread has been quiet `IDLE` and that is not working is closed (`conductor-sleep`); the next message resumes it.
 pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], agents: &[Session]) -> Result<()> {
+    let all = std::cell::OnceCell::new();
     for t in events.iter().filter(|e| e.kind == "thread-new") {
         let id = t.str("thread").unwrap_or_default();
         let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
@@ -1350,9 +1271,18 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
         };
         let heard = of(events, id).filter(|e| e.data.get("noreply").is_none());
         let quiet = heard.map(|e| e.ts).max().unwrap_or(0) + cfg.limits.orchestrator_idle_minutes * 60 <= ctx.now;
-        let a = agents.iter().find(|a| Some(a.name.as_str()) == s.str("agent"));
-        if a.is_some_and(Session::signed_out) {
-            signed_out(ctx, cfg, r, t, s)?;
+        let name = s.str("agent").unwrap_or_default();
+        let listed = agents.iter().find(|a| a.name == name).cloned();
+        let Ok(a) = listed.map_or_else(|| crate::session::get(r, name), |a| Ok(Some(a))) else {
+            continue;
+        };
+        let a = a.as_ref();
+        let out = account(s).filter(|_| a.is_some()).and_then(|(h, acct)| {
+            let all = all.get_or_init(|| crate::accounts::ls(cfg, r));
+            crate::accounts::of(all.as_deref()?, &h, &acct).filter(|h| h.why == crate::accounts::Why::SignedOut)
+        });
+        if let Some(h) = out {
+            signed_out(ctx, cfg, r, t, s, &h)?;
             continue;
         }
         if a.is_some() && pending(events, id).is_some() {
@@ -1375,11 +1305,33 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
     Ok(())
 }
 
-fn signed_out(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Result<()> {
-    let (id, hn) = (
-        t.str("thread").unwrap_or_default(),
-        s.str("harness").unwrap_or_default(),
-    );
+/// Shed moved thread `id`'s orchestrator to account `now` (`why` `limit` or `owner`): one row, `<was> hit its limit; now on <now>` or `switched to <now>`; none at its `start`.
+pub fn account_moved(
+    ctx: &Ctx,
+    cfg: &Config,
+    (fleet, id): (&str, &str),
+    (now, was): (&str, Option<&str>),
+    why: &str,
+) -> Result<()> {
+    let text = match (why, was) {
+        ("limit", Some(was)) => format!("{was} hit its limit; now on {now}"),
+        ("limit" | "owner", _) => format!("switched to {now}"),
+        _ => return Ok(()),
+    };
+    let d = json!({"thread": id, "from": "system", "text": text, "account": now});
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "thread-msg", d))
+}
+
+fn account(s: &Event) -> Option<(String, crate::config::Account)> {
+    let a = match s.str("account")? {
+        "auto" => crate::config::Account::Auto,
+        n => crate::config::Account::Named(n.into()),
+    };
+    Some((s.str("harness")?.into(), a))
+}
+
+fn signed_out(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event, h: &crate::accounts::Hold) -> Result<()> {
+    let id = t.str("thread").unwrap_or_default();
     close(ctx, r, s)?;
     let d = json!({"thread": id, "agent": s.str("agent"), "why": "signed out"});
     emit(
@@ -1387,7 +1339,7 @@ fn signed_out(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> 
         cfg,
         Event::new(ctx.now, &t.fleet, None, "orchestrator-sleep", d),
     )?;
-    let d = json!({"thread": id, "from": "system", "text": format!("{hn} is signed out: sign in"), "signin": hn});
+    let d = json!({"thread": id, "from": "system", "text": h.line(r), "signin": h.signin()});
     emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))
 }
 
@@ -1410,21 +1362,59 @@ fn pending<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
 }
 
 fn held(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], a: Option<&Session>) -> Result<()> {
-    let id = t.str("thread").unwrap_or_default();
     let Some(a) = a.filter(|a| a.status() == Some(crate::session::Status::Limited)) else {
         return Ok(());
     };
+    let at = crate::limit::reset_at(r, a.note.as_deref().unwrap_or_default(), ctx.now);
+    let until = at.map_or("its reset".into(), |at| crate::usage::date(r, at, "+%a %H:%M"));
+    let text = format!("orchestrator out of usage until {until}; your message is kept");
+    hold_row(ctx, cfg, t, events, (&text, at))
+}
+
+fn hold_row(ctx: &Ctx, cfg: &Config, t: &Event, events: &[Event], (text, at): (&str, Option<u64>)) -> Result<()> {
+    let id = t.str("thread").unwrap_or_default();
     let Some(m) = of(events, id)
         .rfind(|e| human(e))
         .filter(|m| !since(events, id, m.seq, "held"))
     else {
         return Ok(());
     };
-    let at = crate::limit::reset_at(r, a.note.as_deref().unwrap_or_default(), ctx.now);
-    let until = at.map_or("its reset".into(), |at| crate::usage::date(r, at, "+%a %H:%M"));
-    let text = format!("orchestrator out of usage until {until}; your message is kept");
     let d = json!({"thread": id, "from": "system", "text": text, "held": m.seq, "at": at});
     emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))
+}
+
+fn on_hold(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    t: &Event,
+    events: &[Event],
+    h: &crate::accounts::Hold,
+) -> Result<String> {
+    use crate::accounts::Why;
+    let line = h.line(r);
+    match &h.why {
+        Why::Setup(_) => {
+            let why = format!("{line}; the orchestrator does not start");
+            log(
+                ctx,
+                cfg,
+                t,
+                "system",
+                (&format!("the orchestrator does not start: ACP_UNGUARDED: {why}"), &[]),
+            )?;
+            return refused("ACP_UNGUARDED", why);
+        }
+        Why::Limited(at) => {
+            let text = format!("{line}; your message is kept. New threads will fail too until then.");
+            hold_row(ctx, cfg, t, events, (&text, *at))?;
+        }
+        Why::SignedOut | Why::Missing => {
+            let d = json!({"thread": t.str("thread"), "from": "system", "text": line, "signin": h.signin()});
+            emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))?;
+        }
+    }
+    refused("LOGIN_NEEDED", format!("{line}; the orchestrator waits"))
 }
 
 /// `check`: per thread, its rate-limited orchestrator's `out of usage` row, one `continue` at that row's reset time, and a `no reply yet` row for an owner message unanswered `orchestrator_reply_minutes`.
