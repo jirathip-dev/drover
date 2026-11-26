@@ -96,7 +96,7 @@ fn a_typed_answer_closes_the_ask_only_with_the_owners_exact_line_after_it_in_its
         (d.str("id"), d.str("by"), d.str("choice")),
         (Some("q1"), Some("owner (typed)"), Some("Ok as recommended then"))
     );
-    assert_eq!(open(&c), [] as [std::string::String; 0]);
+    assert_eq!(open(&c), <[std::string::String; 0]>::default());
     assert!(row(&c, "q1").ends_with("[answered]"), "{}", row(&c, "q1"));
 }
 
@@ -156,7 +156,7 @@ fn a_thread_ask_nobody_waits_on_expires_after_24_h_and_its_choose_goes() {
     c.now = NOW;
     check(&c, &r);
     assert_eq!(kinds(&c, "ask-expired").len(), 1);
-    assert_eq!(open(&c), [] as [std::string::String; 0]);
+    assert_eq!(open(&c), <[std::string::String; 0]>::default());
     assert_eq!(choosing(&c), 0);
     assert!(row(&c, "q1").ends_with("[expired]"), "{}", row(&c, "q1"));
 }
@@ -209,7 +209,7 @@ fn an_ask_whose_lane_was_killed_expires_after_24_h() {
     c.now = NOW;
     check(&c, &Fake::default());
     assert_eq!(kinds(&c, "ask-expired").len(), 1);
-    assert_eq!(open(&c), [] as [std::string::String; 0]);
+    assert_eq!(open(&c), <[std::string::String; 0]>::default());
 }
 
 #[test]

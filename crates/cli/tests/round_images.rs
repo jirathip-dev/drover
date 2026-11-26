@@ -15,7 +15,8 @@ fn serve(c: &'static drover::Ctx) -> (&'static Server<'static>, String) {
         for mut st in l.incoming().flatten() {
             let mut buf = [0u8; 8192];
             let n = std::io::Read::read(&mut st, &mut buf).unwrap_or(0);
-            let _ = st.write_all(&s.respond(&String::from_utf8_lossy(&buf[..n]), c.now));
+            st.write_all(&s.respond(&String::from_utf8_lossy(&buf[..n]), c.now))
+                .ok();
         }
     });
     (s, addr)
@@ -47,8 +48,8 @@ impl Sw {
 }
 impl Drop for Sw {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        self.0.kill().ok();
+        self.0.wait().ok();
     }
 }
 

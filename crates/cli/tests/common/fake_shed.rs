@@ -53,7 +53,7 @@ pub struct FakeShed {
 
 impl Drop for FakeShed {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.sock);
+        std::fs::remove_file(&self.sock).ok();
     }
 }
 
@@ -70,7 +70,7 @@ impl FakeShed {
             std::process::id(),
             N.fetch_add(1, Ordering::SeqCst)
         ));
-        let _ = std::fs::remove_file(&sock);
+        std::fs::remove_file(&sock).ok();
         let l = UnixListener::bind(&sock).unwrap();
         let state = Arc::new(Mutex::new(State {
             events,
@@ -148,7 +148,7 @@ impl FakeShed {
     /// Inject `f` into every connection from now on.
     pub fn fault(&self, f: Fault) {
         if f == Fault::Gone {
-            let _ = std::fs::remove_file(&self.sock);
+            std::fs::remove_file(&self.sock).ok();
         }
         self.lock().fault = f;
     }

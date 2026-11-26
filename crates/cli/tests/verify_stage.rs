@@ -456,7 +456,7 @@ fn parity_70_shots_are_only_a_verify_verdicts_files_inside_its_lane_folder() {
     ev(&c, 3, "verdict", old);
     assert_eq!(
         drover::verify::served(&read(&c.state).unwrap(), ("sendmeter", 12), None),
-        [] as [(std::string::String, std::path::PathBuf); 0]
+        <[(std::string::String, std::path::PathBuf); 0]>::default()
     );
     assert!(get("/shot/sendmeter/12/0").starts_with("HTTP/1.1 404"));
 }

@@ -13,7 +13,7 @@ fn setup(name: &str, config: &str, verdicts: &[(&str, &str)]) -> (std::path::Pat
     append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", spawn)).unwrap();
     for (i, (v, sha)) in verdicts.iter().enumerate() {
         let e = Event::new(
-            20 + i as u64,
+            20 + u64::try_from(i).unwrap(),
             "sendmeter",
             Some(12),
             "verdict",

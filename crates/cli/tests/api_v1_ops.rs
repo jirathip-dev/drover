@@ -49,7 +49,7 @@ fn send_prompts_a_lane_with_the_boards_refusals_and_rate_limit() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let msg = json!({"agent": IMPL, "text": "run the tests again"});
     assert_eq!(post(&s, "send", &msg.clone(), "").1, "UNPAIRED");
-    assert_eq!(r.1.sent(IMPL), [] as [std::string::String; 0]);
+    assert_eq!(r.1.sent(IMPL), <[std::string::String; 0]>::default());
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     assert_eq!(
         post(&s, "send", &msg.clone(), &ck),

@@ -41,7 +41,7 @@ fn fixture(c: &drover::Ctx) {
     let body = "a finding, its proof and the file it names\n".repeat(30);
     let mut log = vec![];
     for i in 0..30_000u64 {
-        let (f, n) = (["sendmeter", "berth"][(i % 2) as usize], 1 + i % 300);
+        let (f, n) = (["sendmeter", "berth"][usize::try_from(i % 2).unwrap()], 1 + i % 300);
         let agent = format!("{f}-impl-{n}");
         let line = match i % 10 {
             0 => ev(
@@ -97,8 +97,8 @@ fn fixture(c: &drover::Ctx) {
 struct Served(Child);
 impl Drop for Served {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        self.0.kill().ok();
+        self.0.wait().ok();
     }
 }
 
@@ -238,10 +238,11 @@ fn soak(name: &str, mode: &str, config: &str) -> Result<Vec<u64>, String> {
             "- soak ({mode}, {secs} s): RSS {} → {end} MB (budget {BUDGET_MB})\n",
             samples[0]
         );
-        let _ = std::fs::OpenOptions::new()
+        std::fs::OpenOptions::new()
             .append(true)
             .open(p)
-            .map(|mut f| f.write_all(line.as_bytes()));
+            .map(|mut f| f.write_all(line.as_bytes()))
+            .ok();
     }
     if end > mid + (mid / 5).max(16) {
         return Err(format!("RSS grew from {mid} MB to {end} MB: {samples:?}"));

@@ -1,0 +1,12 @@
+about = "crates/server builds no HTML but the page shell (`page`, `pairb`, the export's copy) and the lifeboat (#269, #725); the board draws the rest"
+fix = "draw it in web/ from API v1"
+budget_secs = 10
+paths = ["crates/server/src/**"]
+run = '''
+set -eu
+tags='p|div|span|b|i|a|button|form|input|details|summary|section|pre|code|h[1-6]|svg|use|small|figure|figcaption|img|ul|li|textarea|select|option|label|br|script|style|link|meta|html|head|body|header|main|nav|template'
+bad=$(find crates/server/src -name '*.rs' ! -name lifeboat.rs | sort | xargs awk -v t="$tags" '
+  /^[[:space:]]*(pub(\([a-z]+\))? )?fn [a-z_0-9]+/ { match($0, /fn [a-z_0-9]+/); f = substr($0, RSTART + 3, RLENGTH - 3) }
+  $0 ~ ("\"[^\"]*(</(" t ")>|<(" t ") [a-z-]+=)") && f !~ /^(page|pairb|export)$/ { print FILENAME ":" FNR ": " $0 }')
+if [ -n "$bad" ]; then echo "HTML built outside the page shell (draw it in web/ from API v1): $bad"; exit 1; fi
+'''

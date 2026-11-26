@@ -571,3 +571,17 @@ fn push_is_the_owners_never_a_lanes_or_an_orchestrators() {
     }
     assert!(!bash(&d, "open", "drover hygiene check --base origin/staging").contains("REFUSED"));
 }
+
+#[test]
+fn the_guard_matches_private_names_as_the_shared_set_says() {
+    let set = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/private-names");
+    let read = |f: &str| std::fs::read_to_string(set.join(f)).unwrap();
+    let check = drover::hygiene::Check {
+        private: read("names").lines().map(String::from).collect(),
+        ..Default::default()
+    };
+    let hits: Vec<String> = (read("lines.md").lines().zip(1..))
+        .filter_map(|(l, n)| Some(format!("{} at lines.md:{n}", check.find(l)?)))
+        .collect();
+    assert_eq!(hits.join("\n"), read("expect").trim());
+}
