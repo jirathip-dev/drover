@@ -1,6 +1,6 @@
-mod common;
 #[path = "drive/ci_flaky.rs"]
 mod ci_flaky;
+mod common;
 #[path = "drive/done_lanes.rs"]
 mod done_lanes;
 #[path = "drive/no_baseline.rs"]
