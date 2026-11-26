@@ -201,6 +201,7 @@ fn a_requeued_lessons_issue_starts_its_lesson_lane_never_impl() {
     sh.attach(&c);
     let r = runner();
     ok(&c, &r, &["queue", "sendmeter", "add", "12"]);
+    ev(&c, 9, "job-filed", json!({"job": "lesson", "role": "lesson", "title": "lessons: sendmeter"}));
     let d = json!({"role": "lesson", "agent": "sendmeter-lesson-12", "pane": "sendmeter-lesson-12"});
     ev(&c, 10, "spawn", d);
     ev(&c, 11, drover::pending::REQUEUED, json!({"by": "owner"}));

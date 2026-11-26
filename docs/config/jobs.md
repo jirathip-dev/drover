@@ -15,7 +15,7 @@ A scheduled job is one config entry. `drover tick` runs each due job of each fle
 Three layers, merged key by key: the built-in entry in `roles/jobs/`, then `[job.<name>]`, then
 `[fleet.<n>.job.<name>]`. A missing `title`, `body` or `role`, a bad `every` or an unknown key is a load error.
 
-Built in, all on: `lesson` every 7d (files when the week holds 2 review FAILs), `triage` 1d, `deps` 30d, `advisory`
+Built in, all on: `lesson` every 7d (files when `drover lesson digest <fleet> --min-fails 2` finds 2 review FAILs in the week), `triage` 1d, `deps` 30d, `advisory`
 1d (files when the repo's audit fails). A fleet opts out with one line:
 
 ```toml
