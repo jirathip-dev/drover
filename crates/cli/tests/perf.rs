@@ -530,11 +530,8 @@ fn huge_with(total: u64, old: u64) -> (drover::Ctx, Fake) {
     let mut log = vec![];
     let ev = |ts, f: &str, n: Option<u64>, kind, d| serde_json::to_string(&Event::new(ts, f, n, kind, d)).unwrap();
     for i in 0..old {
-        let (f, n, ts) = (
-            FLEETS[usize::try_from(i / 50).unwrap() % 5],
-            1_000 + i / 50,
-            NOW - 500_000 + i,
-        );
+        let k = usize::try_from(i / 50 % 5).unwrap();
+        let (f, n, ts) = (FLEETS[k], 1_000 + i / 50, NOW - 500_000 + i);
         let agent = format!("{f}-impl-{n}");
         let (kind, d) = match i % 50 {
             0 => (
@@ -1135,9 +1132,7 @@ fn a_pass_over_30k_events_and_150_done_issues_stays_fast() {
         cal.push((cpu_ms() - t0).round());
         let t0 = cpu_ms();
         assert_eq!(run(&c, &r, &["drive"]).0, 0);
-        if k > 0 {
-            t.push((cpu_ms() - t0).round());
-        }
+        t.extend((k > 0).then(|| (cpu_ms() - t0).round()));
     }
     t.sort_by(f64::total_cmp);
     cal.sort_by(f64::total_cmp);
