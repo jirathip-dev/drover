@@ -32,7 +32,7 @@ fn parity_r2_a_fleet_toml_from_before_each_retired_key_change_loads() {
     }
     let c = ctx(&tmpdir("upgrade-441"), RETIRED);
     let (_, out) = run(&c, &Fake::default(), &["doctor", "--config-only"]);
-    let warn = "! config — [accounts] is removed (#923): lanes run on the host's own CLI login; delete [accounts], fleet.drover.role.impl.account";
+    let warn = "! config — [accounts] is removed (#1576): accounts are shed's, a role or fleet names one with `account`; delete [accounts]";
     assert!(out.lines().any(|l| l == warn), "{out}");
 }
 
@@ -53,7 +53,7 @@ fn check_alerts_a_retired_key_once_and_the_board_shows_it() {
     let r = Fake::default();
     let (code, out) = run(&c, &r, &["check"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("[accounts] is removed (#923): lanes run on the host's own CLI login; delete [accounts], fleet.drover.role.impl.account"), "{out}");
+    assert!(out.contains("[accounts] is removed (#1576): accounts are shed's, a role or fleet names one with `account`; delete [accounts]"), "{out}");
     let log = drover::events::read(&c.state).unwrap();
     assert_eq!(log.iter().filter(|e| e.kind == "config-warning").count(), 1);
     let (_, out) = run(&c, &r, &["check"]);

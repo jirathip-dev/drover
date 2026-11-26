@@ -125,8 +125,9 @@ and restores the terminal. The lane hook refuses it (`OWNER_ONLY`).
   each at most 10 MB; picked at once or added with `[+]`, waiting above the box as thumbnails with `[×]`) or with
   `drover thread say <thread> "<text>" --file <path>` (repeatable) are saved in the orchestrator's folder under
   `uploads/` and each path is typed in with the message (`(attached: <path>)`), so the orchestrator can read them.
-- **Handoff (#413):** `drover thread handoff <from> <repo|thread> <title> <text>` starts a thread titled `<title>`
-  in a repo (or `all`), or reuses an existing thread (`t6`; `<title>` is the handoff row's subject). It logs
+- **Handoff (#413):** `drover thread handoff <from> <repo|thread> <title> <text>` goes at once to a thread
+  (`t6`) or, for a repo (or `all`), to its desk thread (#1610: no ask; the first handoff starts it, titled `Desk`, logged
+  `thread-facts` `{desk: true}`); `<title>` is the handoff row's subject. [move] (`POST handoff-move`) re-delivers it. It logs
   `thread-handoff` `{from, to, title, text}`, then types `[<to>] <from>: <text>` into the target's orchestrator (started or
   resumed, as with `say`). The source shows `continued in <to>` and the target `from <from>` with the text. While the
   link exists, the target's filed issues (`gh issue create`: `filed #<n>: <title>`, or the title alone) and answered

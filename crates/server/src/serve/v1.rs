@@ -28,6 +28,7 @@ const V1_PAIRED: &[&str] = &[
     "config-check",
     "config-edit",
     "timings",
+    "handoff-move",
 ];
 
 const PHONE: &[&str] = &["tap", "sheet", "tab", "send", "answer", "delta"];
@@ -52,6 +53,18 @@ fn reply(status: &'static str, code: &str, message: impl Into<String>) -> Res {
     )
 }
 
+fn client(x: &str) -> bool {
+    x == "manifest" || super::rows::is(x)
+}
+
+fn client_read(ctx: &Ctx, head: &str, x: &str, f: &BTreeMap<String, String>) -> Res {
+    if x != "manifest" {
+        return out("200 OK", &super::rows::get(ctx, x, f));
+    }
+    let host = super::header(head, "host").unwrap_or("127.0.0.1:7777");
+    out("200 OK", &crate::manifest::manifest(&format!("http://{host}")))
+}
+
 impl Server<'_> {
     pub(super) fn api(
         &self,
@@ -68,12 +81,10 @@ impl Server<'_> {
         let paired_op = |op: &str| PAIRED_OPS.contains(&op) || LANE_OPS.contains(&op) || V1_PAIRED.contains(&op);
         match (method, p.strip_prefix("/api/v1/")) {
             ("POST", _) if self.addr.is_none() => reply("405 Method Not Allowed", "READ_ONLY", "GET only"),
-            ("GET", Some(x))
-                if super::rows::is(x) && (Self::plugin(ctx, head) || paired && self.allowed(ctx, head)) =>
-            {
-                out("200 OK", &super::rows::get(ctx, x, &f))
+            ("GET", Some(x)) if client(x) && (Self::plugin(ctx, head) || paired && self.allowed(ctx, head)) => {
+                client_read(ctx, head, x, &f)
             }
-            ("GET", Some(x)) if super::rows::is(x) => reply("401 Unauthorized", "UNPAIRED", "pair this device first"),
+            ("GET", Some(x)) if client(x) => reply("401 Unauthorized", "UNPAIRED", "pair this device first"),
             ("POST", Some(x)) if x.starts_with("thread/") && x.ends_with("/said") => {
                 if !Self::plugin(ctx, head) {
                     return reply("401 Unauthorized", "UNPAIRED", "the plugin token");
@@ -1090,6 +1101,11 @@ pub(super) fn handoff(events: &[Event], o: &Event, folded: bool) -> Handoff {
         (_, Some(_)) => "failed",
         (Some(_), None) => "delivered",
         (None, None) => "pending",
+    };
+    let state = if !card && crate::orchestrator::moved(events, o.seq).is_some() {
+        "forwarded"
+    } else {
+        state
     };
     let opts = o.data.get("options").and_then(Value::as_array).into_iter().flatten();
     let rows = opts.zip(h["targets"].as_array().into_iter().flatten()).zip(1..);

@@ -53,6 +53,7 @@ mod tests {
             title: s(),
             lane_key: None,
             sandbox: None,
+            account: None,
         }
     }
 

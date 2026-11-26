@@ -142,6 +142,8 @@ pub struct Plan {
     pub lane_key: Option<String>,
     /// The fleet's `sandbox`.
     pub sandbox: Option<crate::config::Sandbox>,
+    /// The shed account an ACP start on the main host asks for; shed sets its login, so the start keeps the token variable.
+    pub account: Option<crate::config::Account>,
 }
 
 /// A build or check lane's shell and all it starts under macOS background `QoS`, else `nice 10` and idle I/O.
@@ -171,7 +173,10 @@ impl Plan {
         let plain = self.env.iter().filter(|(_, x)| !x.starts_with("secret:"));
         c.extend(plain.map(|(k, x)| format!("{k}='{}'", v(x))));
         c.extend(providers::get(&self.harness).env().iter().map(|v| String::from(*v)));
-        if let Some(v) = providers::get(&self.harness).token_env() {
+        if let Some(v) = providers::get(&self.harness)
+            .token_env()
+            .filter(|_| self.account.is_none())
+        {
             c.push(format!("&& unset {v}"));
         }
         if self.sources_secrets() {
@@ -379,6 +384,7 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         title,
         lane_key: None,
         sandbox: f.sandbox,
+        account: None,
     })
 }
 
@@ -597,6 +603,7 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&st
         mcp: (meta.is_some() || !p.mcp.is_empty()).then(|| p.mcp_file.clone()),
         meta,
         awake: p.sources_secrets(),
+        account: p.account.clone(),
     })
 }
 
@@ -1120,7 +1127,6 @@ fn start(
     if let Some(why) = crate::breaker::says(&ev, placed.as_ref().map_or("local", |pl| pl.name.as_str())) {
         return refused("RUNTIME_DOWN", why);
     }
-    let placed = crate::hosts::wake(ctx, cfg, r, (f, o.dry_run), placed)?;
     let on = crate::hosts::On::new(r, placed.as_ref().and_then(|pl| pl.machine.as_deref()));
     let (base, r): (&dyn Runner, &dyn Runner) = (r, &on);
     if let Some(pl) = &placed {
@@ -1164,7 +1170,11 @@ fn start(
     if let Some(pl) = placed.as_ref().filter(|pl| pl.machine.is_some() && offline.is_none()) {
         remote_acp(ctx, cfg, &on, &mut p, (pl, &acp_id), o.dry_run)?;
     }
+    p.account = on.machine.is_none().then(|| cfg.account(fleet, role));
     let acp = acp_cmd(ctx, r, &p, &acp_id, hm.filter(|_| on.machine.is_some()))?;
+    if let Some(a) = p.account.as_ref().filter(|_| !o.dry_run) {
+        crate::accounts::admit(cfg, &on, &p.harness, a)?;
+    }
     let mut pj = plan_json(&p, &on, (&local, reopen), (&bt, &labels, &acp));
     if o.dry_run {
         pj.put("dry_run", json!(true));
@@ -1763,7 +1773,8 @@ fn iso(t: u64) -> String {
 
 fn lane_data(p: &Plan, pane: &str) -> Value {
     json!({"role": p.role, "stage": p.stage, "check": p.family == "rev", "harness": p.harness, "profile": p.profile, "model": p.model, "effort": p.effort, "agent": p.agent,
-        "pane": pane, "worktree": p.worktree, "branch": p.branch, "port": p.port, "qos": p.qos()})
+        "pane": pane, "worktree": p.worktree, "branch": p.branch, "port": p.port, "qos": p.qos(),
+        "account": p.account.as_ref().map(crate::config::Account::word)})
 }
 
 pub fn adopt(

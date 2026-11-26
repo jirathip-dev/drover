@@ -1134,6 +1134,49 @@ pub struct Said {
     pub text: String,
 }
 
+/// `GET /api/v1/manifest`: what a client needs to attach a plugin, with no path of its own.
+pub struct Manifest {
+    pub name: String,
+    pub version: String,
+    /// The base URL the client calls; every path below is relative to it.
+    pub api: String,
+    /// The places: header strips, the cards place, the menu row, each with its screen path.
+    pub screens: Vec<Place>,
+    /// Every action name `POST /action` takes, and which of them are destructive.
+    pub actions: Vec<String>,
+    pub destructive: Vec<String>,
+    /// Where a client reads profiles, and attaches, follows and writes a chat.
+    pub threads: Threads,
+}
+
+/// One place a client draws: `type` header-strip, chat-cards or menu-row.
+pub struct Place {
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub persona: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub screen: Option<String>,
+}
+
+/// The manifest's chat paths; `<id>` stands for a thread id.
+pub struct Threads {
+    pub profiles: String,
+    pub started: String,
+    pub attach: String,
+    pub detach: String,
+    pub rows: String,
+    pub stream: String,
+    pub thread: String,
+    pub said: String,
+}
+
 }
 
 /// One block of a lane's transcript, tagged `k`, built from ACP's own fields only (never an agent's wording): a prompt, a reply's markdown (its text chunks joined), a tool call (its updates folded into one; `title_line`, the title's first line, cut), the plan, an approval (`answered`: the option taken); a PTY lane's screen is one `screen`, its `lines`.
