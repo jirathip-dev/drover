@@ -662,7 +662,7 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
 }
 
 fn start_pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
-    let late = 2 * cfg.limits.pass_max_secs + cfg.limits.fast_secs;
+    let late = (2 * cfg.limits.pass_max_secs + cfg.limits.fast_secs).max(cfg.limits.slow_secs);
     let fresh = last_pass(ctx, fleet).is_some_and(|t| ctx.now.saturating_sub(t) <= late);
     if held(ctx, &format!("drive-{fleet}.lock")).is_some() || crate::service::wake(ctx, fleet) && fresh {
         return Ok(());

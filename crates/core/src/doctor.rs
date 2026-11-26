@@ -378,6 +378,15 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line = format!("timer — {label} {state} → drover timer install (the owner or an orchestrator)");
         row(rows, state == "loaded", '✗', &line);
     }
+    let has = |l: &str| crate::timer::has_job(ctx, l);
+    let pid = crate::service::up(ctx).filter(|_| has(crate::timer::SERVICE));
+    let line = pid.map_or("service — not running → drover timer install".into(), |p| {
+        format!("service — running (pid {p})")
+    });
+    row(rows, pid.is_some(), '✗', &line);
+    if has(crate::timer::FAST) && has(crate::timer::SERVICE) {
+        rows.push("✗ fast job — replaced by the service → drover timer install".into());
+    }
     if cfg.shed().is_some() {
         shed_rows(ctx, cfg, r, rows);
     }
