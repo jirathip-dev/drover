@@ -153,6 +153,12 @@ except = ["crates/core/src/promise.rs"]
 reason = "#854: a waiting/next-step line is a typed promise: build it with crate::promise::Say"
 
 [[ban]]
+pattern = "escalate::"
+paths = ["crates/*/src/**", "crates/*/tests/**"]
+except = ["crates/core/src/flow/escalate.rs"]
+reason = "#1656: flow::escalate is built but off until slice 5's cut-over; only flow::act calls it then"
+
+[[ban]]
 pattern = "merging within"
 paths = ["crates/*/src/**"]
 except = ["crates/core/src/promise.rs"]
