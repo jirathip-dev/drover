@@ -63,12 +63,14 @@ Build machines (#1708): `[fleet.<n>.remote.<kind>]` sends a heavy kind's command
 `tag = "linux"` (required), and optional `wait` (minutes for a free machine slot), `setup`, `env = ["NAME"]` and
 `out = ["path"]`, passed as `runners run --tag … --dir <lane worktree> … -- bash -c <cmd>`. Its output and exit code
 are the command's; a remote run holds no slot here. On runners' exit 75, 76, 64 or 78, or no `runners` on `PATH`,
-`drover heavy` prints `runners: exit 75, running here` and runs the command here in a heavy slot as above. Never
+`drover heavy` prints `runners: exit 75, running here`, logs `heavy-here` (its `kind`, `cmd` and `why`) and runs the
+command here in a heavy slot as above; `drover top` lists that slot as `heavy slot <kind> here (<why>)`. Never
 routed, whatever the patterns: `git`, `gh`, `drover`, `nx affected`, `--changed`, `merge-base`, `origin/`, code
 signing, `--release` and `cargo install`, containers, and lines reading stdin (`<`) or `.env`
 (`heavy::NEVER_ROUTED`); `remote_deny = ["…"]` in `[fleet.<n>]` adds more. A line mixing a routed kind's commands with
 never-routed ones (#1748) sends only those commands, each with its own redirects kept here, and runs the rest here
-in order, so its output and exit code are the line's. A line with a pipe into or out of such a command, a subshell,
+in order, so its output and exit code are the line's; so does a line where such a command heads a pipe
+(`cargo test 2>&1 | tail`) or redirects to a file (#1819). A line with a pipe into such a command, a subshell,
 a here-doc, `<`, `&` or `.env` stays here in a slot and prints `heavy: <why> in the line, running here`. Text in
 quotes, comments and here-doc bodies never makes a command a heavy kind. A fleet with any heavy kind or route
 gets the `cargo` kind (`heavy::CARGO`: build, check, clippy, test, nextest, run, xtask) unless it sets its own. Config load refuses a routed kind whose
@@ -77,9 +79,9 @@ removes; a failure is printed and kept in the `clean` event's `forget`, and the 
 `runners run` process `[remote <tag>]`.
 
 Gate checks (#1747): a fleet with `[fleet.<n>.remote.cargo]` sends its gate checks the same way. A lane's
-`./.gatekeeper/run check…` and `just check…` join the `cargo` kind; `turn done` runs each done check of a lane on the
-main host under `drover heavy cargo --remote <tag>` (the gatekeeper check gets its head, PR body and private names
-through `--env`, never stdin); `drover hold` sends its command to the fleet whose repo is the job's (`GITHUB_REPOSITORY`)
+`just check…` joins the `cargo` kind; `turn done` runs each done check of a lane on the main host under
+`drover heavy cargo --remote <tag>`, but the gatekeeper check: it reads git and a build machine's tree has no `.git` (#1803), so it runs in the
+lane's worktree; `drover hold` sends its command to the fleet whose repo is the job's (`GITHUB_REPOSITORY`)
 and holds no slot. Each falls back here as above, printing the `runners:` line. The never-routed list still applies;
 a fleet whose gate builds platform-only code (Metal, `xcodebuild`) lists its gate command in `remote_deny`.
 
@@ -92,9 +94,9 @@ samples admission every `[limits] hold_sample_secs` (default 10). Past the wait 
 
 `drover top` (#910; `--json` for the same data) shows what each live lane is really doing: every process under its
 worktree as a tree with its CPU %, run time and heavy kind, and `waiting for heavy slot <kind> <age>` for each of its
-commands in line; the header gives the host's load per CPU against `load_per_cpu`, heavy slots used of `heavy_max` and
-the respawns the last drive pass held back (`RESPAWN_PACED`). When load per CPU stays over `load_per_cpu` for
+commands in line; the header gives the host's CPU idle against `min_cpu_idle`, heavy slots used of `heavy_max` and
+the respawns the last drive pass held back (`RESPAWN_PACED`). When CPU idle stays under `min_cpu_idle` for
 `[limits] overload_minutes` (default 10) in the host history, `drover check` alerts `host-overloaded` once, naming
-the 5 busiest processes and their lanes; once load is back under the limit, the next overload alerts again.
+the 5 busiest processes and their lanes; once idle is back over the floor, the next overload alerts again.
 
 Enforcement: the Claude `PreToolUse` hook (`drover hook`) refuses the command mechanically.

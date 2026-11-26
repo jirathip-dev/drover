@@ -55,6 +55,10 @@ dir = "crates/core/flow"
 glob = "**/*.toml"
 
 [[collect]]
+dir = "roles/jobs"
+glob = "*.toml"
+
+[[collect]]
 dir = "ci/cap.d"
 glob = "*.toml"
 
@@ -364,3 +368,18 @@ reason = "#1643: one module builds the gatekeeper command and reads its report"
 pattern = "/plugin/"
 paths = ["crates/*/src/**"]
 reason = "#1571: drover never calls cooee; it serves rows and actions in /api/v1"
+
+[[ban]]
+pattern = "lesson::"
+paths = ["crates/core/src/jobs.rs"]
+reason = "#1756: the job mechanism names no job; a job is an entry in roles/jobs/ or the fleet's config"
+
+[[ban]]
+pattern = "triage::"
+paths = ["crates/core/src/jobs.rs"]
+reason = "#1756: the job mechanism names no job; a job is an entry in roles/jobs/ or the fleet's config"
+
+[[ban]]
+pattern = "hotspots::"
+paths = ["crates/core/src/jobs.rs"]
+reason = "#1756: the job mechanism names no job; a job is an entry in roles/jobs/ or the fleet's config"

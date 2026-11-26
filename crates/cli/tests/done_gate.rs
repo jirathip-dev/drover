@@ -789,34 +789,6 @@ fn routed_done(name: &str, runners: i32, checks: &str) -> (Repo, drover::Ctx, Fa
 }
 
 #[test]
-fn a_routed_fleets_gatekeeper_done_check_runs_on_the_build_machine_with_its_exit_code() {
-    let (repo, c, f, bin) = routed_done("done-gk-routed", 0, "");
-    let (code, out) = run(&c, &ui(Git::new(&f), &bin, false), &["turn", "done"]);
-    assert_eq!(code, 0, "{out} RAN {:?}", std::fs::read_to_string(bin.join("ran.log")));
-    assert!(
-        !repo.wt.join(".gatekeeper/ran.log").exists(),
-        "the failing local wrapper never ran"
-    );
-    let ran = std::fs::read_to_string(bin.join("ran.log")).unwrap();
-    let want = format!(
-        "runners run --tag linux --dir {} --env DROVER_PRIVATE_NAMES --env GATEKEEPER_HEAD --env GATEKEEPER_PR_BODY -- bash -c mkdir -p target/gatekeeper && printf %s \"$GATEKEEPER_PR_BODY\" > target/gatekeeper/pr-body.md && ./.gatekeeper/run check --pr-body target/gatekeeper/pr-body.md | {}\n",
-        repo.wt.display(),
-        repo.head
-    );
-    assert_eq!(ran, want);
-    let t = kinds(&c, "turn-end").pop().unwrap();
-    assert_eq!(t.str("sha"), Some(repo.head.as_str()));
-
-    let (repo, c, f, bin) = routed_done("done-gk-routed-fail", 3, "");
-    let (out, _) = refused(&c, &ui(Git::new(&f), &bin, false), "DONE_CHECK");
-    assert!(
-        out.contains("`./.gatekeeper/run check` failed (exit 3):\nremote: FAIL gate-9"),
-        "{out}"
-    );
-    assert!(!repo.wt.join(".gatekeeper/ran.log").exists());
-}
-
-#[test]
 fn a_routed_fleets_done_checks_route_the_same_way_but_never_routed_ones() {
     let (repo, c, f, bin) = routed_done(
         "done-set-routed",
@@ -836,4 +808,28 @@ fn a_routed_fleets_done_checks_route_the_same_way_but_never_routed_ones() {
         repo.wt.display()
     );
     assert_eq!(ran, want);
+}
+
+#[test]
+fn a_routed_fleets_gatekeeper_done_check_runs_in_the_lanes_git_tree() {
+    for (code, name) in [(0, "done-gk-here"), (2, "done-gk-here-fail")] {
+        let (repo, c, f, bin) = routed_done(name, 0, "");
+        tool(&repo.wt.join(".gatekeeper"), "run", code, "FAIL gate-3: needs git");
+        let r = ui(Git::new(&f), &bin, false);
+        if code == 0 {
+            let (code, out) = run(&c, &r, &["turn", "done"]);
+            assert_eq!(code, 0, "{out}");
+        } else {
+            let (out, _) = refused(&c, &r, "DONE_CHECK");
+            assert!(
+                out.contains("`./.gatekeeper/run check` failed (exit 2):\nFAIL gate-3: needs git"),
+                "{out}"
+            );
+        }
+        assert!(!bin.join("ran.log").exists(), "never sent to runners run");
+        let wt = repo.wt.canonicalize().unwrap();
+        let ran = std::fs::read_to_string(repo.wt.join(".gatekeeper/ran.log")).unwrap();
+        let want = format!("run check --pr-body target/gatekeeper/pr-body.md {}\n", wt.display());
+        assert_eq!(ran, want);
+    }
 }

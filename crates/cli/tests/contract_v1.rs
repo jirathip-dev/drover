@@ -221,3 +221,33 @@ fn the_stream_resumes_after_last_event_id() {
     let row: Value = serde_json::from_str(data).unwrap();
     assert_eq!((row["seq"].clone(), row["kind"].clone()), (json!(16), json!("alert")));
 }
+
+#[test]
+fn attach_and_said_keep_contract_v1() {
+    let c = board("contract-said");
+    let r = Fake::default().reply("gh", "");
+    let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let post = |path: &str, auth: &str, body: Value| {
+        let body = body.to_string();
+        let r = format!(
+            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n{auth}Content-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let res = String::from_utf8_lossy(&s.respond(&r, T)).into_owned();
+        serde_json::from_str::<Value>(res.split_once("\r\n\r\n").unwrap().1).unwrap()
+    };
+    let attach = post(
+        "/api/v1/orchestrator-attach",
+        &ck,
+        json!({"fleet": "sendmeter", "thread": "chat-1"}),
+    );
+    assert_eq!(attach["ok"], true, "{attach}");
+    let said = json!({"id": "m1", "ts": T, "from": "owner", "text": "go"});
+    let said = post("/api/v1/thread/chat-1/said", &bearer(), said);
+    assert_eq!(said["ok"], true, "{said}");
+    let mut fails = vec![];
+    check("orchestrator-attach", &attach, &mut fails);
+    check("said", &said, &mut fails);
+    assert!(fails.is_empty(), "{}", fails.join("\n"));
+}

@@ -84,14 +84,20 @@ fn hold(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str, mut extra: Value) -> Res
     Ok(t)
 }
 
+/// `POST /api/v1/orchestrator-attach` and `drover attach`: chat `id` on `fleet`, a repo, `all` or `none`; its brief, settings and env.
 pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
-    let f = cfg.fleet(fleet)?;
-    let (_, role) = defaults(cfg, fleet)?;
+    let any = matches!(fleet, "all" | "none");
+    let range = if any {
+        None
+    } else {
+        cfg.fleet(fleet)?.port_range.as_deref()
+    };
+    let (_, role) = defaults(cfg, if any { "all" } else { fleet })?;
     let t = hold(ctx, cfg, fleet, id, json!({}))?;
     let p = role.profile_or("orchestrator");
     let acp = providers::get(&role.harness).acp().unwrap_or(&role.harness);
     let why = crate::spawn::unguarded(ctx, (&p, "orchestrator", &role.harness), acp, false);
-    let port = crate::spawn::lane_port(f.port_range.as_deref(), &format!("{fleet}/orchestrator-{id}"), &[]);
+    let port = crate::spawn::lane_port(range, &format!("{fleet}/orchestrator-{id}"), &[]);
     let settings = providers::profiles_root(ctx).join(&p).join("settings.json");
     let env = json!({"DROVER_LANE": format!("{fleet}:-:orchestrator"), "DROVER_THREAD": id,
         "DROVER_PORT": port.to_string()});
@@ -100,6 +106,27 @@ pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
         json!({"ok": true, "code": "OK", "message": message, "brief": brief::thread(cfg, &t, fleet),
         "settings": settings, "env": env, "guarded": why.is_empty(), "why": why}),
     )
+}
+
+/// `POST /api/v1/thread/<id>/said`: an attached chat's owner line, logged once per `item` for `answer --typed`.
+pub fn said(ctx: &Ctx, cfg: &Config, id: &str, (item, from, text): (&str, &str, &str)) -> Result<String> {
+    if from != "owner" || item.is_empty() {
+        return refused(
+            "BAD_VALUE",
+            "said: an `id` and `from: owner`; the agent's lines stay in the client",
+        );
+    }
+    text_ok(text)?;
+    let events = working(&ctx.state)?;
+    let Some(t) = attached(&events, id) else {
+        return refused("NO_SUCH_THREAD", format!("{id} is no attached chat"));
+    };
+    if of(&events, id).any(|e| e.kind == "thread-msg" && e.str("item") == Some(item)) {
+        return Ok(format!("{item} is logged already"));
+    }
+    let d = json!({"thread": id, "from": "owner", "text": text, "item": item, "via": "client"});
+    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))?;
+    Ok(format!("{item} logged in {id}"))
 }
 
 /// `POST /api/v1/orchestrator-detach`: the link ends (`orchestrator-detached`); `NO_SUCH_THREAD` unless attached.
@@ -661,7 +688,11 @@ pub fn post(
 /// `say`'s second half: type `line` into thread `t`'s orchestrator, starting or resuming it first.
 pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Result<String> {
     let id = t.str("thread").unwrap_or_default();
-    let cur = thread_role(cfg, &working(&ctx.state)?, t)?.1;
+    let events = working(&ctx.state)?;
+    if attached(&events, id).is_some() {
+        return Ok(id.into());
+    }
+    let cur = thread_role(cfg, &events, t)?.1;
     let ms = harness_models(cfg, &cur.harness);
     if let Some(m) = cur.model.filter(|m| !ms.is_empty() && !ms.contains(&m.as_str())) {
         let text = format!("model {m} is not one of {ms:?}");

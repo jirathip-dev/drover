@@ -16,10 +16,8 @@ mod cli;
 pub mod clock;
 pub mod clone;
 pub mod cloud;
-pub mod compact;
 pub mod config;
 pub mod db;
-pub mod deps;
 pub mod design;
 pub mod devices;
 pub mod diagram;
@@ -38,6 +36,7 @@ pub mod host;
 pub mod hosts;
 pub mod hotspots;
 pub mod hygiene;
+pub mod jobs;
 pub mod land;
 pub mod lanes;
 pub mod lesson;
@@ -57,6 +56,7 @@ pub mod queue;
 pub mod release;
 pub mod rename;
 pub mod report;
+pub mod reroot;
 pub mod respawn;
 pub mod roots;
 pub mod runner;
@@ -450,7 +450,7 @@ pub fn ask(
         .pop()
         .context("ask not logged")?;
     let id = ev.str("id").unwrap_or_default();
-    if let Some(t) = routed.filter(|t| orchestrator::attached(&events, t).is_none()) {
+    if let Some(t) = routed {
         if let Err(e) = crate::thread::route::lane_ask(ctx, cfg, r, t, &ev) {
             crate::thread::route::to_owner(ctx, cfg, t, &ev, None, &format!("orchestrator not reached: {e:#}"))?;
         }

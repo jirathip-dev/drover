@@ -119,7 +119,7 @@ export type LaneNow = { title: string, w?: string | null, n?: string | null, t?:
 export type ShedRow = { host: string, error?: string | null, name?: string | null, runtime?: string | null, labels?: { [key in string]: string } | null, state?: string | null, last?: string | null, age?: string | null, };
 
 /**
- * API v1's `chat`, the [chat] tab: a card per repo (`all` first) with its threads, then every thread's view (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
+ * API v1's `chat`, the [chat] tab: a card per repo (`all` first) with its open threads' rows (`?archived=1`: the archived ones too), and `?thread=<t>`'s view alone (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
  */
 export type ChatTab = { now: number, rw: boolean, error?: string | null, repos: Array<ChatRepo>, threads: Array<ThreadView>, };
 
@@ -529,6 +529,19 @@ guarded: boolean, why: string, };
 export type AttachEnv = { DROVER_LANE: string, DROVER_THREAD: string, DROVER_PORT: string, };
 
 /**
+ * `POST /api/v1/thread/<id>/said`: one owner line of an attached chat, copied for `answer --typed`.
+ */
+export type Said = { 
+/**
+ * The client's item id: posting it twice logs it once.
+ */
+id: string, ts: number, 
+/**
+ * `owner`; the agent's own lines stay in the client.
+ */
+from: string, text: string, };
+
+/**
  * `GET /api/v1/config`: fleet.toml as cooee's config screens read it.
  */
 export type ConfigView = { 
@@ -626,9 +639,9 @@ lane: string,
 who: string, what: string, since: number, next_cmd?: string | null, };
 
 /**
- * What the last look at a host saw (`<state dir>/hosts.json`): detected tags and `$HOME` (probed hourly), reachability, load/cpu, free memory and disk in GB.
+ * What the last look at a host saw (`<state dir>/hosts.json`): detected tags and `$HOME` (probed hourly), reachability, CPU idle %, free memory and disk in GB.
  */
-export type HostSeen = { tags: Array<string>, home: string, probed: number, seen: number, up: boolean, load?: number | null, mem?: number | null, disk?: number | null, 
+export type HostSeen = { tags: Array<string>, home: string, probed: number, seen: number, up: boolean, idle?: number | null, mem?: number | null, disk?: number | null, 
 /**
  * A remote host's failed checks from `health` (`✗` keeps lanes off it, `!` warns), with the probe.
  */
@@ -662,7 +675,7 @@ export type HostRoot = { path: string, state: string, free_gb?: number | null, }
 /**
  * One row a minute per host in `<state dir>/host-history.jsonl`, written by the fast step; 24 h kept.
  */
-export type HostRow = { ts: number, host: string, load_cpu?: number | null, pressure?: number | null, swap_out?: number | null, mem_free_gb?: number | null, disk_free_gb?: number | null, lanes: number, 
+export type HostRow = { ts: number, host: string, cpu_idle?: number | null, pressure?: number | null, swap_out?: number | null, mem_free_gb?: number | null, disk_free_gb?: number | null, lanes: number, 
 /**
  * MB per `host::groups` group, only while `/live?tab=host` was seen in the last 2 min (else no `ps` walk).
  */

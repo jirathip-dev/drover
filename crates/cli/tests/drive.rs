@@ -1,3 +1,5 @@
+#[path = "drive/ci_flaky.rs"]
+mod ci_flaky;
 mod common;
 #[path = "drive/done_lanes.rs"]
 mod done_lanes;
@@ -382,47 +384,6 @@ fn the_third_fail_stops_at_needs_human_with_the_findings() {
     assert!(nh.str("findings").unwrap().contains("src/y.rs:9 still wrong"));
     idle(&c, &r);
     assert!(started("").is_empty(), "no fix lane after the limit");
-}
-
-#[test]
-fn red_ci_after_pass_is_a_fail_with_the_log_tail() {
-    let c = setup("drive-red");
-    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
-    let head = sha("abc");
-    ev(
-        &c,
-        30,
-        "verdict",
-        json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
-    );
-    let r = fake(NONE)
-        .reply("gh pr view issue-12", &pr(&head, "red"))
-        .reply(
-            "gh run view 777 -R jirathip-dev/sendmeter --log-failed",
-            "test x ... FAILED\nGH_TOKEN=ghp_abcdef123456\nerror: 1 test failed\n",
-        )
-        .reply(
-            "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
-            &format!("{head}\n"),
-        )
-        .reply("git -C", "");
-    let (out, steps) = drive(&c, &r);
-    assert_eq!(steps, ["ci-red", "fix"], "{out}");
-    let all = read(&c.state).unwrap();
-    let v = all.iter().rev().find(|e| e.kind == "verdict").unwrap();
-    assert_eq!(v.str("verdict"), Some("FAIL"));
-    assert!(
-        v.str("body").unwrap().contains("error: 1 test failed"),
-        "{:?}",
-        v.str("body")
-    );
-    assert!(
-        !v.str("body").unwrap().contains("ghp_abcdef"),
-        "the log tail is masked: {:?}",
-        v.str("body")
-    );
-    let st = &fold(&all)[&("sendmeter".to_string(), 12)];
-    assert_eq!((st.state.as_str(), st.rounds), ("fix(1)", 1), "same head: no new round");
 }
 
 #[test]
@@ -2255,10 +2216,10 @@ fn a_held_lane_whose_pane_is_gone_is_respawned_when_its_blocker_merges() {
 fn busy(mut f: Fake) -> Fake {
     let o = drover::runner::Out {
         code: 0,
-        stdout: "{ 50.00 40.00 30.00 }\n".into(),
+        stdout: iostat(5),
         stderr: String::new(),
     };
-    f.replies.insert(0, ("sysctl -n vm.loadavg".into(), o));
+    f.replies.insert(0, ("iostat".into(), o));
     f
 }
 
@@ -2560,6 +2521,7 @@ fn a_no_repro_verdict_refiled_and_refused_again_is_one_owner_card() {
 
 fn lesson(name: &str, live: bool) -> (drover::Ctx, Fake) {
     let c = setup(name);
+    ev(&c, 9, "job-filed", json!({"job": "lesson", "role": "lesson"}));
     let wt = lane(&c, 10, "lesson", "sendmeter-lesson-12", "issue-12");
     let list = [("sendmeter-lesson-12", "idle", wt.to_string_lossy().to_string())];
     let r = fake(if live { &list[..] } else { &[] })
@@ -2579,11 +2541,11 @@ fn a_lesson_lane_ending_without_a_push_is_prompted_once_then_closed_never_lane_e
     };
     let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
     assert!(
-        out.contains("#12 drive: lesson lane ended without a push: prompting it once"),
+        out.contains("#12 drive: job lane ended without a push: prompting it once"),
         "{out}"
     );
     let (out, _) = drive(&c, &r);
-    assert!(out.contains("sendmeter #12 lesson lane prompted: sent"), "{out}");
+    assert!(out.contains("sendmeter #12 job lane prompted: sent"), "{out}");
     let prompt = || {
         let line = "no repeated class? end with `drover done --no-change \"no repeated class\" sendmeter 12`";
         typed("sendmeter-lesson-12", line)

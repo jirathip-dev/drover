@@ -55,14 +55,12 @@ integration = "staging"
 # build_dirs = ["ios/build"]   # freed with target, node_modules, .next and dist when a lane finishes or over budget
 # cap_script = "scripts/line-cap.sh"   # #754: `drover cap` runs it and reads its `N / cap M` lines; unset = the first premerge check naming a cap, else the built-in Rust count
 # clone_build = ["target"]   # cp -cR (APFS clone) these local folders into a new lane when the lockfile matches
-# deps = "monthly"   # #1488: `drover tick` runs `drover deps` every 30 days and the advisory check daily (default off: on demand only)
 # done_checks = ["npm run format:check", "drover arch-check"]   # #1362: `turn done` runs these in the lane's worktree (gate_check_minutes each) before any review; unset = `drover arch-check` with .drover/arch.toml, `cargo fmt --check` with a Cargo.toml
 # env = { npm_config_cache = "~/.cache/drover/npm" }   # npm fleets: one shared cache (pnpm's store already is)
 # env = { PORT = "$DROVER_PORT" }   # each lane's own port (a hash of fleet/branch), for dev servers
 # flow = "shadow"   # #1649: the flow table runs beside drive and only logs (`drover flow report`); "legacy" turns it off
 # hotspots = "off"   # #889: `drover tick` runs `drover hotspots` weekly per fleet (default "weekly"); "off" opts out
 # hygiene = { merge = "merge", docs_trust = [] }   # #1101: this fleet's keys over [hygiene]'s (docs/config/hygiene.md); "off" opts a key out
-# lessons = "off"   # #419: `drover tick` runs `drover lesson` weekly per fleet (default "weekly"); "off" opts out
 # line_cap = 10000   # `drover cap-check --config <this file>`: formatted src/**/*.rs lines, exit 1 over it
 # max_impl = 2   # optional caps (CAP); unset = no cap, the host check protects the Mac
 # max_rev = 2
@@ -75,7 +73,6 @@ merge_label = "merge-ready"   # the full CI runs only with this label; drover ad
 # sandbox = "srt"   # #782 spike: start each lane's agent inside sandbox-runtime (`srt` on PATH); off by default (docs/spikes/lane-sandbox.md)
 # serial_paths = ["supabase/migrations/**"]   # the old form of one [[fleet.web.serial]] group named serial_label (default "db"), serial_max at a time
 # swift_build = true   # #1478: each lane gets DROVER_DERIVED_DATA (xcodebuild -derivedDataPath) and DROVER_SWIFT_SCRATCH (swift build --scratch-path), cloned warm in <root>/.build/<agent> (docs/lanes.md)
-# triage = "weekly"   # #1100: `drover tick` runs `drover triage` weekly per fleet (default off: on demand only)
 # ui_paths = ["web/**", "assets/**"]   # #417: a PR touching these goes through the verify stage (needs [fleet.web.role.verify])
 # update_ready = "always"   # catch every behind PASSed PR up with integration; default "needed": only on a conflict or a strict branch rule
 
@@ -98,6 +95,15 @@ paths = ["supabase/migrations/**"]
 # mode = "fast-first"   # a PASS lands once its `fast` checks are green; integration's own CI runs the full suite after
 # fast = ["lint", "unit"]   # names of existing CI checks; `doctor` warns about names no recent PR reports
 # full_first_paths = ["supabase/migrations/**", ".github/workflows/**"]   # a PR touching these waits for the full suite
+
+# #1756: scheduled jobs (docs/config/jobs.md): built in lesson 7d, triage 1d, deps 30d, advisory 1d; "off" opts out.
+# [fleet.web.job.triage]
+# every = "off"
+# [job.audit]   # a job of your own, for every fleet
+# every = "30d"
+# title = "audit: {fleet} {month}"
+# body = "Review the auth paths. One PR; list what you checked in its body."
+# role = "impl"
 
 # Per-fleet notifiers replace the global [[notify]] for this fleet's events (same fields).
 [[fleet.web.notify]]

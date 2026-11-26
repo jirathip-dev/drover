@@ -20,13 +20,13 @@ fn two_hosts(name: &str) -> (drover::Ctx, FakeShed) {
 
 fn fake() -> Fake {
     Fake::default()
-        .reply("sysctl -n vm.loadavg", "{ 6.0 1 1 }")
+        .reply("iostat", &iostat(40))
         .reply("sysctl -n hw.ncpu", "4")
         .reply(
             "df -k /",
             "Filesystem 1024-blocks Used Available\n/dev/disk3 488245288 400000000 44040192\n",
         )
-        .reply(&format!("{SSH}'cat' '/proc/loadavg'"), "2.0 1 1 1/9 42")
+        .reply(&format!("{SSH}'vmstat' '1' '2'"), &vmstat(80))
         .reply(&format!("{SSH}'nproc'"), "4")
         .reply(
             &format!("{SSH}'df' '-k' '/'"),
@@ -34,11 +34,11 @@ fn fake() -> Fake {
         )
 }
 
-fn row(ts: u64, host: &str, load: f64) -> Row {
+fn row(ts: u64, host: &str, idle: f64) -> Row {
     Row {
         ts,
         host: host.into(),
-        load_cpu: Some(load),
+        cpu_idle: Some(idle),
         pressure: Some(0),
         swap_out: Some(1834.0),
         mem_free_gb: Some(9.4),
@@ -61,8 +61,8 @@ fn rows_are_appended_per_host_per_step() {
     assert_eq!(code, 0, "{out}");
     survey(&c, &cfg, &sh.on(&over), false);
     let rows = history(&c);
-    let hosts: Vec<(&str, Option<f64>)> = rows.iter().map(|r| (r.host.as_str(), r.load_cpu)).collect();
-    assert_eq!(hosts, [("mini", Some(1.5)), ("bazzite", Some(0.5))], "{rows:?}");
+    let hosts: Vec<(&str, Option<f64>)> = rows.iter().map(|r| (r.host.as_str(), r.cpu_idle)).collect();
+    assert_eq!(hosts, [("mini", Some(40.0)), ("bazzite", Some(80.0))], "{rows:?}");
     let disk: Vec<Option<f64>> = rows.iter().map(|r| r.disk_free_gb).collect();
     assert_eq!(disk, [Some(42.0), Some(0.5)]);
     assert!(rows.iter().all(|r| r.ts == NOW), "{rows:?}");
@@ -129,33 +129,33 @@ fn one_host_keeps_24h_and_rewrites_rarely() {
 fn downsampling_keeps_the_worst_per_bucket() {
     let rows: Vec<Row> = (0..60u64)
         .map(|i| {
-            let mut r = row(NOW - 3_600 + 60 + i * 60, "mini", if i == 17 { 3.71 } else { 0.5 });
+            let mut r = row(NOW - 3_600 + 60 + i * 60, "mini", if i == 17 { 9.0 } else { 60.0 });
             r.disk_free_gb = Some(if i == 40 { 9.0 } else { 50.0 });
             r
         })
         .collect();
-    let load = spark(&rows, "mini", "load", (NOW, 3_600, 6));
+    let idle = spark(&rows, "mini", "idle", (NOW, 3_600, 6));
     assert_eq!(
-        load[1],
-        Some((3.71, NOW - 3_600 + 60 + 17 * 60)),
-        "the peak and its own minute"
+        idle[1],
+        Some((9.0, NOW - 3_600 + 60 + 17 * 60)),
+        "the dip and its own minute"
     );
-    assert!(load
+    assert!(idle
         .iter()
         .enumerate()
-        .all(|(i, v)| i == 1 || (v.unwrap().0 - 0.5).abs() < f64::EPSILON));
+        .all(|(i, v)| i == 1 || (v.unwrap().0 - 60.0).abs() < f64::EPSILON));
     let disk = spark(&rows, "mini", "disk", (NOW, 3_600, 6));
     assert_eq!(disk[4].unwrap().0, 9.0, "free space keeps the minimum");
-    assert_eq!(spark(&rows, "bazzite", "load", (NOW, 3_600, 6)), vec![None; 6]);
+    assert_eq!(spark(&rows, "bazzite", "idle", (NOW, 3_600, 6)), vec![None; 6]);
 }
 
 #[test]
 fn the_host_api_has_a_card_per_host_with_its_24h_series() {
     let (c, sh) = two_hosts("history-cards");
     let st = c.state.parent().unwrap();
-    let seen = json!({"bazzite": {"tags": ["os:linux"], "seen": NOW - 1980, "up": false, "load": 0.4, "disk": 300.0, "disk_total": 476.0}});
+    let seen = json!({"bazzite": {"tags": ["os:linux"], "seen": NOW - 1980, "up": false, "idle": 90.0, "disk": 300.0, "disk_total": 476.0}});
     std::fs::write(st.join("hosts.json"), seen.to_string()).unwrap();
-    record(&c, &[row(NOW - 30, "mini", 3.1), row(NOW - 30, "bazzite", 0.4)], 2).unwrap();
+    record(&c, &[row(NOW - 30, "mini", 12.0), row(NOW - 30, "bazzite", 90.0)], 2).unwrap();
     let r = fake();
     let w = sh.on(&r);
     let s = Server::new(&c, &w, Some(ADDR.into()));
@@ -173,13 +173,13 @@ fn the_host_api_has_a_card_per_host_with_its_24h_series() {
             .cloned()
             .unwrap_or_else(|| panic!("no {k} on {h}"))
     };
-    for k in ["load", "swap", "mem", "disk", "lanes"] {
+    for k in ["idle", "swap", "mem", "disk", "lanes"] {
         for h in hosts {
             drop(key(h, k));
         }
     }
-    let s24 = key(&hosts[0], "load")["s"].as_str().unwrap().to_string();
-    assert!(s24.starts_with(&",".repeat(119)) && s24[119..] == *"3.10", "{s24}");
+    let s24 = key(&hosts[0], "idle")["s"].as_str().unwrap().to_string();
+    assert!(s24.starts_with(&",".repeat(119)) && s24[119..] == *"12", "{s24}");
     let disk = key(&hosts[0], "disk");
     assert_eq!(
         (&disk["b"], &disk["bt"], &disk["notes"]),

@@ -298,7 +298,7 @@ fn force_on_a_stuck_issue_spawns_it_past_the_load_limit_by_the_owner_and_its_lin
     let r = Fake::default()
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
-        .reply("sysctl -n vm.loadavg", "{ 40.0 40.0 40.0 }\n")
+        .reply("iostat", &iostat(5))
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("git -C", "")

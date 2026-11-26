@@ -25,12 +25,15 @@ pub struct Proc {
     pub background: bool,
 }
 
-/// A heavy check in line for a slot, and how long it has waited.
+/// A heavy check in line for a slot or holding one here, and for how long.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Wait {
     pub kind: String,
     pub cmd: String,
     pub secs: u64,
+    /// Why a routed check holds a slot here instead of running on its build machine.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub here: Option<String>,
 }
 
 /// A live lane: its agent, `<fleet>:<issue>:<role>`, process tree and heavy-slot waits.
@@ -40,17 +43,19 @@ pub struct Lane {
     pub lane: String,
     pub procs: Vec<Proc>,
     pub waits: Vec<Wait>,
+    /// Its heavy checks holding a slot on this host.
+    pub held: Vec<Wait>,
     /// An impl or rev lane, whose processes all belong at background priority.
     pub build: bool,
 }
 
-/// `drover top`: the host's load against its limit, heavy slots, held respawns and every live lane.
+/// `drover top`: the host's CPU idle against its floor, heavy slots, held respawns and every live lane.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Top {
-    pub load_per_cpu: Option<f64>,
-    /// Why the load is unknown: `<tool> not found`.
+    pub cpu_idle: Option<f64>,
+    /// Why the CPU idle is unknown: `<tool> not found`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub load_unknown: Option<String>,
+    pub idle_unknown: Option<String>,
     pub limit: f64,
     pub heavy_used: usize,
     pub heavy_max: usize,
@@ -121,17 +126,22 @@ fn lanes(
         for root in mine.iter().filter(|p| !mine.iter().any(|q| q.pid == p.ppid)) {
             walk(&mine, root, 0, &mut procs);
         }
-        let waits = (queue.iter().filter(|(_, t)| !t.running && t.lane == key)).map(|(_, t)| Wait {
-            kind: t.kind.clone(),
-            cmd: t.cmd.clone(),
-            secs: ctx.now.saturating_sub(t.since),
-        });
-        let waits = waits.collect();
+        let of = |running: bool| {
+            (queue.iter().filter(|(_, t)| t.running == running && t.lane == key))
+                .map(|(_, t)| Wait {
+                    kind: t.kind.clone(),
+                    cmd: t.cmd.clone(),
+                    secs: ctx.now.saturating_sub(t.since),
+                    here: t.here.clone(),
+                })
+                .collect()
+        };
         Some(Lane {
             agent: agent.into(),
+            waits: of(false),
+            held: of(true),
             lane: key,
             procs,
-            waits,
             build: matches!(family, Some("impl" | "rev")),
         })
     };
@@ -186,11 +196,9 @@ pub fn top(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Top> {
     let held = cfg.fleet.keys().filter_map(last).flat_map(acts);
     let h = host::sample(r);
     Ok(Top {
-        load_per_cpu: h.load_per_cpu,
-        load_unknown: h
-            .not_found(&["sysctl", "cat", "nproc"])
-            .filter(|_| h.load_per_cpu.is_none()),
-        limit: cfg.limits.load_per_cpu,
+        cpu_idle: h.cpu_idle,
+        idle_unknown: h.not_found(&["iostat", "vmstat"]).filter(|_| h.cpu_idle.is_none()),
+        limit: cfg.limits_on(None).min_cpu_idle,
         heavy_used: line.iter().filter(|(_, t)| t.running).count(),
         heavy_max: main.and_then(|h| h.heavy_max).unwrap_or(3),
         respawns_held: held.filter(|a| a["code"] == "RESPAWN_PACED").count(),
@@ -204,14 +212,14 @@ pub fn top(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Top> {
 
 /// `drover top`'s plain text: the header line, then each lane and its indented process tree.
 pub fn print(t: &Top, out: &mut dyn Write) -> Result<()> {
-    let load = match (t.load_per_cpu, &t.load_unknown) {
-        (Some(l), _) => format!("load/cpu {l:.2}"),
-        (None, Some(why)) => format!("? load/cpu — {why}"),
-        (None, None) => "load/cpu ?".into(),
+    let idle = match (t.cpu_idle, &t.idle_unknown) {
+        (Some(i), _) => format!("cpu idle {i:.0}%"),
+        (None, Some(why)) => format!("? cpu idle — {why}"),
+        (None, None) => "cpu idle ?".into(),
     };
     writeln!(
         out,
-        "{load} (limit {}) · heavy slots {}/{} · respawns held {}",
+        "{idle} (floor {}%) · heavy slots {}/{} · respawns held {}",
         t.limit, t.heavy_used, t.heavy_max, t.respawns_held
     )?;
     for l in &t.lanes {
@@ -227,6 +235,10 @@ pub fn print(t: &Top, out: &mut dyn Write) -> Result<()> {
         }
         for w in &l.waits {
             writeln!(out, "  waiting for heavy slot {} {}: {}", w.kind, age(w.secs), w.cmd)?;
+        }
+        for w in &l.held {
+            let why = w.here.as_ref().map_or(String::new(), |h| format!(" ({h})"));
+            writeln!(out, "  heavy slot {} here{why} {}: {}", w.kind, age(w.secs), w.cmd)?;
         }
     }
     for h in &t.holds {

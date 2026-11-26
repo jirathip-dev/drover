@@ -13,15 +13,16 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `silent_minutes` | `10` | an ACP lane's open turn with no session event this long is cancelled and nudged |
 | `ci_start_minutes` | `10` | a PR head with no checks this long after its push alerts `ci-missing` |
 | `ci_stuck_minutes` | `30` | a ready PR's check still pending this long after its run completed is re-run once, then alerts `ci-stuck` |
-| `load_per_cpu` | `2.5` | spawn refuses HOST_BUSY over this load per CPU |
-| `overload_minutes` | `10` | load per CPU over `load_per_cpu` this long alerts `host-overloaded` once, with the 5 busiest processes |
-| `swapout_rate` | `2000.0` | pages swapped out per 2 s sample that count as swapping |
+| `ci_flaky_retries` | `1` | re-runs of a failed check's jobs a head gets before its red counts, `ci-rerun` why failed (0 = off; a fleet may set its own) |
+| `min_cpu_idle` | `15.0` | spawn refuses HOST_BUSY under this percent of the CPUs idle over a 1 s sample; `[hosts.<n>]` may set its own |
+| `overload_minutes` | `10` | CPU idle under `min_cpu_idle` this long alerts `host-overloaded` once, with the 5 busiest processes |
+| `swapout_rate` | `2000.0` | pages swapped out per 2 s sample that count as swapping; `[hosts.<n>]` may set its own |
 | `min_free_gb` | `10.0` | spawn refuses DISK_LOW under this many GB free on `/` |
 | `worktree_budget_gb` | `25.0` | over this many GB of worktrees drive frees build folders, then spawn refuses DISK_BUDGET |
 | `build_budget_gb` | `20.0` | over this many GB of lane build folders drive trims their unlocked profiles |
 | `sweep_remote` | `true` | the scratch sweep runs on every enabled remote host too |
 | `stray_roots` | `["/tmp", "$TMPDIR"]` | where `drover clean` looks for stray build folders and temp dirs |
-| `min_free_mem_gb` | `2.0` | spawn refuses MEM_LOW under this many GB of free + inactive memory |
+| `min_free_mem_gb` | `2.0` | spawn refuses MEM_LOW under this many GB of free + inactive memory; `[hosts.<n>]` may set its own |
 | `effort` | `unset` | default reasoning effort for roles that set none |
 | `ask_default_minutes` | `30` | a routine ask unanswered this long takes its recommended option |
 | `ask_expire_hours` | `24` | an ask no live lane waits on expires after this many hours |
@@ -75,8 +76,8 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `proxy_connect_secs` | `1` | the token proxy's liveness connect timeout |
 | `proxy_retry_secs` | `300` | a proxy lane's sign-out holds its host only if no call gets through the token proxy this long after it |
 | `service_call_secs` | `2` | a call to the running service's socket times out after this long |
-| `disk_probe_secs` | `2` | a folder listing slower than this on a host under `load_per_cpu` marks its disk as not answering |
-| `disk_hung_secs` | `6` | over `load_per_cpu` a call waits this long for a slow folder listing, then the disk is not answering |
+| `disk_probe_secs` | `2` | a folder listing slower than this on a host over `min_cpu_idle` marks its disk as not answering |
+| `disk_hung_secs` | `6` | under `min_cpu_idle` a call waits this long for a slow folder listing, then the disk is not answering |
 | `disk_sick_secs` | `300` | a disk that let a call run out of time stays hung this long |
 | `disk_trust_secs` | `60` | a folder that answered is trusted this long before it is probed again |
 | `lane_read_secs` | `5` | a lane worktree read slower than this skips the lane for the pass (`root-hung`) |

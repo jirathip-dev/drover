@@ -87,7 +87,7 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<(Win
         crate::events::since(&ctx.state, &["conflict-predicted"], since)?,
     );
     let same = |e: &&crate::events::Event| cfg.fleet(&e.fleet).is_ok_and(|g| g.repo == f.repo);
-    let shas = crate::compact::Shas::of(&events);
+    let shas = crate::reroot::Shas::of(&events);
     let updates = |sha: &String| {
         let merged = events
             .iter()
