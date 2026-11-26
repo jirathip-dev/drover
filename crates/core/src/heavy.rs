@@ -273,7 +273,7 @@ impl Heavy {
         let mut kinds = f.heavy_kinds();
         if f.remote.contains_key(GATE_KIND) {
             let gates = kinds.entry(GATE_KIND.into()).or_default();
-            gates.extend([format!("{}*", crate::gatekeeper::CHECK), "just check*".into()]);
+            gates.push("just check*".into());
         }
         Heavy {
             kinds,

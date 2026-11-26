@@ -562,19 +562,37 @@ fn a_routed_fleets_gate_checks_go_to_the_build_machine_under_the_cargo_kind() {
         .current_dir(&d)
         .status()
         .unwrap();
-    for gate in ["just check", "./.gatekeeper/run check --gate core/fmt"] {
-        let w = wrapped(&d, gate);
-        assert!(
-            w.contains("'heavy' 'cargo'") && w.contains("'--remote' 'linux'") && w.ends_with(&format!("'--' '{gate}'")),
-            "{gate}: {w}"
-        );
-    }
+    let w = wrapped(&d, "just check");
+    assert!(
+        w.contains("'heavy' 'cargo'") && w.contains("'--remote' 'linux'") && w.ends_with("'--' 'just check'"),
+        "{w}"
+    );
     let d = lane("");
     assert_eq!(
         hook(&d, "just check"),
         "",
         "an unrouted fleet's gate check is unchanged"
     );
+}
+
+#[test]
+fn a_gatekeeper_check_never_goes_to_a_build_machine() {
+    let d = gated();
+    let gate = "./.gatekeeper/run check --gate core/fmt";
+    assert_eq!(hook(&d, gate), "", "the hook leaves it on the lane's host");
+    std::fs::create_dir_all(d.join(".gatekeeper")).unwrap();
+    std::fs::write(d.join(".gatekeeper/run"), "#!/bin/sh\nexit 6\n").unwrap();
+    Command::new("chmod")
+        .args(["755"])
+        .arg(d.join(".gatekeeper/run"))
+        .status()
+        .unwrap();
+    let path = fake_runners(&d, Some(0));
+    let st = routed_hold(&d, &path, &["./.gatekeeper/run", "check"])
+        .status()
+        .unwrap();
+    assert_eq!(st.code(), Some(6), "it ran here");
+    assert!(!d.join("runners.log").exists(), "never sent to runners run");
 }
 
 fn cargo_routed() -> (PathBuf, String, String) {

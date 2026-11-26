@@ -106,7 +106,7 @@ fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64), role:
     let via = on.machine.is_none().then_some((&heavy, ctx.exe.as_str()));
     for c in checks(f, &on, Path::new(wt)) {
         let o = if c == crate::gatekeeper::CHECK {
-            crate::gatekeeper::check(&on, Path::new(wt), &pr, &f.private_names, limit, via)
+            crate::gatekeeper::check(&on, Path::new(wt), &pr, &f.private_names, limit)
         } else {
             let line = via.map_or_else(|| c.clone(), |(h, exe)| h.gate(exe, &c, wt));
             on.run_for("sh", &argv(&["-c", &format!("cd \"$0\" && {line}"), wt]), "", limit)
