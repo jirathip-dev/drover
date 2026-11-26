@@ -1,3 +1,7 @@
+# #1796: a test still running after 5 min is killed, named in the log and failed, so it cannot hold a shard for hours.
+[profile.default]
+slow-timeout = { period = "60s", terminate-after = 5 }
+
 # #1586: the sim hunt is the longest single test (105-170 s on CI); started first, it ends with its shard instead of after it.
 [[profile.default.overrides]]
 filter = 'binary(sim) & test(the_hunt_finds)'
