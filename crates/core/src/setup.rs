@@ -98,7 +98,11 @@ pub fn vendors(cfg: &Config) -> Vec<(String, String)> {
 /// Start setup `name` on `host` in a new shed terminal there; logs `setup` (no command line, no input); its name.
 pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, via: &str) -> Result<String> {
     let boot = ("gh-token".to_string(), GH_TOKEN.to_string());
-    let Some((_, line)) = all(cfg).into_iter().chain([boot]).find(|s| s.0 == name) else {
+    let found = all(cfg).into_iter().chain([boot]).find(|s| s.0 == name);
+    if let (None, Some((provider, account))) = (&found, name.split_once('/')) {
+        return login(ctx, cfg, r, (provider, account), via);
+    }
+    let Some((_, line)) = found else {
         return refused("NO_SUCH_SETUP", format!("no setup `{name}`"));
     };
     let h = cfg.hosts.get(host);
@@ -116,6 +120,21 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, vi
     let d = json!({"host": host, "name": name, "pane": pane, "machine": on.machine, "via": via});
     append(&ctx.state, &Event::new(ctx.now, "", None, "setup", d))?;
     Ok(pane.into())
+}
+
+/// A [sign in] for shed account `provider/account` on the main host: `account.login`'s terminal is the sheet's pane; logs `setup`.
+fn login(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (provider, account): (&str, &str), via: &str) -> Result<String> {
+    let w = r.shed().or_else(|| cfg.shed()).context("no shed runtime")?.wire;
+    let p = crate::shed::proto::AccountLogin {
+        provider: provider.into(),
+        name: account.into(),
+        token: false,
+    };
+    let v = crate::shed::call(r, &w, crate::shed::proto::Method::AccountLogin, json!(p))?;
+    let pane = serde_json::from_value::<crate::shed::proto::Login>(v)?.terminal;
+    let d = json!({"host": "main", "name": format!("{provider}/{account}"), "pane": pane, "machine": null, "via": via});
+    append(&ctx.state, &Event::new(ctx.now, "", None, "setup", d))?;
+    Ok(pane)
 }
 
 /// The open `setup` event of `pane` (no `setup-closed` after it).

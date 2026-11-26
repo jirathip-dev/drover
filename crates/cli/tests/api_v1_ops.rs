@@ -263,8 +263,8 @@ fn set_takes_json_and_chat_writes_the_new_thread_defaults() {
 fn a_backlog_issue_gets_a_thread_or_closes() {
     let sh = FakeShed::new();
     let cfg = format!(
-        "{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\naccount = \"C\"\n\n\
-         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        "{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\n\n\
+         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n",
         sh.sock.display()
     );
     let mut c = ctx(&tmpdir("v1-backlog"), &cfg);

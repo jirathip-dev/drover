@@ -78,6 +78,7 @@ impl FakeShed {
                 version: version.into(),
                 ..Hello::ours()
             }),
+            accounts: vec![json!({"provider": "claude", "name": "work", "state": "ready"})],
             ..State::default()
         }));
         let (s, moved) = (state.clone(), Arc::new(Condvar::new()));
@@ -297,6 +298,15 @@ fn handle(m: &str, p: &Value, st: &mut State) -> Result<Value, RpcError> {
         "ls" => Ok(json!(terms.values().collect::<Vec<_>>())),
         "events" => Ok(json!({})),
         "account.ls" => Ok(json!(st.accounts)),
+        "account.login" => {
+            let pane = format!(
+                "login-{}-{}",
+                p["provider"].as_str().unwrap_or_default(),
+                p["name"].as_str().unwrap_or_default()
+            );
+            terms.insert(pane.clone(), json!({"name": pane, "labels": {}, "cwd": "/", "cmd": [], "keep": false, "state": "running", "exit": null, "pid": 9, "redacted": true}));
+            Ok(json!({"terminal": pane}))
+        }
         _ if !terms.contains_key(&name) => Err(gone()),
         "get" => Ok(terms[&name].clone()),
         "read" if p["events"] == true && terms[&name]["acp"].is_string() => {

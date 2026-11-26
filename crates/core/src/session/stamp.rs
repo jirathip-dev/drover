@@ -114,7 +114,7 @@ fn gone(
     stamp(ctx, &events, (fleet, issue), agent, d)?;
     if exit.cause == Cause::Limit {
         let events = crate::events::working(&ctx.state)?;
-        if let Some(sp) = last_spawn(&events, agent) {
+        if let Some(sp) = last_spawn(&events, agent).filter(|sp| !crate::hosts::on_account(sp)) {
             let d = crate::hosts::hold_alert(&events, sp, "hit the usage limit");
             if !events
                 .iter()
@@ -136,6 +136,10 @@ pub fn on_event(ctx: &Ctx, cfg: &Config, w: &crate::shed::Wire, e: &shed_proto::
         return Ok(false);
     }
     pulse::hear(ctx, &e.name, &e.kind, e.replay)?;
+    if let (EventKind::Account { account, was, why }, Some(t)) = (&e.kind, e.labels.get("thread").filter(|_| !e.replay))
+    {
+        crate::orchestrator::moved(ctx, cfg, (&fleet, t), (account, was.as_deref()), why)?;
+    }
     let Some(issue) = issue else {
         return Ok(false);
     };

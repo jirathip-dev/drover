@@ -1066,11 +1066,17 @@ fn start(
         head,
         lane_key: None,
         sandbox: None,
+        account: Some(cfg.account(fleet, "orchestrator")),
     };
     p.env.insert("DROVER_THREAD".into(), id.into());
     p.env.insert("DROVER_ORCHESTRATOR".into(), id_of(t).into());
     let shed = cfg.shed_for(fleet).context(crate::config::NO_RUNTIME)?;
     let wire = r.shed().map_or(shed.wire.clone(), |w| w.wire);
+    let all = crate::shed::accounts(r, &wire).ok();
+    let hold = (p.account.as_ref()).and_then(|a| crate::accounts::of(all.as_deref()?, &p.harness, a));
+    if let Some(h) = hold {
+        return on_hold(ctx, cfg, r, t, events, &h);
+    }
     let aid = shed.acp.clone().context(crate::config::NO_RUNTIME)?;
     let acp = match crate::spawn::acp_cmd(ctx, r, &p, &aid, None) {
         Ok(cmd) => cmd,
@@ -1109,7 +1115,7 @@ fn start(
     let kicked = b.kick_acp(r, &agent, &format!("{}\n\n{kick}\n\n{line}", text.trim_end()))?;
     let mut d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed-acp", "harness": p.harness,
         "model": p.model, "effort": p.effort, "resumed": false,
-        "confirmed": kicked});
+        "confirmed": kicked, "account": p.account.as_ref().map(crate::config::Account::word)});
     if let Some(was) = replaced {
         d.put("replaced", json!(was));
     }
@@ -1313,6 +1319,7 @@ pub fn ls(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: Option<&str>, as_
 
 /// `check`: each awake conductor whose thread has been quiet `IDLE` and that is not working is closed (`conductor-sleep`); the next message resumes it.
 pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], agents: &[Session]) -> Result<()> {
+    let all = std::cell::OnceCell::new();
     for t in events.iter().filter(|e| e.kind == "thread-new") {
         let id = t.str("thread").unwrap_or_default();
         let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
@@ -1327,8 +1334,12 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
             continue;
         };
         let a = a.as_ref();
-        if a.is_some_and(Session::signed_out) {
-            signed_out(ctx, cfg, r, t, s)?;
+        let out = account(s).filter(|_| a.is_some()).and_then(|(h, acct)| {
+            let all = all.get_or_init(|| crate::accounts::ls(cfg, r));
+            crate::accounts::of(all.as_deref()?, &h, &acct).filter(|h| h.why == crate::accounts::Why::SignedOut)
+        });
+        if let Some(h) = out {
+            signed_out(ctx, cfg, r, t, s, &h)?;
             continue;
         }
         if a.is_some() && pending(events, id).is_some() {
@@ -1351,11 +1362,33 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
     Ok(())
 }
 
-fn signed_out(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Result<()> {
-    let (id, hn) = (
-        t.str("thread").unwrap_or_default(),
-        s.str("harness").unwrap_or_default(),
-    );
+/// Shed moved thread `id`'s orchestrator to account `now` (`why` `limit` or `owner`): one row, `<was> hit its limit; now on <now>` or `switched to <now>`; none at its `start`.
+pub fn moved(
+    ctx: &Ctx,
+    cfg: &Config,
+    (fleet, id): (&str, &str),
+    (now, was): (&str, Option<&str>),
+    why: &str,
+) -> Result<()> {
+    let text = match (why, was) {
+        ("limit", Some(was)) => format!("{was} hit its limit; now on {now}"),
+        ("limit" | "owner", _) => format!("switched to {now}"),
+        _ => return Ok(()),
+    };
+    let d = json!({"thread": id, "from": "system", "text": text, "account": now});
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "thread-msg", d))
+}
+
+fn account(s: &Event) -> Option<(String, crate::config::Account)> {
+    let a = match s.str("account")? {
+        "auto" => crate::config::Account::Auto,
+        n => crate::config::Account::Named(n.into()),
+    };
+    Some((s.str("harness")?.into(), a))
+}
+
+fn signed_out(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event, h: &crate::accounts::Hold) -> Result<()> {
+    let id = t.str("thread").unwrap_or_default();
     close(ctx, r, s)?;
     let d = json!({"thread": id, "agent": s.str("agent"), "why": "signed out"});
     emit(
@@ -1363,7 +1396,7 @@ fn signed_out(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> 
         cfg,
         Event::new(ctx.now, &t.fleet, None, "orchestrator-sleep", d),
     )?;
-    let d = json!({"thread": id, "from": "system", "text": format!("{hn} is signed out: sign in"), "signin": hn});
+    let d = json!({"thread": id, "from": "system", "text": h.line(r), "signin": h.signin()});
     emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))
 }
 
@@ -1386,21 +1419,59 @@ fn pending<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
 }
 
 fn held(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], a: Option<&Session>) -> Result<()> {
-    let id = t.str("thread").unwrap_or_default();
     let Some(a) = a.filter(|a| a.status() == Some(crate::session::Status::Limited)) else {
         return Ok(());
     };
+    let at = crate::limit::reset_at(r, a.note.as_deref().unwrap_or_default(), ctx.now);
+    let until = at.map_or("its reset".into(), |at| crate::usage::date(r, at, "+%a %H:%M"));
+    let text = format!("orchestrator out of usage until {until}; your message is kept");
+    hold_row(ctx, cfg, t, events, (&text, at))
+}
+
+fn hold_row(ctx: &Ctx, cfg: &Config, t: &Event, events: &[Event], (text, at): (&str, Option<u64>)) -> Result<()> {
+    let id = t.str("thread").unwrap_or_default();
     let Some(m) = of(events, id)
         .rfind(|e| human(e))
         .filter(|m| !since(events, id, m.seq, "held"))
     else {
         return Ok(());
     };
-    let at = crate::limit::reset_at(r, a.note.as_deref().unwrap_or_default(), ctx.now);
-    let until = at.map_or("its reset".into(), |at| crate::usage::date(r, at, "+%a %H:%M"));
-    let text = format!("orchestrator out of usage until {until}; your message is kept");
     let d = json!({"thread": id, "from": "system", "text": text, "held": m.seq, "at": at});
     emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))
+}
+
+fn on_hold(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    t: &Event,
+    events: &[Event],
+    h: &crate::accounts::Hold,
+) -> Result<String> {
+    use crate::accounts::Why;
+    let line = h.line(r);
+    match &h.why {
+        Why::Setup(_) => {
+            let why = format!("{line}; the orchestrator does not start");
+            log(
+                ctx,
+                cfg,
+                t,
+                "system",
+                (&format!("the orchestrator does not start: ACP_UNGUARDED: {why}"), &[]),
+            )?;
+            return refused("ACP_UNGUARDED", why);
+        }
+        Why::Limited(at) => {
+            let text = format!("{line}; your message is kept. New threads will fail too until then.");
+            hold_row(ctx, cfg, t, events, (&text, *at))?;
+        }
+        Why::SignedOut | Why::Missing => {
+            let d = json!({"thread": t.str("thread"), "from": "system", "text": line, "signin": h.signin()});
+            emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))?;
+        }
+    }
+    refused("LOGIN_NEEDED", format!("{line}; the orchestrator waits"))
 }
 
 /// `check`: per thread, its rate-limited orchestrator's `out of usage` row, one `continue` at that row's reset time, and a `no reply yet` row for an owner message unanswered `orchestrator_reply_minutes`.

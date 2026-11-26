@@ -248,7 +248,7 @@ fn host_busy_names_the_lane_holding_the_cpu() {
 fn with_account(c: &drover::Ctx) -> &'static str {
     let toml = std::fs::read_to_string(&c.config).unwrap().replacen(
         "harness = \"claude\"",
-        "harness = \"claude\"\naccount = \"A\"",
+        "harness = \"claude\"\naccount = \"a\"",
         1,
     ) + "\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\n";
     std::fs::write(&c.config, toml).unwrap();
