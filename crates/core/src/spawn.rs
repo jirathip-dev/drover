@@ -1633,18 +1633,31 @@ pub(crate) fn lane_admit(
         return refused("CAP", format!("{n} {role} lane(s) open in {fleet}, max_{fam} = {cap}"));
     }
     let admitted = crate::drive::own_marker(ctx, fleet, issue).is_some();
-    let full = crate::queue::flight_full(ctx, &lanes, f, fleet, (issue, &pending));
-    let Some((v, starting, cap)) = full.filter(|_| fam == "impl" && !admitted) else {
+    if fam != "impl" || admitted {
+        return Ok(());
+    }
+    let named = |v: String, starting: usize| {
+        let starting = (starting > 0).then(|| format!("{starting} starting"));
+        let v = (!v.is_empty()).then_some(v);
+        v.into_iter().chain(starting).collect::<Vec<_>>().join(", ")
+    };
+    let why = if let Some((v, starting, cap)) = crate::queue::flight_full(ctx, &lanes, f, fleet, (issue, &pending)) {
+        let count = v.len() + starting;
+        format!(
+            "{count}/{cap} PRs in flight in {fleet} ({})",
+            named(crate::queue::hashes(&v), starting)
+        )
+    } else if let Some(t) = crate::queue::total_full(ctx, (events, &lanes), cfg, (fleet, issue, &pending)) {
+        let (count, cap) = (t.prs.len() + t.starts, t.cap);
+        let ahead = (t.ahead > 0).then(|| format!("; {} start(s) in other fleets go first", t.ahead));
+        let all = named(crate::queue::by_fleet(&t.prs), t.starts);
+        format!(
+            "{count}/{cap} PRs in flight across fleets ({all}){}",
+            ahead.unwrap_or_default()
+        )
+    } else {
         return Ok(());
     };
-    let count = v.len() + starting;
-    let starting = (starting > 0).then(|| format!("{starting} starting"));
-    let named: Vec<String> = (!v.is_empty())
-        .then(|| crate::queue::hashes(&v))
-        .into_iter()
-        .chain(starting)
-        .collect();
-    let why = format!("{count}/{cap} PRs in flight in {fleet} ({})", named.join(", "));
     if !force {
         return refused("IN_FLIGHT_CAP", format!("{why}; they land first, or pass --force"));
     }

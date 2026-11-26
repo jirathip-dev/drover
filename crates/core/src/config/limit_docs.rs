@@ -108,6 +108,14 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "concurrent detached spawn kicks on the main host (0: in the pass)",
     ),
     (
+        "max_in_flight_total",
+        "PRs in flight across every fleet before a first start is refused `IN_FLIGHT_CAP` (0: off)",
+    ),
+    (
+        "fleet_priority",
+        "fleets in the order a freed `max_in_flight_total` slot goes to, oldest queue entry first; unlisted fleets after",
+    ),
+    (
         "start_max",
         "lanes starting at once on a remote host that sets no `start_max`",
     ),
