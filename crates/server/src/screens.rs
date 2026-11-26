@@ -944,8 +944,8 @@ fn stats(ctx: &Ctx, ev: &[Event], states: &crate::events::States, only: Option<&
     let fleets = Config::kept(ctx).into_iter().flat_map(|c| c.fleet);
     let flights = fleets
         .filter(|f| only.is_none_or(|o| o == f.0))
-        .filter_map(|(f, fc)| crate::queue::flight(ctx, states, &fc, &f))
-        .map(|(v, cap)| (v.len(), cap))
+        .filter_map(|(f, fc)| crate::queue::flight(ctx, ev, states, &fc, &f))
+        .map(|(v, s, cap)| (v.len() + s.len(), cap))
         .reduce(|a, b| (a.0 + b.0, a.1 + b.1));
     items.extend(flights.map(|(v, cap)| tile("in flight", format!("{v}/{cap}"))));
     k::Stat::new().id("stats").items(items).block()

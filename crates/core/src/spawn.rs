@@ -1553,6 +1553,7 @@ pub(crate) fn lane_admit(
     let lanes = fold(events);
     let pending = crate::drive::pending(ctx, cfg, r);
     let st = crate::events::fold_into(lanes.clone(), &pending);
+    let full = || crate::queue::flight_full(ctx, events, &lanes, f, (fleet, issue));
     let events = &[events, &pending].concat();
     let others: Vec<_> = st.values().filter(|s| s.fleet == fleet && s.issue != issue).collect();
     let building = |s: &str| s == "impl" || s.starts_with("fix");
@@ -1586,7 +1587,7 @@ pub(crate) fn lane_admit(
         let v = (!v.is_empty()).then_some(v);
         v.into_iter().chain(starting).collect::<Vec<_>>().join(", ")
     };
-    let why = if let Some((v, starting, cap)) = crate::queue::flight_full(ctx, &lanes, f, fleet, (issue, &pending)) {
+    let why = if let Some((v, starting, cap)) = full() {
         let count = v.len() + starting;
         format!(
             "{count}/{cap} PRs in flight in {fleet} ({})",
