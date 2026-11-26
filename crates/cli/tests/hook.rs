@@ -1442,7 +1442,8 @@ fn the_stop_hook_asks_for_the_turn_only_in_impl_lanes() {
     for lane in [None, Some("sendmeter:-:orchestrator"), Some("sendmeter:-:conductor")] {
         assert_eq!(stop(lane, "orchestrator"), "", "{lane:?} ends its turn freely");
     }
-    let out = stop(Some("sendmeter:24:impl"), "impl");
+    let lane = [("DROVER_LANE", Some("sendmeter:24:impl")), ("DROVER_OUTBOX", Some("1"))];
+    let out = hook_env(&lane, "impl", &json!({"hook_event_name": "Stop"}));
     let v: Value = serde_json::from_str(out.trim()).unwrap();
     assert_eq!(
         (&v["decision"], &v["reason"]),
