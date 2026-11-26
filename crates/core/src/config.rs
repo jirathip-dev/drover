@@ -37,8 +37,6 @@ pub struct Config {
     pub telegram: Option<toml::Value>,
     /// `[chat]`, new threads' orchestrator defaults over the fleet's `role.orchestrator` (`orchestrator::defaults`).
     pub chat: Chat,
-    /// `[ci_runners]`, the owner's CI runner VMs (`crate::runners`, docs/hosts.md).
-    pub ci_runners: Option<CiRunners>,
     /// `[self_update]`, the release branch the live install follows and the optional staging serve.
     pub self_update: SelfUpdate,
     /// `[hygiene]`, the history and issue convention every fleet follows unless its own `[fleet.<n>.hygiene]` key says otherwise.
@@ -64,33 +62,6 @@ impl Default for SelfUpdate {
             staging_addr: "127.0.0.1:7787".into(),
         }
     }
-}
-
-/// The repo's runner VMs: their recipe (`provider`), spec, slots per VM, label, and the `max_vms` / `usd_day` cap; `vms` are the ones made by hand (`runners add|remove` change the set in the log); `local_*` the mini's runners.
-#[derive(Clone, Debug, Deserialize)]
-pub struct CiRunners {
-    pub provider: String,
-    pub repo: String,
-    pub label: String,
-    pub size: String,
-    #[serde(default)]
-    pub ttl_hours: u64,
-    #[serde(default)]
-    pub snapshots: bool,
-    pub slots: u64,
-    pub max_vms: u64,
-    pub usd_day: f64,
-    #[serde(default)]
-    pub vms: Vec<String>,
-    pub local_label: Option<String>,
-    pub local_stop: Option<String>,
-    /// The VMs' runner service (the recipe's `{service}`).
-    #[serde(default = "ci_service")]
-    pub service: String,
-}
-
-fn ci_service() -> String {
-    "ci-runner".into()
 }
 
 /// The harness, model and effort a new thread's orchestrator starts on; each unset one is the role's.
@@ -791,7 +762,6 @@ pub struct Limits {
     pub orchestrator_idle_minutes: u64,
     pub orchestrator_reply_minutes: u64,
     pub orchestrator_change_minutes: u64,
-    pub token_refresh_minutes: u64,
     pub ask_waiting_minutes: u64,
     pub outbox_stale_minutes: u64,
     pub host_offline_minutes: u64,
@@ -933,7 +903,6 @@ impl Default for Limits {
             orchestrator_idle_minutes: 30,
             orchestrator_reply_minutes: 10,
             orchestrator_change_minutes: ORCHESTRATOR_CHANGE_MINUTES,
-            token_refresh_minutes: 30,
             ask_waiting_minutes: 30,
             outbox_stale_minutes: 5,
             host_offline_minutes: 15,

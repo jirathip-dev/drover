@@ -84,7 +84,6 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `orchestrator_idle_minutes` | `30` | an orchestrator whose thread is quiet this long closes on the next `check` |
 | `orchestrator_reply_minutes` | `10` | an owner message with no orchestrator reply this long gets a `no reply yet` row |
 | `orchestrator_change_minutes` | `30` | an orchestrator's answer may not change one this long after it |
-| `token_refresh_minutes` | `30` | `check` pushes a fresh runner registration token to every VM this often |
 | `ask_waiting_minutes` | `30` | an owner ask open this long alerts `ask-waiting` |
 | `outbox_stale_minutes` | `5` | a remote lane's outbox line undelivered this long alerts `outbox-stale` |
 | `host_offline_minutes` | `15` | a remote host unreachable this long has its open lanes restarted on the main host |

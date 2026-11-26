@@ -542,6 +542,37 @@ id: string, ts: number,
 from: string, text: string, };
 
 /**
+ * `GET /api/v1/manifest`: what a client needs to attach a plugin, with no path of its own.
+ */
+export type Manifest = { name: string, version: string, 
+/**
+ * The base URL the client calls; every path below is relative to it.
+ */
+api: string, 
+/**
+ * The places: header strips, the cards place, the menu row, each with its screen path.
+ */
+screens: Array<Place>, 
+/**
+ * Every action name `POST /action` takes, and which of them are destructive.
+ */
+actions: Array<string>, destructive: Array<string>, 
+/**
+ * Where a client reads profiles, and attaches, follows and writes a chat.
+ */
+threads: Threads, };
+
+/**
+ * One place a client draws: `type` header-strip, chat-cards or menu-row.
+ */
+export type Place = { type: string, id?: string | null, persona?: string | null, label?: string | null, subtitle?: string | null, screen?: string | null, };
+
+/**
+ * The manifest's chat paths; `<id>` stands for a thread id.
+ */
+export type Threads = { profiles: string, started: string, attach: string, detach: string, rows: string, stream: string, thread: string, said: string, };
+
+/**
  * `GET /api/v1/config`: fleet.toml as cooee's config screens read it.
  */
 export type ConfigView = { 

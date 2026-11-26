@@ -63,6 +63,9 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   one publisher thread rebuilds the screens open streams hold (each second, at once after a write but at most once a second a screen, asleep while none
   is held) and hands each stream the diff; no server-wide stream cap, 16 a device;
 - `POST /action` `{screen, block, action, values}`: an action not in the manifest's `[permissions]` actions is 403;
-  each other runs the board's own op (a refusal is 409 with its line).
+  each other runs the board's own op (a refusal is 409 with its line);
+- `GET /api/v1/manifest` (#1774): the plugin's name, version, `api` URL, `actions` and `destructive`, the `[threads]`
+  paths, and its `screens`, one place each: `type` (header-strip, chat-cards or menu-row, `kind` in Rust), `id`,
+  `persona`, `label`, `subtitle` and `screen`; `cooee-plugin.toml` is `just gen`'s rendering of it.
 
 Tests: `crates/cli/tests/cooee_screens.rs` against cooee's fixtures in `crates/cli/tests/golden/cooee/`.

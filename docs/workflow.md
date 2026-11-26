@@ -87,7 +87,6 @@ flowchart TD
     t0 -.- k_idle_reap_minutes(["idle_reap_minutes = 10"])
     t0 -.- k_done_close_minutes(["done_close_minutes = 5"])
     t0 -.- k_idle_merged_minutes(["idle_merged_minutes = 15"])
-    t0 -.- k_token_refresh_minutes(["token_refresh_minutes = 30"])
     d0 -.- k_pass_max_secs(["pass_max_secs = 60"])
     d0 -.- k_ssh_quick_secs(["ssh_quick_secs = 5"])
     d0 -.- k_ssh_call_secs(["ssh_call_secs = 20"])

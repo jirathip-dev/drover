@@ -36,8 +36,6 @@ pub const LEGACY: &[&str] = &[
     "shed-version-ok",
     "auto-update-failed",
     "clean-failed",
-    "runners-low",
-    "runners-ok",
     "runtime-down",
     "heavy-timeout",
     "host-overloaded",

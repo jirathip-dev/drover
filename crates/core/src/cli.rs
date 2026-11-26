@@ -562,14 +562,6 @@ enum Cmd {
         #[arg(long, help = "Remove without asking")]
         apply: bool,
     },
-    #[command(
-        about = "#537: the `[ci_runners]` VMs and their GitHub runners (an orchestrator's `runners` group, its brief names the verbs); each verb logged `runners-*`"
-    )]
-    #[command(hide = true)]
-    Runners {
-        #[command(subcommand)]
-        cmd: RunnersCmd,
-    },
     #[command(about = "Send Esc to an agent's pane (it pauses); logs `stop`")]
     Stop { agent: String },
     #[command(
@@ -976,41 +968,6 @@ enum HostsCmd {
         about = "Empty a root (default the host's first): new lanes skip it, its lanes are saved and restarted on the next root"
     )]
     Eject { name: String, root: Option<String> },
-}
-
-#[derive(Subcommand)]
-enum RunnersCmd {
-    #[command(about = "The GitHub runners, each VM's state and a health line (`9/9 online`)")]
-    Status,
-    #[command(about = "A fresh registration token and a runner-service restart on that VM")]
-    Revive { vm: String },
-    #[command(
-        about = "Create N VMs to the spec, within `max_vms` and the $/day cap (past it: RUNNERS_CAP, an owner ask)"
-    )]
-    Add {
-        #[arg(default_value_t = 1)]
-        n: u64,
-        #[arg(help = "The owner ask that approved going past the cap")]
-        #[arg(long, value_name = "ID")]
-        approved: Option<String>,
-    },
-    #[command(about = "Drain (no job running), deregister, then delete a VM; or deregister one idle runner by name")]
-    Remove {
-        target: String,
-        #[arg(help = "The owner ask that approved removing the last online VM (RUNNERS_LAST)")]
-        #[arg(long, value_name = "ID")]
-        approved: Option<String>,
-    },
-    #[command(
-        about = "Push a fresh registration token to every VM now (`check` repeats it every 30 min) and report the refresher"
-    )]
-    Tokens,
-    #[command(about = "Stop and deregister this host's self-hosted runners (`local_label`, `local_stop`)")]
-    RetireLocal {
-        #[arg(help = "The owner ask that approved it while VM runners are below expected (RUNNERS_LOW)")]
-        #[arg(long, value_name = "ID")]
-        approved: Option<String>,
-    },
 }
 
 #[derive(Subcommand)]
@@ -1969,18 +1926,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             }
                         }
                     }
-                }
-                Cmd::Runners { cmd } => {
-                    use crate::runners::Verb;
-                    let (verb, id) = match cmd {
-                        RunnersCmd::Status => (Verb::Status, None),
-                        RunnersCmd::Revive { vm } => (Verb::Revive(vm), None),
-                        RunnersCmd::Add { n, approved } => (Verb::Add(n), approved),
-                        RunnersCmd::Remove { target, approved } => (Verb::Remove(target), approved),
-                        RunnersCmd::Tokens => (Verb::Tokens, None),
-                        RunnersCmd::RetireLocal { approved } => (Verb::RetireLocal, approved),
-                    };
-                    crate::runners::run(ctx, &cfg, r, out, verb, id.as_deref())?;
                 }
                 Cmd::Reclaim { apply } => check::reclaim(ctx, &cfg, r, out, stdin, apply)?,
                 Cmd::Stop { agent } => check::stop(ctx, &cfg, r, out, &agent)?,
