@@ -17,9 +17,10 @@ hour. Its rules come from the binary and the loaded fleet.toml only, never from 
 The same hook runs on Claude `PostToolUse` (Bash) and `Stop`: a
 `git push` that went through, or a finished turn, runs `drover kick <fleet> <issue> --why push|stop`.
 So do `drover ask`, `verdict` and `answer`, and the board's answer, override, extend, park and queue
-moves. A kick returns at once: a detached `kick --now` (output in `<state>/kick.log`) drives that issue's
-due steps alone under the drive lock, logs `kick`, and coalesces kicks within 10 s (or while the lock is
-busy) into one follow-up. A lane on another host kicks the main host. The tick and fast timers stay the
+moves. A kick returns at once: it joins its fleet's kick queue, and only a fleet with no kick running starts
+one `kick --now` (output in `<state>/kick.log`; #1749: at most one per fleet). That process drives each queued
+issue's due steps alone, logs `kick` for each, then waits 10 s for more before it ends: a kick in that time, or one
+whose issue is busy, joins its run. A pass's own spawn and job kicks still run one process each. A lane on another host kicks the main host. The tick and fast timers stay the
 safety net for CI, outside merges and stalls.
 
 ### Denied commands (#216)
@@ -95,7 +96,8 @@ samples admission every `[limits] hold_sample_secs` (default 10). Past the wait 
 `drover top` (#910; `--json` for the same data) shows what each live lane is really doing: every process under its
 worktree as a tree with its CPU %, run time and heavy kind, and `waiting for heavy slot <kind> <age>` for each of its
 commands in line; the header gives the host's CPU idle against `min_cpu_idle`, heavy slots used of `heavy_max` and
-the respawns the last drive pass held back (`RESPAWN_PACED`). When CPU idle stays under `min_cpu_idle` for
+the respawns the last drive pass held back (`RESPAWN_PACED`), then drover's own share of the busy CPU (#1749: its
+processes' CPU % summed against every process's). When CPU idle stays under `min_cpu_idle` for
 `[limits] overload_minutes` (default 10) in the host history, `drover check` alerts `host-overloaded` once, naming
 the 5 busiest processes and their lanes; once idle is back over the floor, the next overload alerts again.
 
