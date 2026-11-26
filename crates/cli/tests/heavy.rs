@@ -595,6 +595,24 @@ fn a_gatekeeper_check_never_goes_to_a_build_machine() {
     assert!(!d.join("runners.log").exists(), "never sent to runners run");
 }
 
+#[test]
+fn a_just_check_never_goes_to_a_build_machine() {
+    let d = gated();
+    assert_eq!(hook(&d, "just check"), "", "the hook leaves it on the lane's host");
+    let path = fake_runners(&d, Some(0));
+    let just = d.join("bin/just");
+    std::fs::write(&just, "#!/bin/sh\npwd -P > just.log\nexit 6\n").unwrap();
+    Command::new("chmod").args(["755"]).arg(&just).status().unwrap();
+    let st = routed_hold(&d, &path, &["just", "check"]).status().unwrap();
+    assert_eq!(st.code(), Some(6), "it ran here");
+    assert!(!d.join("runners.log").exists(), "never sent to runners run");
+    let here = d.canonicalize().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(d.join("just.log")).unwrap().trim(),
+        here.to_str().unwrap()
+    );
+}
+
 fn cargo_routed() -> (PathBuf, String, String) {
     let (d, top) = routed();
     let cfg = std::fs::read_to_string(d.join("fleet.toml")).unwrap();
