@@ -40,12 +40,19 @@ impl Check {
     pub fn find(&self, text: &str) -> Option<String> {
         let low = text.to_lowercase();
         let name = |c: char| c.is_alphanumeric() || c == '_';
-        let under = |d: &str| {
-            (low.match_indices(&d.to_lowercase()))
-                .any(|(i, m)| low.get(i + m.len()..).is_some_and(|r| r.starts_with(name)))
+        let under_but = |d: &str, but: Option<&str>| {
+            (low.match_indices(&d.to_lowercase())).any(|(i, m)| {
+                low.get(i + m.len()..).is_some_and(|r| {
+                    r.starts_with(name)
+                        && !but
+                            .and_then(|b| r.strip_prefix(b))
+                            .is_some_and(|t| !t.starts_with(name))
+                })
+            })
         };
+        let under = |d: &str| under_but(d, None);
         let uuid = uuids(text).any(|u| self.session(&u));
-        let hit = if ["/users/", "/home/"].iter().any(|d| under(d)) {
+        let hit = if ["/users/", "/home/"].iter().any(|d| under_but(d, Some("user"))) {
             "home-path".to_string()
         } else if self.dirs.iter().any(|d| under(d)) {
             "session-path".into()
