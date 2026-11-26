@@ -8,7 +8,7 @@ pub struct Role {
     pub harness: String,         // until the cut-over only: "claude" spells agent = "claude-acp"
     pub model: Option<String>,
     pub effort: Option<String>,
-    …                            // profile, mcp, prompt, needs, host: unchanged
+    …                            // profile, account, mcp, prompt, needs: unchanged
 }
 ```
 
@@ -16,42 +16,43 @@ pub struct Role {
 exists, takes that model or effort, `rev` on another vendor than `impl`) is checked where shed can be
 asked: spawn, `drover set`, `drover config propose` and doctor.
 
-`[runtime] acp_policy` gains `"judge"`. `[limits]` gains `judge_secs` (30) and `probe_seconds` (120).
+`[runtime] acp_policy` gains `"judge"`. `[limits]` gains `acp_judge_secs` (30) and `acp_probe_seconds` (120).
 At the cut-over `harness`, `[runtime] acp` and `acp_policy` are deleted: every lane is judged.
 
 ## What is read from shed's list
 
-`core::agents` is the only reader of `shed agents --json`. Each field is one of shed's.
+`core::agents` is the only reader of `shed agents --json`, on the main host. Each field is one of shed's.
 
 ```rust
 pub struct Agent {
     pub id: String,                    // id                       "antigravity-acp"
-    pub vendor: String,                // provider.agent           the program it fronts; rev-is-not-impl compares it
-    pub installed: Option<Installed>,  // installed.version, .cmd  None: not installed on this host
+    pub vendor: String,                // provider.agent           the program it fronts: the key of shed's accounts,
+                                       //                          what rev-is-not-impl compares, a co-author trailer's name
+    pub installed: Option<Installed>,  // installed.version, .cmd  None: not installed
     pub install: Option<String>,       // provider.install         the fix line of "not installed"
-    pub login: Option<String>,         // provider.login           setup's list, the signed-out fix line
-    pub status: Option<SignIn>,        // provider.status, status_read
-    pub config_dir_var: Option<String>,// provider.config_dir_var  accounts
-    pub scrub: Vec<String>,            // provider.scrub           variables a lane's shell unsets
+    pub login: Option<String>,         // provider.login           setup's list
     pub takes_model: bool,             // model_env or model_args is set
     pub efforts: Vec<String>,          // provider.efforts         empty: it takes none
     pub models: Vec<(String, String)>, // provider.models          the model chips
     pub sessions: Vec<String>,         // default_folder + session_files: the leak check's session paths
 }
 pub struct Installed { pub version: String, pub cmd: Vec<String> }
-pub struct SignIn { pub cmd: String, pub key: Option<String> }   // key: the JSON field that says signed in; none: exit 0
 
 pub struct Catalog(Vec<Agent>);
 impl Catalog {
-    pub fn on(on: &hosts::On) -> Result<Catalog>;   // asks that host's shed: spawn, doctor, tick
-    pub fn cached(ctx: &Ctx) -> Catalog;            // the main host's last read, a state file: serve, chips
+    pub fn read(r: &dyn Runner) -> Result<Catalog>;   // asks shed: spawn, set, propose, doctor, tick
+    pub fn cached(ctx: &Ctx) -> Catalog;              // the last read, a state file: serve, chips
     pub fn get(&self, id: &str) -> Option<&Agent>;
 }
 ```
 
-Not read by drover, because shed applies them itself: `model_env`, `model_args`, `effort_args`, `env`
-(through `shed run --model --effort`), `limit`, `resets`, `auth_failures` (shed reports `rate-limited`
-and `error auth:`, which `core::session` already reads).
+Not read by drover, because shed applies or reports them itself:
+
+- `model_env`, `model_args`, `effort_args`, `env`: through `shed run --model --effort`.
+- `status`, `status_read`, `limit`, `resets`, `auth_failures`, `setup_files`, `config_dir_var`, `scrub`,
+  `token_var`: shed's accounts. `shed run --account` sets the folder and the token itself. drover reads
+  `account.ls` (`core::accounts`, #1576) for signed out, a usage limit and a folder that holds a setup, and
+  shed's reported state (`rate-limited`, `error auth:`) for a running lane, as today.
 
 ## The guard
 
@@ -59,7 +60,7 @@ and `error auth:`, which `core::session` already reads).
 pub enum Guard {
     Judge,    // shed's judge calls the hook's ACP mode
     Hooked,   // the agent's own hook format calls `drover hook`: today's path
-    Both,     // judged, with the hook format still on: the cut-over's live rounds
+    Both,     // judged, the hook format still on as a net: the cut-over's live rounds
 }
 ```
 
@@ -69,7 +70,9 @@ pub enum Guard {
 | yes | not `judge` | `Hooked` |
 | yes | `judge` | `Both` |
 
-`Hooked`, `Both` and the type go at the cut-over.
+In `Both` the hook format answers only before a tool call, and only to deny: it rewrites nothing and does
+nothing at a prompt, after a call or at a turn's end (`DROVER_GUARD=both` tells it). Turn end, kicks,
+heavy commands and the turn line already run the judged way. `Hooked`, `Both` and the type go at the cut-over.
 
 ## The judge's wire (shed's, from shed#359)
 
@@ -99,10 +102,13 @@ pub struct Verdict { pub decision: Decision, pub reason: String }   // one line 
 pub enum Decision { Allow, Deny }
 ```
 
-The judge runs as a child of shed's bridge, so it does not see what the lane's shell exports. The lane's
-plain variables (`DROVER_LANE`, `DROVER_HOST`, `DROVER_RULES`, `DROVER_SCRATCH_TARGET`, `DROVER_THREAD`,
-the fleet's non-secret `env`) therefore go in `shed run --env`: the judge and the agent see one
-environment, and the hook reads its lane as it does today. Secrets stay in the sourced file.
+shed runs the judge as a child of its bridge, which holds what `shed run --env` set. So the lane's plain
+variables (`DROVER_LANE`, `DROVER_PORT`, `DROVER_SCRATCH_TARGET`, `DROVER_GUARD`, the fleet's non-secret
+`env`) go in `--env`: the judge and the agent see one environment, and the hook reads its lane as it does
+today. Secrets stay in the sourced file.
+
+shed does not pass the reason back to the agent (ACP's answer has no field for it). It is on shed's
+`approved` event (`by: judge`, `decision`, `reason`), where the follower reads it.
 
 ## The ACP-to-hook mapping
 
@@ -130,35 +136,41 @@ pub fn decide(call: &Call, p: &Policy, git: &dyn Fn(&str, &[&str]) -> Option<Str
 | `tool_call` is null | | none | deny, `HOOK_FAILED_CLOSED` |
 
 Heavy commands: the judge cannot change a call. A `Shell` call that matches a heavy kind and is not
-already under `drover heavy` is denied once with `REFUSED HEAVY_SLOT: run it as: <the wrapped line>`. A
-call already under `drover heavy … -- <cmd>` is judged on `<cmd>`.
+already under `drover heavy` is denied with `REFUSED HEAVY_SLOT: run it as: <the wrapped line>`. A call
+already under `drover heavy … -- <cmd>` is judged on `<cmd>`.
 
 Until the cut-over the hook format's parser builds the same `Call` (`tool_name` and `tool_input` to
 `Shell` or `Write`), so `decide` has one body and both entries share every rule.
 
+## A denied call's reason
+
+The follower keeps a judged lane's denied calls of the open turn in its pulse (`session::pulse`, the file
+it has today). At the turn's end it sends them as one prompt, each reason once per lane: a reason the lane
+was already told is not sent again, so a lane that repeats a refused call is not prompted in a loop.
+
 ## The test run's stamp, and the new events
 
-No new state file: the stamp is the latest `agent-guard` event for a host and agent id.
+No new state file: the stamp is the latest `agent-guard` event for an agent id.
 
 ```json
-{"kind": "agent-guard", "host": "main", "acp": "antigravity-acp", "version": "1.5.2", "verdict": "guarded"}
-{"kind": "agent-guard", "host": "main", "acp": "x-acp", "version": "0.3.0", "verdict": "unguarded", "why": "ran a shell command without asking"}
-{"kind": "judge-unasked", "agent": "myapp-rev-12", "acp": "antigravity-acp", "n": 3}
+{"kind": "agent-guard", "acp": "antigravity-acp", "version": "1.5.2", "verdict": "guarded"}
+{"kind": "agent-guard", "acp": "x-acp", "version": "0.3.0", "verdict": "unguarded", "why": "ran a shell command without asking"}
+{"kind": "acp-unasked", "agent": "myapp-rev-12", "acp": "antigravity-acp", "n": 3}
 {"kind": "lane-unguarded", "agent": "myapp-rev-12", "acp": "antigravity-acp", "tool": "git push origin staging", "rule": "pushing to `staging` is blocked…"}
 ```
 
 ```rust
-pub enum Verdict {            // judge::probe
+pub enum Verdict {            // acp::probe
     Guarded,
     Unguarded(String),        // a marker file exists: it ran a shell command, or wrote a file, without asking
     Unreadable(String),       // it asked, but drover could not read the command or the path
-    Inconclusive(String),     // signed out, no reply in probe_seconds, or it never tried the shell command
+    Inconclusive(String),     // signed out, no reply in acp_probe_seconds, or it never tried the shell command
 }
 ```
 
 - `spawn` gains `"acp": "<agent id>"` and `"guard": "judge" | "hooked" | "both"`.
-- `judge-unasked`: at a turn's end, how many `execute`, `edit`, `delete` or `move` calls ran with no
+- `acp-unasked`: at a turn's end, how many `execute`, `edit`, `delete` or `move` calls ran with no
   permission request. Informational; doctor sums it per agent.
 - `lane-unguarded`: one of those calls is one the rules refuse. The lane is stopped (its work saved as
-  `wip/`), an `agent-guard` `unguarded` is logged for that host, and the owner gets one alert.
+  `wip/`), an `agent-guard` `unguarded` is logged, and the owner gets one alert.
 - `hook-denied` and `hook-failed-closed` are today's, from the same code.
