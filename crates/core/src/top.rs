@@ -60,6 +60,10 @@ pub struct Top {
     pub heavy_used: usize,
     pub heavy_max: usize,
     pub respawns_held: usize,
+    /// drover's own processes' CPU %, summed (100 = one core).
+    pub drover_cpu: f64,
+    /// Every process's CPU %, summed: the host's busy CPU.
+    pub busy_cpu: f64,
     pub lanes: Vec<Lane>,
     /// `drover hold` jobs (holder `ci:<repo>`) running or waiting in the heavy line.
     pub holds: Vec<crate::heavy::Ticket>,
@@ -181,7 +185,14 @@ pub fn normal(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Vec<(String, St
 /// Sample the host and build `drover top`'s rows.
 pub fn top(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Top> {
     let agents = crate::session::live_on(r)?;
-    let (_, lanes) = snapshot(ctx, cfg, r, &agents)?;
+    let (all, lanes) = snapshot(ctx, cfg, r, &agents)?;
+    let exe = Path::new(&ctx.exe).file_name().unwrap_or_default();
+    let ours = |p: &&Proc| {
+        p.cmd
+            .split(' ')
+            .next()
+            .is_some_and(|c| Path::new(c).file_name() == Some(exe))
+    };
     let main = crate::hosts::cards(cfg, r).into_iter().next().and_then(|c| c.1);
     let line = crate::heavy::line(&ctx.state.with_file_name("heavy"));
     let passes = crate::events::since(&ctx.state, &["drive-pass"], ctx.now.saturating_sub(3600))?;
@@ -202,6 +213,8 @@ pub fn top(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Top> {
         heavy_used: line.iter().filter(|(_, t)| t.running).count(),
         heavy_max: main.and_then(|h| h.heavy_max).unwrap_or(3),
         respawns_held: held.filter(|a| a["code"] == "RESPAWN_PACED").count(),
+        drover_cpu: all.iter().filter(ours).map(|p| p.cpu).sum(),
+        busy_cpu: all.iter().map(|p| p.cpu).sum(),
         lanes,
         holds: (line.iter())
             .filter(|(_, t)| t.lane.starts_with("ci:"))
@@ -217,10 +230,15 @@ pub fn print(t: &Top, out: &mut dyn Write) -> Result<()> {
         (None, Some(why)) => format!("? cpu idle — {why}"),
         (None, None) => "cpu idle ?".into(),
     };
+    let share = if t.busy_cpu > 0.0 {
+        100.0 * t.drover_cpu / t.busy_cpu
+    } else {
+        0.0
+    };
     writeln!(
         out,
-        "{idle} (floor {}%) · heavy slots {}/{} · respawns held {}",
-        t.limit, t.heavy_used, t.heavy_max, t.respawns_held
+        "{idle} (floor {}%) · heavy slots {}/{} · respawns held {} · drover {:.0}% of busy CPU ({:.0}% of {:.0}%)",
+        t.limit, t.heavy_used, t.heavy_max, t.respawns_held, share, t.drover_cpu, t.busy_cpu
     )?;
     for l in &t.lanes {
         writeln!(out, "{} ({})", l.agent, l.lane)?;

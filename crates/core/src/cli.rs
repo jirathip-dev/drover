@@ -2448,8 +2448,8 @@ fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
 }
 
 fn places(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> queue::Places {
-    let st = crate::events::fold(events);
-    let ls = crate::snapshot::lanes(ctx, cfg, (events, &st), &crate::link::sessions(ctx, cfg, r));
+    let sessions = crate::link::sessions(ctx, cfg, r);
+    let ls = crate::events::with_states(events, |st| crate::snapshot::lanes(ctx, cfg, (events, st), &sessions));
     let at = ls.into_iter().map(|l| (l.name, l.place)).collect();
     (at, crate::starts::held_now(ctx, cfg, r))
 }
