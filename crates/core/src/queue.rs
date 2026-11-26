@@ -3,6 +3,7 @@ use crate::events::{age, fold, last_spawn, Event, IssueState, Json, States};
 use crate::overlap::Conflicts;
 use anyhow::{anyhow, ensure, Result};
 use serde_json::{json, Value};
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Item {
@@ -440,16 +441,116 @@ pub fn fleets_use(
         .flat_map(|c| c.fleet.keys())
         .filter(|f| only.is_none_or(|o| o == *f));
     let line = |st: &States, f: &String| Some(format!("{f}: {}\n", fleet_use(ctx, events, st, f, cfg)?));
-    crate::events::with_states(events, |st| fleets.filter_map(|f| line(st, f)).collect())
+    let all = |st: &States| total(ctx, st, cfg?).map(|(v, cap)| format!("in flight {}/{cap}\n", v.len()));
+    crate::events::with_states(events, |st| {
+        all(st).into_iter().chain(fleets.filter_map(|f| line(st, f))).collect()
+    })
 }
 
 /// The fleet's PRs in flight (at impl, fix, review, verify or ready, or held with an open PR) and its cap, unless off.
 pub fn flight(ctx: &crate::Ctx, st: &States, f: &Fleet, fleet: &str) -> Option<(Vec<u64>, usize)> {
-    let cap = f.in_flight_cap()?;
+    Some((flying(ctx, st, fleet), f.in_flight_cap()?))
+}
+
+fn flying(ctx: &crate::Ctx, st: &States, fleet: &str) -> Vec<u64> {
     let pr = |n: u64| crate::gh::cached_pr(ctx, fleet, n).at("state") == "OPEN";
     let held = |s: &IssueState| matches!(s.state.as_str(), "queued" | "blocked" | "needs-human") && pr(s.issue);
     let flies = |s: &&IssueState| s.fleet == fleet && (in_flight(&s.state) || held(s));
-    Some((st.values().filter(flies).map(|s| s.issue).collect(), cap))
+    st.values().filter(flies).map(|s| s.issue).collect()
+}
+
+/// Every fleet's PRs in flight as (fleet, issue) and `max_in_flight_total`, unless `0` turns it off.
+pub fn total(ctx: &crate::Ctx, st: &States, cfg: &crate::config::Config) -> Option<(Vec<(String, u64)>, usize)> {
+    let cap = Some(cfg.limits.max_in_flight_total).filter(|&n| n > 0)?;
+    let all = cfg
+        .fleet
+        .keys()
+        .flat_map(|f| flying(ctx, st, f).into_iter().map(|n| (f.clone(), n)));
+    Some((all.collect(), cap))
+}
+
+/// `a: #1, #2; b: #4`.
+pub fn by_fleet(v: &[(String, u64)]) -> String {
+    let mut by = BTreeMap::<&str, Vec<u64>>::new();
+    for (f, n) in v {
+        by.entry(f).or_default().push(*n);
+    }
+    let one = |(f, ns): (&str, Vec<u64>)| format!("{f}: {}", hashes(&ns));
+    by.into_iter().map(one).collect::<Vec<_>>().join("; ")
+}
+
+/// Why a first start waits on `max_in_flight_total`.
+pub struct TotalFull {
+    pub prs: Vec<(String, u64)>,
+    pub starts: usize,
+    pub ahead: usize,
+    pub cap: usize,
+}
+
+/// A first start of queued `n` in `fleet` against `max_in_flight_total`: every fleet's PRs in flight, the `pending` starts and the startable issues `fleet_priority` (then the oldest queue entry) puts ahead of it fill the free slots.
+pub fn total_full(
+    ctx: &crate::Ctx,
+    (events, st): (&[Event], &States),
+    cfg: &crate::config::Config,
+    (fleet, n, pending): (&str, u64, &[Event]),
+) -> Option<TotalFull> {
+    let fresh = state(st, fleet, n) == "queued" && crate::gh::cached_pr(ctx, fleet, n).at("state") != "OPEN";
+    let (v, cap) = total(ctx, st, cfg).filter(|_| fresh)?;
+    let me = (fleet.to_string(), n);
+    let v: Vec<_> = v.into_iter().filter(|k| *k != me).collect();
+    let starts = pending.iter().filter_map(|p| Some((p.fleet.clone(), p.issue?)));
+    let starts: BTreeSet<_> = starts.filter(|k| *k != me && !v.contains(k)).collect();
+    let used = v.len() + starts.len();
+    let ahead = if used < cap {
+        ahead(ctx, (events, st), cfg, (fleet, n), &starts)
+    } else {
+        0
+    };
+    (used + ahead >= cap).then_some(TotalFull {
+        prs: v,
+        starts: starts.len(),
+        ahead,
+        cap,
+    })
+}
+
+fn ahead(
+    ctx: &crate::Ctx,
+    (events, st): (&[Event], &States),
+    cfg: &crate::config::Config,
+    (fleet, n): (&str, u64),
+    starts: &BTreeSet<(String, u64)>,
+) -> usize {
+    let adds = crate::events::of_kind(events, &["queue"]);
+    let entered = |g: &str, m: u64| {
+        let add = |e: &&Event| {
+            e.fleet == g && e.str("op") == Some("add") && e.data.get("issues").is_some_and(|v| nums(v).contains(&m))
+        };
+        adds.iter().copied().rfind(add).map_or(0, |e| e.ts)
+    };
+    let order = &cfg.limits.fleet_priority;
+    let rank = |g: &str, ts: u64| {
+        (
+            order.iter().position(|p| p == g).unwrap_or(order.len()),
+            ts,
+            g.to_string(),
+        )
+    };
+    let me = rank(fleet, entered(fleet, n));
+    let others = cfg.fleet.iter().filter(|(g, f)| *g != fleet && !f.paused);
+    let waiting = |(g, f): (&String, &Fleet)| {
+        let free = |m: &u64| !starts.contains(&(g.clone(), *m)) && crate::drive::backoff(ctx, events, g, *m).is_none();
+        let ms: Vec<u64> = startable(events, g)
+            .iter()
+            .filter_map(|m| m.parse().ok())
+            .filter(free)
+            .collect();
+        let first = ms.iter().map(|&m| entered(g, m)).min()?;
+        let used = flying(ctx, st, g).len() + starts.iter().filter(|s| s.0 == *g).count();
+        let room = f.in_flight_cap().map_or(ms.len(), |c| c.saturating_sub(used));
+        (rank(g, first) < me).then(|| ms.len().min(room))
+    };
+    others.filter_map(waiting).sum()
 }
 
 /// Why a first start of queued issue `n` waits: the fleet's other in-flight PRs and `pending` starts fill its cap: (PRs, starts, cap).
