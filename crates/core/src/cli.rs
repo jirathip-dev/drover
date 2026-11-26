@@ -1310,15 +1310,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Hook { role } => run_hook(ctx, r, out, stdin, role.as_deref() == Some("rev"))?,
         Cmd::Statusline => crate::usage::statusline(&crate::config::env("DROVER_LANE").unwrap_or_default(), out),
         Cmd::LaneEvent { kind, data } => lane_event(ctx, &kind, serde_json::from_str(&data)?),
-        Cmd::Heavy(a) => {
-            let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
-            let timeout = |t: &crate::heavy::Ticket, _: &str| {
-                let d = json!({"kind": t.kind, "cmd": t.cmd, "since": t.since});
-                lane_event(ctx, "heavy-timeout", d);
-                None
-            };
-            return a.run(r, &ctx.state.with_file_name("heavy"), lane, timeout);
-        }
+        Cmd::Heavy(a) => return heavy(ctx, r, a),
         Cmd::Hold { wait, cmd } => return crate::heavy::hold(ctx, r, wait, &cmd),
         Cmd::Status(Scope { fleet, json }) => {
             let fleet = fleet.map(|f| crate::rename::current(&ctx.state, &f));
@@ -2421,6 +2413,20 @@ fn coauthor_warn(ctx: &Ctx, r: &dyn Runner, dir: &str, rev: &str) {
     };
     crate::stderr!("drover: warning: a pushed commit carries `{trailer}`; lanes add no AI co-author trailers");
     lane_event(ctx, "coauthor-trailer", json!({"line": trailer}));
+}
+
+fn heavy(ctx: &Ctx, r: &dyn Runner, a: crate::heavy::Args) -> Result<i32> {
+    let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
+    let timeout = |t: &crate::heavy::Ticket, _: &str| {
+        let d = json!({"kind": t.kind, "cmd": t.cmd, "since": t.since});
+        lane_event(ctx, "heavy-timeout", d);
+        None
+    };
+    let fell = |t: &crate::heavy::Ticket| {
+        let d = json!({"kind": t.kind, "cmd": t.cmd, "why": t.here});
+        lane_event(ctx, "heavy-here", d);
+    };
+    a.run(r, &ctx.state.with_file_name("heavy"), lane, fell, timeout)
 }
 
 fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {

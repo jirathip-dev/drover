@@ -631,11 +631,11 @@ fn a_mixed_line_routes_its_build_and_runs_the_rest_here() {
 }
 
 #[test]
-fn a_build_piped_or_reading_stdin_stays_here_and_says_why() {
+fn a_build_fed_by_a_pipe_or_reading_stdin_stays_here_and_says_why() {
     let (d, _, path) = cargo_routed();
     std::fs::write(d.join("in"), "").unwrap();
     for (cmd, why) in [
-        ("cargo test | cat", "heavy: a pipe in the line, running here"),
+        ("echo x | cargo test", "heavy: a pipe in the line, running here"),
         ("cargo test < in", "heavy: stdin (<) in the line, running here"),
     ] {
         let h = hook(&d, cmd);
