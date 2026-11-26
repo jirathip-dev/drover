@@ -288,33 +288,113 @@ fn a_panicking_kick_leaves_no_marker_or_lock() {
 }
 
 #[test]
-fn spawn_pending_for_15_minutes_alerts_once() {
+fn a_start_held_for_any_length_fires_no_spawn_held() {
     let (c, _sh) = fleet("kicks-held", 6, 1);
     let held = |ts| {
         let a = serde_json::json!([{"issue": 3, "step": "spawn", "outcome": "waiting", "code": "SPAWN_PENDING"}]);
         let e = drover::events::Event::new(ts, "sendmeter", None, "drive-pass", serde_json::json!({"actions": a}));
         drover::events::append(&c.state, &e).unwrap();
     };
-    held(c.now - 600);
-    let alerts = || {
-        read(&c.state)
-            .unwrap()
-            .iter()
-            .filter(|e| e.kind == "spawn-held")
-            .count()
-    };
-    assert_eq!(run(&c, &Fake::default(), &["check"]).0, 0);
-    assert_eq!(alerts(), 0, "held 10 min");
-    let later = drover::Ctx {
-        now: c.now + 420,
-        ..c.clone()
-    };
-    held(c.now + 360);
-    let (code, out) = run(&later, &Fake::default(), &["check"]);
+    for ago in [86_000, 3600, 600, 60] {
+        held(c.now - ago);
+    }
+    let (code, out) = run(&c, &Fake::default(), &["check"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("#3 held back by SPAWN_PENDING for 17m"), "{out}");
-    run(&later, &Fake::default(), &["check"]);
-    assert_eq!(alerts(), 1, "once per episode");
+    assert!(!read(&c.state).unwrap().iter().any(|e| e.kind == "spawn-held"), "{out}");
+}
+
+fn one_slot_held(name: &str, issues: u64) -> (drover::Ctx, Fake, FakeShed) {
+    let (c, sh) = fleet(name, 1, issues);
+    mark(&c, 11, 4242, 10);
+    let r = fake(80)
+        .reply("kill -0 4242", "")
+        .reply("ps -o etime= -p 4242", "  00:30\n");
+    (c, r, sh)
+}
+
+fn kick(c: &drover::Ctx, r: &Fake, n: u64) -> String {
+    let n = n.to_string();
+    let (code, out) = run(c, r, &["kick", "sendmeter", &n, "--why", "webhook", "--now"]);
+    assert_eq!(code, 0, "{out}");
+    out
+}
+
+fn kicked_why(c: &drover::Ctx, n: u64) -> String {
+    let ev = read(&c.state).unwrap();
+    let p = ev
+        .iter()
+        .rfind(|e| e.kind == "drive-pass" && e.data["kick"] == n)
+        .unwrap();
+    act(&serde_json::Value::Object(p.data.clone()), n)["why"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+#[test]
+fn a_waiting_fix_round_gets_the_freed_slot_before_a_waiting_first_start() {
+    let (c, held, sh) = one_slot_held("line-round-first", 1);
+    fix_due(&c, 21);
+    let d = pass(&c, &held);
+    assert_eq!(
+        (act(&d, 21)["code"].clone(), act(&d, 1)["code"].clone()),
+        ("SPAWN_PENDING".into(), "SPAWN_PENDING".into()),
+        "{d}"
+    );
+    let (code, board) = run(&c, &held, &["board", "sendmeter"]);
+    assert_eq!(code, 0, "{board}");
+    assert!(board.contains("line 2 SPAWN_PENDING"), "{board}");
+    let (code, out) = run(&c, &held, &["waiting", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("line 1 on every host"), "{out}");
+    let freed = fake(80);
+    let out = kick(&c, &freed, 1);
+    assert!(
+        kicked_why(&c, 1).starts_with("waits its turn behind sendmeter #21"),
+        "{out}"
+    );
+    assert!(!started(&sh) && marker(&c, 1).is_none(), "{out}");
+    let d = pass(&c, &freed);
+    assert_eq!((launched(&freed, 21), launched(&freed, 1)), (1, 0), "{d}");
+}
+
+#[test]
+fn first_starts_refused_in_one_pass_are_admitted_in_queue_order() {
+    let (c, held, sh) = one_slot_held("line-queue-order", 2);
+    let d = pass(&c, &held);
+    assert_eq!(codes(&d), ["SPAWN_PENDING", "SPAWN_PENDING"], "{d}");
+    let freed = fake(80);
+    let out = kick(&c, &freed, 2);
+    assert_eq!(
+        kicked_why(&c, 2),
+        "waits its turn behind sendmeter #1 on local",
+        "{out}"
+    );
+    assert!(!started(&sh), "{out}");
+    let out = kick(&c, &freed, 1);
+    assert!(started(&sh), "{out}");
+}
+
+#[test]
+fn a_refused_start_never_sleeps_and_the_pass_goes_on() {
+    let (c, _sh) = fleet("line-no-sleep", 6, 2);
+    fix_due(&c, 21);
+    for h in ["local", "mini"] {
+        lease_as(&c, &format!("admit-{h}.lock"), 4242, drover::now() - 5, 60);
+    }
+    let r = fake(80)
+        .reply("kill -0 4242", "")
+        .reply("ps -o etime= -p 4242", "  00:05\n");
+    let d = pass(&c, &r);
+    for n in [21, 1, 2] {
+        let a = act(&d, n);
+        assert_eq!(a["code"], "SPAWN_PENDING", "{d}");
+        assert!(
+            a["why"].as_str().unwrap().contains("another pass is admitting a spawn"),
+            "{d}"
+        );
+    }
+    assert!(!r.called("sleep"), "{:?}", r.calls.borrow());
 }
 
 #[test]
@@ -851,11 +931,6 @@ fn a_dead_kicks_marker_counts_nowhere_and_the_hold_names_the_live_one() {
     }
     let (code, out) = run(&c, &r, &["check"]);
     assert_eq!(code, 0, "{out}");
-    let ev = read(&c.state).unwrap();
-    let alert = ev.iter().rfind(|e| e.kind == "spawn-held").expect("spawn-held");
-    let why = alert.str("reason").unwrap_or_default();
-    assert!(why.contains("spawn-sendmeter-17.pending 30s"), "{why}");
-    assert!(!why.contains("spawn-sendmeter-11.pending"), "{why}");
     assert_eq!(stale(&c).len(), 6);
 }
 

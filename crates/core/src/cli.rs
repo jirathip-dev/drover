@@ -1266,8 +1266,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 let look = crate::snapshot::Snap::read(ctx, &spared);
                 let (at, slots) = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
                 let skip = |s: &crate::events::IssueState| {
-                    let f = cfg.as_ref().and_then(|c| c.fleet.get(&s.fleet));
-                    let skip = queue::skipped(&events, &all, f, &s.fleet, (s.issue, ctx), &slots);
+                    let skip = queue::skipped(&events, &all, cfg.as_ref(), &s.fleet, (s.issue, ctx), &slots);
                     skip.map(|s| format!("skipped this pass: {}", s.1))
                 };
                 let skips: Vec<_> = rows.iter().map(|s| skip(s)).collect();
@@ -1824,7 +1823,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             }
                             None => match crate::drive::retrying(ctx, &events, &s.fleet, s.issue)
                                 .map(|w| (String::new(), w))
-                                .or_else(|| queue::skipped(&events, &st, Some(f), &s.fleet, (s.issue, ctx), &slots))
+                                .or_else(|| queue::skipped(&events, &st, Some(&cfg), &s.fleet, (s.issue, ctx), &slots))
                             {
                                 Some((_, why)) => ("drive", format!("next in the queue, held back: {why}{note}")),
                                 None => ("drive", format!("next in the queue: drive starts it{note}")),
