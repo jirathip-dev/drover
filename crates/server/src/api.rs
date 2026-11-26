@@ -416,6 +416,21 @@ pub struct HandoffChoice {
     pub id: String,
 }
 
+/// API v1's `rows` and `thread/<id>/rows` (docs/rows.md): `seq` the newest row's; `more`: ask again from the last row's seq.
+pub struct Rows {
+    pub seq: u64,
+    pub more: bool,
+    pub rows: Vec<RowView>,
+}
+
+/// A row as cooee reads it: the row, what every surface draws (`block`), and a handoff row's item.
+pub struct RowView {
+    #[serde(flatten)]
+    pub row: drover_core::thread::Row,
+    pub block: Value,
+    pub handoff: Option<Handoff>,
+}
+
 /// API v1's `repo/<fleet>/threads`: the repo's conductor threads, newest-active first.
 pub struct RepoThreads {
     pub repo: String,
@@ -1107,6 +1122,16 @@ pub struct AttachEnv {
     pub thread: String,
     #[serde(rename = "DROVER_PORT")]
     pub port: String,
+}
+
+/// `POST /api/v1/thread/<id>/said`: one owner line of an attached chat, copied for `answer --typed`.
+pub struct Said {
+    /// The client's item id: posting it twice logs it once.
+    pub id: String,
+    pub ts: u64,
+    /// `owner`; the agent's own lines stay in the client.
+    pub from: String,
+    pub text: String,
 }
 
 }

@@ -19,7 +19,7 @@ fn ctx(dir: &std::path::Path, config: &str) -> drover::Ctx {
 }
 
 fn started(name: &str) -> bool {
-    sh().all("run").iter().any(|p| p["name"] == name)
+    sh().has(name)
 }
 
 fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: Value) {
@@ -82,7 +82,7 @@ fn a_granted_extend_on_a_never_started_lane_spawns_it_once_the_host_admits() {
 fn used(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
-    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "workspace": "", "runtime": "shed", "branch": "issue-12"});
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "workspace": "", "runtime": "shed-acp", "branch": "issue-12"});
     ev(&c, 10, "spawn", d);
     for (ts, p) in [(11, "1"), (12, "2"), (13, "3")] {
         ev(&c, ts, "verdict", json!({"verdict": "FAIL", "sha": p.repeat(40)}));

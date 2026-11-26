@@ -1,0 +1,42 @@
+[
+  {
+    "block": {
+      "blocks": [
+        {
+          "id": "m-4-t",
+          "markdown": "retry the flaky gate?",
+          "type": "text"
+        },
+        {
+          "id": "m-4-a",
+          "markdown": "✓ **retry** · owner · 16m",
+          "type": "text"
+        }
+      ],
+      "id": "m-4",
+      "kind": "ask",
+      "meta": {
+        "label": "{}",
+        "since": "1970-01-12T13:30:03Z"
+      },
+      "title": "q1",
+      "tone": "",
+      "type": "card"
+    },
+    "fleet": "sendmeter",
+    "handoff": null,
+    "issue": 12,
+    "key": "ask-sendmeter-q1",
+    "kind": "decision",
+    "open": false,
+    "prompt": null,
+    "push": null,
+    "seq": 7,
+    "text": "sendmeter #12 decision q1 by owner: retry",
+    "to": {
+      "id": "t1",
+      "k": "thread"
+    },
+    "ts": 999006
+  }
+]

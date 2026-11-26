@@ -62,6 +62,18 @@ fn shot(t: &mut Terminal<TestBackend>, app: &App) -> String {
     rows.collect::<Vec<_>>().join("\n")
 }
 
+fn later(t: &mut Terminal<TestBackend>, app: &mut App, clock: &std::cell::Cell<u64>) -> String {
+    clock.set(clock.get() + 1);
+    let age = |w: &str| {
+        w.len() > 1 && w.ends_with(['s', 'm', 'h', 'd']) && w[..w.len() - 1].bytes().all(|b| b.is_ascii_digit())
+    };
+    let ageless = |l: &str| {
+        let words: Vec<&str> = l.split(' ').map(|w| if age(w) { "·" } else { w }).collect();
+        words.join(" ").trim_end().to_owned()
+    };
+    screen(t, app).lines().map(ageless).collect::<Vec<_>>().join("\n")
+}
+
 fn until(app: &mut App, done: impl Fn(&App) -> bool) {
     for _ in 0..20 {
         if done(app) {
@@ -191,7 +203,9 @@ fn keys_answer_the_open_ask_and_settle_a_card_and_an_expired_card_is_refused_as_
         assert!(!screen(&mut t, &mut app).contains("answer q1"), "⌫ backs out");
         key(&mut app, KeyCode::Char('2'));
         key(&mut app, KeyCode::Enter);
-        until(&mut app, |_| !kinds(&c, "decision").is_empty());
+        until(&mut app, |a| {
+            !kinds(&c, "decision").is_empty() && !shot(&mut term(40, 18), a).contains("answer q1")
+        });
         let d = &kinds(&c, "decision")[0];
         assert_eq!(
             (d.str("id"), d.str("choice"), d.str("by")),
@@ -376,18 +390,25 @@ fn every_key_of_the_designs_list_does_what_the_list_says() {
     let cli = b.on(&cli);
     let ctrl = |app: &mut App, ch: char| app.key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::CONTROL));
     let door = Local::new(&c, &cli);
+    let clock = std::rc::Rc::new(std::cell::Cell::new(c.now));
+    let tick = clock.clone();
+    drover::sim::set(Some(drover::sim::Hooks {
+        now: Box::new(move || tick.get()),
+        pid: std::process::id(),
+        point: Box::new(|_| {}),
+    }));
     std::thread::scope(|s| {
         let mut app = App::new(s, &c, &cli, &door, &Open::Threads(None));
         let mut t = term(40, 18);
-        screen(&mut t, &mut app);
+        later(&mut t, &mut app, &clock);
         key(&mut app, KeyCode::Tab);
-        assert!(screen(&mut t, &mut app).contains("Queue · Events · Lanes"));
+        assert!(later(&mut t, &mut app, &clock).contains("Queue · Events · Lanes"));
         key(&mut app, KeyCode::Tab);
         key(&mut app, KeyCode::Char('?'));
-        assert!(screen(&mut t, &mut app).contains("Ctrl-C"));
+        assert!(later(&mut t, &mut app, &clock).contains("Ctrl-C"));
         (0..9).for_each(|_| key(&mut app, KeyCode::Char('j')));
         assert!(
-            screen(&mut t, &mut app).contains("Esc or ⌫"),
+            later(&mut t, &mut app, &clock).contains("Esc or ⌫"),
             "the sheet scrolls to its end"
         );
         key(&mut app, KeyCode::Esc);
@@ -397,29 +418,29 @@ fn every_key_of_the_designs_list_does_what_the_list_says() {
         typed(&mut app, "zb");
         key(&mut app, KeyCode::Left);
         typed(&mut app, "X");
-        assert!(screen(&mut t, &mut app).contains("› zX▌b"));
+        assert!(later(&mut t, &mut app, &clock).contains("› zX▌b"));
         key(&mut app, KeyCode::Right);
         key(&mut app, KeyCode::Backspace);
-        assert!(screen(&mut t, &mut app).contains("› zX▌"));
+        assert!(later(&mut t, &mut app, &clock).contains("› zX▌"));
         ctrl(&mut app, 'u');
-        assert!(screen(&mut t, &mut app).contains("› ▌message t1"));
-        let bottom = screen(&mut t, &mut app);
+        assert!(later(&mut t, &mut app, &clock).contains("› ▌message t1"));
+        let bottom = later(&mut t, &mut app, &clock);
         key(&mut app, KeyCode::Up);
-        assert_ne!(screen(&mut t, &mut app), bottom, "↑ scrolls");
+        assert_ne!(later(&mut t, &mut app, &clock), bottom, "↑ scrolls");
         key(&mut app, KeyCode::Down);
-        assert_eq!(screen(&mut t, &mut app), bottom);
+        assert_eq!(later(&mut t, &mut app, &clock), bottom);
         ctrl(&mut app, 'b');
-        assert_ne!(screen(&mut t, &mut app), bottom, "Ctrl-B pages up");
+        assert_ne!(later(&mut t, &mut app, &clock), bottom, "Ctrl-B pages up");
         ctrl(&mut app, 'f');
-        assert_eq!(screen(&mut t, &mut app), bottom, "Ctrl-F pages back down");
+        assert_eq!(later(&mut t, &mut app, &clock), bottom, "Ctrl-F pages back down");
         key(&mut app, KeyCode::Char('d'));
-        let pick = screen(&mut t, &mut app);
+        let pick = later(&mut t, &mut app, &clock);
         assert!(
             pick.contains("deny r1") && pick.contains("nothing runs") && pick.contains("echo hi"),
             "{pick}"
         );
         key(&mut app, KeyCode::Esc);
-        assert_eq!(screen(&mut t, &mut app), bottom, "Esc backs out");
+        assert_eq!(later(&mut t, &mut app, &clock), bottom, "Esc backs out");
         key(&mut app, KeyCode::Char('d'));
         key(&mut app, KeyCode::Enter);
         until(&mut app, |_| !kinds(&c, "run-settled").is_empty());
@@ -428,11 +449,14 @@ fn every_key_of_the_designs_list_does_what_the_list_says() {
         assert!(!app.quit, "q types in the chat");
         ctrl(&mut app, 'u');
         key(&mut app, KeyCode::Esc);
-        assert!(screen(&mut t, &mut app).contains("↵ open"), "Esc: back to the list");
+        assert!(
+            later(&mut t, &mut app, &clock).contains("↵ open"),
+            "Esc: back to the list"
+        );
         key(&mut app, KeyCode::Enter);
         key(&mut app, KeyCode::Backspace);
         assert!(
-            screen(&mut t, &mut app).contains("↵ open"),
+            later(&mut t, &mut app, &clock).contains("↵ open"),
             "⌫ with the box empty: back to the list"
         );
     });

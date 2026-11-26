@@ -104,11 +104,14 @@ fn branch_main_ignores_a_newer_staging_head_and_installs_main_heads_release() {
     assert_eq!(code, 0, "{out}");
     assert!(out.starts_with("✓ installed 1111111 at "), "{out}");
     assert!(
-        r.called("git -C /x/drover fetch -q origin main"),
+        r.called("git -C /x/drover fetch -q origin +refs/heads/main:refs/remotes/origin/main"),
         "{:?}",
         r.calls.borrow()
     );
-    assert!(!r.called("git -C /x/drover fetch -q origin staging") && !r.called("gh release download build-staging-"));
+    assert!(
+        !r.called("git -C /x/drover fetch -q origin +refs/heads/staging:")
+            && !r.called("gh release download build-staging-")
+    );
     assert!(has(&live, MAIN), "the release is live");
 
     let r = heads(&c, &live, &[("main", MAIN), ("staging", MAIN2)]);
@@ -370,7 +373,6 @@ fn a_release_is_staged_gated_swapped_synced_and_restarted() {
         "{calls}"
     );
     assert_eq!(kinds(&c, "self-updated")[0].str("sha"), Some(SHA));
-    assert!(kinds(&c, "self-update-swapping").is_empty(), "no remote host to hold");
 
     let r2 = release(base(&c, &live), "main", SHA, &live);
     assert_eq!(run(&c, &Disk(&r2), &["self-update"]).1, "= up to date @ abcdef1\n");

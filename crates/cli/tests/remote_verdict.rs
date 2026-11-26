@@ -16,7 +16,9 @@ fn head() -> String {
 
 fn setup(name: &str) -> (drover::Ctx, String) {
     let rev = tmpdir(&format!("{name}-rev")).display().to_string();
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG
+        .replace("harness  =  \"claude\"", "harness = \"claude\"")
+        .replace("review_rounds = 3", "review_rounds = 3\nssh_sessions = 64");
     let c = ctx(
         &tmpdir(name),
         &format!("{base}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n"),
@@ -163,6 +165,25 @@ fn a_verdict_md_in_the_hosts_report_is_recorded_in_the_same_pass() {
     assert!(kinds(&c, "verdict-pickup-failed").is_empty(), "{out}");
 }
 
+#[test]
+fn a_remote_verdict_md_the_hosts_report_never_carries_is_read_there_and_recorded_in_one_pass() {
+    let (c, rev) = setup("remote-verdict-unreported");
+    let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
+    bazzite.lane(LANE, "done", &rev);
+    let verdict = format!("PASS\n\nReviewed head: {}\n", head());
+    let f = boat(&rev, Ok(&verdict));
+    std::fs::remove_file(format!("{rev}/verdict.md")).unwrap();
+    let f = f.reply(&format!("{SSH}'cat' '{rev}/verdict.md'"), &verdict);
+    let (code, out) = run(&c, &two(&f, &bazzite), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let v = kinds(&c, "verdict");
+    assert_eq!(v.len(), 1, "{out}");
+    assert_eq!(
+        (v[0].str("verdict"), v[0].str("sha")),
+        (Some("PASS"), Some(head().as_str()))
+    );
+}
+
 fn fix_due(c: &drover::Ctx, n: u64) {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
@@ -220,4 +241,144 @@ fn two<'a>(f: &'a Fake, bazzite: &'a FakeShed) -> OverSsh<'a> {
         f,
         hosts: vec![("bazzite", bazzite)],
     }
+}
+
+#[test]
+fn with_an_admission_pending_a_ready_pr_merges_and_a_remote_verdict_is_recorded_in_the_same_pass() {
+    let (c, rev) = setup("remote-verdict-1625-admission");
+    let cfg = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(
+        &c.config,
+        cfg.replace("max_parallel_spawns = 0", "max_parallel_spawns = 6"),
+    )
+    .unwrap();
+    let (sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
+    bazzite.lane(LANE, "idle", &rev);
+    bazzite.exit(LANE);
+    let wt = c.worktrees.join("sendmeter/issue-5");
+    std::fs::create_dir_all(&wt).unwrap();
+    let wt = wt.display().to_string();
+    let ready = "b".repeat(40);
+    let at = |kind, d| append(&c.state, &Event::new(NOW - 800, "sendmeter", Some(5), kind, d)).unwrap();
+    at(
+        "spawn",
+        json!({"role": "impl", "agent": "sendmeter-impl-5", "harness": "claude", "pane": "sendmeter-impl-5",
+               "worktree": wt, "branch": "issue-5"}),
+    );
+    at("verdict", json!({"verdict": "PASS", "sha": ready, "body": "PASS"}));
+    sh.lane("sendmeter-impl-5", "idle", &wt);
+    for k in ["admit-local.lock", "admit-mini.lock", "admit-bazzite.lock"] {
+        lease_as(&c, k, 4242, drover::now(), 600);
+    }
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "7"]).0, 0);
+    let green = json!({"number": 105, "state": "OPEN", "baseRefName": "staging", "headRefOid": ready,
+                       "mergeable": "MERGEABLE",
+                       "statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]});
+    let f = boat(&rev, Ok(&format!("PASS\n\nReviewed head: {}\n", head())))
+        .reply("kill -0 4242", "")
+        .reply("ps -o etime= -p 4242", "  10:00\n")
+        .reply("gh pr view issue-5", &green.to_string())
+        .reply("gh pr view 105", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
+        .reply("gh pr merge 105", "")
+        .reply(
+            "gh api repos/jirathip-dev/sendmeter/branches/issue-5",
+            &format!("{ready}\n"),
+        )
+        .reply("gh api -X POST repos/jirathip-dev/sendmeter/statuses/", "{}")
+        .reply("gh issue view", r#"{"title":"t","body":"b"}"#)
+        .reply("gh issue", "")
+        .reply("sh -c nohup", "4321\n")
+        .reply("git -C", "");
+    let (code, out) = run(&c, &two(&f, &bazzite), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("REFUSED SPAWN_PENDING"),
+        "the start waits on the admission: {out}"
+    );
+    let kicks: Vec<String> = f
+        .calls
+        .borrow()
+        .iter()
+        .filter(|l| l.contains(" --why plan "))
+        .cloned()
+        .collect();
+    let mut ran = String::new();
+    for k in &kicks {
+        let a: Vec<&str> = k.split(' ').skip(4).take_while(|w| *w != ">>").collect();
+        let (code, o) = run_only(&c, &two(&f, &bazzite), &a);
+        assert_eq!(code, 0, "{o}");
+        ran += &o;
+    }
+    let v = kinds(&c, "verdict");
+    assert!(
+        v.iter()
+            .any(|e| e.issue == Some(12) && e.str("verdict") == Some("PASS")),
+        "{out}"
+    );
+    assert!(kinds(&c, "merged").iter().any(|e| e.issue == Some(5)), "{out}\n{ran}");
+    assert!(
+        lease_on(&c, "admit-bazzite.lock").is_some_and(|l| l.pid == 4242),
+        "still pending"
+    );
+}
+
+fn refused_then_one_card(name: &str, (queue, code): (&str, &str), exited: bool) {
+    let (c, rev) = setup(name);
+    let (q, out) = run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", queue]);
+    assert_eq!(q, 0, "{out}");
+    let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
+    bazzite.lane(LANE, "idle", &rev);
+    if exited {
+        bazzite.exit(LANE);
+    }
+    let f = boat(&rev, Ok(&format!("PASS\n\nReviewed head: {}\n", head())));
+    let (status, out) = run(&c, &two(&f, &bazzite), &["drive"]);
+    assert_eq!(status, 0, "{out}");
+    assert!(out.contains(&format!("REFUSED {code}")), "{out}");
+    let (_, waiting) = run(&c, &two(&f, &bazzite), &["waiting", "sendmeter"]);
+    assert!(waiting.contains(&format!("verdict refused {code}")), "{waiting}");
+    assert!(!waiting.contains("recording within 1 min"), "{waiting}");
+    let later = drover::Ctx {
+        now: c.now + 31 * 60,
+        ..c.clone()
+    };
+    for _ in 0..2 {
+        let (_, out) = run(&later, &two(&f, &bazzite), &["drive"]);
+        let nh = kinds(&c, "needs-human");
+        assert_eq!(nh.len(), 1, "{out}");
+        assert_eq!(nh[0].str("code"), Some(code), "{out}");
+    }
+    assert!(kinds(&c, "verdict").is_empty());
+}
+
+#[test]
+fn a_remote_no_repro_pass_from_an_exited_reviewer_is_shown_then_one_owner_card_after_the_stall_threshold() {
+    refused_then_one_card("remote-verdict-norepro", ("--repro", "NO_REPRO"), true);
+}
+
+#[test]
+fn a_remote_no_baseline_pass_is_shown_then_one_owner_card_after_the_stall_threshold() {
+    refused_then_one_card("remote-verdict-nobaseline", ("--perf", "NO_BASELINE"), false);
+}
+
+#[test]
+fn a_remote_no_baseline_pass_from_an_exited_reviewer_is_shown_then_one_owner_card() {
+    refused_then_one_card("remote-verdict-nobaseline-gone", ("--perf", "NO_BASELINE"), true);
+}
+
+#[test]
+fn a_remote_valid_pass_is_recorded_in_the_next_pass() {
+    let (c, rev) = setup("remote-verdict-pass");
+    let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
+    bazzite.lane(LANE, "idle", &rev);
+    bazzite.exit(LANE);
+    let f = boat(&rev, Ok(&format!("PASS\n\nReviewed head: {}\n", head())));
+    let (code, out) = run(&c, &two(&f, &bazzite), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let v = kinds(&c, "verdict");
+    assert_eq!(v.len(), 1, "{out}");
+    assert_eq!(
+        (v[0].str("verdict"), v[0].str("sha")),
+        (Some("PASS"), Some(head().as_str()))
+    );
 }

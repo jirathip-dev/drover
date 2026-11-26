@@ -196,6 +196,13 @@ fn ended(events: &[Event], sessions: &Sessions, sp: &Event) -> Option<Exit> {
     }
 }
 
+/// Drover closed or killed the lane spawn `sp` started.
+pub fn closed(events: &[Event], sp: &Event) -> bool {
+    let shut = |e: &Event| e.kind == "lane-closed" && crate::events::ends(e, sp) && e.ts >= sp.ts;
+    let killed = |e: &Event| e.kind == "lane-killed" && e.str("agent") == sp.str("agent") && e.ts >= sp.ts;
+    (crate::events::of_kind(events, &["lane-closed", "lane-killed"]).into_iter()).any(|e| shut(e) || killed(e))
+}
+
 /// The issue's active lane's health: one rule set for stall, never-started, dead and closed.
 pub fn health(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &Sessions, s: &IssueState) -> Health {
     let Some((_, lane)) = s.active_lane() else {
@@ -204,9 +211,7 @@ pub fn health(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &Sessions, s:
     let Some(sp) = last_spawn(events, lane) else {
         return Health::Unknown;
     };
-    let shut = |e: &Event| e.kind == "lane-closed" && crate::events::ends(e, sp) && e.ts >= sp.ts;
-    let killed = |e: &Event| e.kind == "lane-killed" && e.str("agent") == Some(lane) && e.ts >= sp.ts;
-    if (crate::events::of_kind(events, &["lane-closed", "lane-killed"]).into_iter()).any(|e| shut(e) || killed(e)) {
+    if closed(events, sp) {
         return Health::Closed;
     }
     let live = match sessions.seen(lane, sp.str("machine")) {
@@ -224,8 +229,7 @@ pub fn health(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &Sessions, s:
             None => return Health::Dead(ended(events, sessions, sp)),
         },
     };
-    let resent = |e: &&Event| e.kind == "start-resent" && e.str("agent") == Some(lane) && e.ts >= sp.ts;
-    let start = events.iter().rfind(resent).map_or(sp.ts, |e| e.ts);
+    let start = sp.ts;
     if live == Status::Unreported {
         let due = ctx.now >= start + crate::stall::START_SECS;
         return if due {
@@ -265,11 +269,15 @@ fn owner(events: &[Event], sp: &Event) -> bool {
     asked || ended.is_some_and(|t| !answered(t))
 }
 
-/// A session's fleet, issue and role from drover's labels on it, when its fleet is configured.
+/// A session's fleet, issue and role from drover's labels on it (a `fix` round runs as `impl`), when its fleet is configured.
 pub fn whose<'a>(cfg: &Config, s: &'a Session) -> Option<(&'a str, Option<u64>, Option<&'a str>)> {
     let fleet = s.labels.get("fleet").filter(|f| cfg.fleet.contains_key(*f))?;
     let issue = s.labels.get("issue").and_then(|i| i.parse().ok());
-    Some((fleet, issue, s.labels.get("role").map(String::as_str)))
+    let role = s
+        .labels
+        .get("role")
+        .map(|r| if r == "fix" { "impl" } else { r.as_str() });
+    Some((fleet, issue, role))
 }
 
 /// The running sessions labelled for a configured fleet that no `spawn`, adoption, conductor start or young `spawn-started` names.

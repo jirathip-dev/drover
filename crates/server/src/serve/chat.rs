@@ -849,6 +849,41 @@ fn owner_card(ctx: &Ctx, events: &[Event], e: &Event) -> Option<Msg> {
     }
 }
 
+pub(super) fn drawn(ctx: &Ctx, events: &[Event], e: &Event, row: &crate::thread::Row, id: &str) -> Value {
+    use crate::thread::RowKind as K;
+    let m = Msg {
+        seq: e.seq,
+        ts: e.ts,
+        kind: "note".into(),
+        text: row.text.clone(),
+        link: link(e),
+        ..Msg::default()
+    };
+    let m = match row.kind {
+        K::Ask | K::Decision => ask(
+            events,
+            e,
+            Msg {
+                kind: "ask".into(),
+                ..m
+            },
+        ),
+        K::RunCard => Msg {
+            kind: "run".into(),
+            run: Some(run_card(ctx, events, e)),
+            ..m
+        },
+        K::ConfigCard | K::SecretCard => owner_card(ctx, events, e).unwrap_or(m),
+        K::Said => Msg {
+            kind: "msg".into(),
+            from: "owner".into(),
+            ..m
+        },
+        _ => m,
+    };
+    wire(&msg_body(ctx.now, id, &m, true, None).block())
+}
+
 pub(super) fn owner_cards(ctx: &Ctx, events: &[Event], paired: bool) -> Vec<Value> {
     let all = crate::events::of_kind(events, &["config-propose", "secret-request"]);
     let card = |e: &Event| {

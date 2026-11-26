@@ -2,7 +2,7 @@ use crate::config::{expand, Config, Role};
 use crate::events::{self, emit, working, Event, Json};
 use crate::gate::refused;
 use crate::runner::Runner;
-use crate::session::Session;
+use crate::session::{Session, Status};
 use crate::spawn::Plan;
 use crate::{providers, term, Ctx};
 use anyhow::{bail, Context, Result};
@@ -54,7 +54,7 @@ pub fn find<'a>(events: &'a [Event], id: &str) -> Result<&'a Event> {
     }
 }
 
-fn link_of<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
+pub(crate) fn link_of<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
     let link = |e: &&Event| matches!(e.kind.as_str(), "orchestrator-attached" | "orchestrator-detached");
     events.iter().rfind(|e| link(e) && e.str("thread") == Some(id))
 }
@@ -84,14 +84,20 @@ fn hold(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str, mut extra: Value) -> Res
     Ok(t)
 }
 
+/// `POST /api/v1/orchestrator-attach` and `drover attach`: chat `id` on `fleet`, a repo, `all` or `none`; its brief, settings and env.
 pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
-    let f = cfg.fleet(fleet)?;
-    let (_, role) = defaults(cfg, fleet)?;
+    let any = matches!(fleet, "all" | "none");
+    let range = if any {
+        None
+    } else {
+        cfg.fleet(fleet)?.port_range.as_deref()
+    };
+    let (_, role) = defaults(cfg, if any { "all" } else { fleet })?;
     let t = hold(ctx, cfg, fleet, id, json!({}))?;
     let p = role.profile_or("orchestrator");
     let acp = providers::get(&role.harness).acp().unwrap_or(&role.harness);
     let why = crate::spawn::unguarded(ctx, (&p, "orchestrator", &role.harness), acp, false);
-    let port = crate::spawn::lane_port(f.port_range.as_deref(), &format!("{fleet}/orchestrator-{id}"), &[]);
+    let port = crate::spawn::lane_port(range, &format!("{fleet}/orchestrator-{id}"), &[]);
     let settings = providers::profiles_root(ctx).join(&p).join("settings.json");
     let env = json!({"DROVER_LANE": format!("{fleet}:-:orchestrator"), "DROVER_THREAD": id,
         "DROVER_PORT": port.to_string()});
@@ -100,6 +106,27 @@ pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
         json!({"ok": true, "code": "OK", "message": message, "brief": brief::thread(cfg, &t, fleet),
         "settings": settings, "env": env, "guarded": why.is_empty(), "why": why}),
     )
+}
+
+/// `POST /api/v1/thread/<id>/said`: an attached chat's owner line, logged once per `item` for `answer --typed`.
+pub fn said(ctx: &Ctx, cfg: &Config, id: &str, (item, from, text): (&str, &str, &str)) -> Result<String> {
+    if from != "owner" || item.is_empty() {
+        return refused(
+            "BAD_VALUE",
+            "said: an `id` and `from: owner`; the agent's lines stay in the client",
+        );
+    }
+    text_ok(text)?;
+    let events = working(&ctx.state)?;
+    let Some(t) = attached(&events, id) else {
+        return refused("NO_SUCH_THREAD", format!("{id} is no attached chat"));
+    };
+    if of(&events, id).any(|e| e.kind == "thread-msg" && e.str("item") == Some(item)) {
+        return Ok(format!("{item} is logged already"));
+    }
+    let d = json!({"thread": id, "from": "owner", "text": text, "item": item, "via": "client"});
+    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))?;
+    Ok(format!("{item} logged in {id}"))
 }
 
 /// `POST /api/v1/orchestrator-detach`: the link ends (`orchestrator-detached`); `NO_SUCH_THREAD` unless attached.
@@ -238,11 +265,11 @@ fn make(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, (harness, orch): Opt2,
             a.kind == "needs-decision"
                 && a.fleet == repo
                 && a.data.get("lane_ask").is_some()
-                && routed_to(&events, a).is_none()
+                && crate::thread::route::routed_to(&events, a).is_none()
                 && events::closed(&events, a).is_none()
         };
         for a in events.iter().filter(waiting) {
-            route_row(ctx, cfg, &id, a)?;
+            crate::thread::route::route_row(ctx, cfg, &id, a)?;
         }
     }
     Ok(id)
@@ -520,96 +547,13 @@ pub fn handoff_text(e: &Event) -> String {
     e.str("target").map_or(title.into(), |t| format!("{title} → {t}"))
 }
 
-/// The thread a lane's ask on `fleet` goes to: `[fleet.<n>] ask_thread`, else the repo's most recently active one (neither archived); none without a conductor role. an attached cooee thread is one of them.
-pub fn route<'a>(cfg: &Config, events: &'a [Event], fleet: &str) -> Option<&'a str> {
-    let own = role(cfg, fleet).is_ok();
-    let chat = |e: &Event| e.str("via") == Some("profile");
-    let repo = |e: &&'a Event| {
-        e.fleet == fleet && (own && e.kind == "thread-new" || e.kind == "orchestrator-attached" && !chat(e))
-    };
-    let ids = events.iter().filter(repo).filter_map(|e| e.str("thread"));
-    let live = |id: &&str| match link_of(events, id) {
-        Some(_) => attached(events, id).is_some_and(|e| e.fleet == fleet),
-        None => !archived(events, id),
-    };
-    let ids: Vec<&str> = ids.filter(live).collect();
-    let pin = cfg.fleet.get(fleet).and_then(|f| f.ask_thread.as_deref());
-    let newest = || ids.iter().max_by_key(|id| of(events, id).map(|e| e.seq).max()).copied();
-    ids.iter().find(|id| Some(**id) == pin).copied().or_else(newest)
-}
-
-/// Lane ask `a` typed into thread `id`'s orchestrator (started or resumed) as a system line the board hides.
-pub fn lane_ask(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, a: &Event) -> Result<String> {
-    let t = find(&working(&ctx.state)?, id)?.clone();
-    let text = route_row(ctx, cfg, id, a)?;
-    deliver(ctx, cfg, r, &t, &format!("[{id}] system: {text}"))
-}
-
-fn route_row(ctx: &Ctx, cfg: &Config, id: &str, a: &Event) -> Result<String> {
-    let s = |k| a.str(k).unwrap_or_default();
-    let rec = a.val("recommend").as_u64();
-    let opts = a.val("options").as_array().into_iter().flatten().zip(1..);
-    let opts: String = opts
-        .map(|(o, n)| {
-            let r = if rec == Some(n) { " (recommended)" } else { "" };
-            format!(" [{n}] {}{r}", o.as_str().unwrap_or_default())
-        })
-        .collect();
-    let at = a.issue.map_or("the fleet".into(), |n| format!("#{n}"));
-    let text = format!(
-        "lane ask {} on {at} from {} ({}): {}{opts}. Answer it only if the issue spec or a past decision settles it: \
-         `drover answer {} {} <n> --basis \"<verbatim spec quote | q<id>>\"`; else run it without --basis and it \
-         goes to the owner.",
-        s("id"),
-        a.str("agent").unwrap_or("a lane"),
-        s("kind"),
-        s("question"),
-        a.fleet,
-        s("id")
-    );
-    let d = json!({"thread": id, "from": "system", "text": text, "lane_ask": a.str("id")});
-    emit(&ctx.state, cfg, Event::new(ctx.now, &a.fleet, None, "thread-msg", d))?;
-    Ok(text)
-}
-
-/// The thread lane ask `a` was routed to: when asked, else its routing row in a thread opened after.
-pub fn routed_to<'a>(events: &'a [Event], a: &'a Event) -> Option<&'a str> {
-    let row = |e: &&Event| e.kind == "thread-msg" && e.fleet == a.fleet && e.str("lane_ask") == a.str("id");
-    a.str("routed")
-        .or_else(|| events.iter().find(row).and_then(|e| e.str("thread")))
-}
-
-/// Lane ask `a` put to the owner as a choice row in thread `id` (once), `rec` (else its own) recommended; it pushes as an ask.
-pub fn to_owner(ctx: &Ctx, cfg: &Config, id: &str, a: &Event, rec: Option<u64>, why: &str) -> Result<()> {
-    let events = working(&ctx.state)?;
-    if of(&events, id).any(|e| e.kind == "ask-owner" && e.str("id") == a.str("id")) {
-        return Ok(());
-    }
-    let rec = rec.or_else(|| a.val("recommend").as_u64());
-    let d = json!({"thread": id, "id": a.str("id"), "question": a.str("question"), "options": a.val("options"),
-        "recommend": rec, "agent": a.str("agent"), "why": why});
-    emit(&ctx.state, cfg, Event::new(ctx.now, &a.fleet, a.issue, "ask-owner", d))
-}
-
 /// An `ask-owner` row's lane ask.
 pub fn lane_of<'a>(events: &'a [Event], e: &Event) -> Option<&'a Event> {
     events::ask_event(events, "needs-decision", &e.fleet, e.str("id").unwrap_or_default())
 }
 
-/// A one-line row from thread `id` into each thread that handed off to it (an issue filed, an ask answered).
-pub fn flow(ctx: &Ctx, cfg: &Config, id: &str, text: &str) -> Result<()> {
-    let events = working(&ctx.state)?;
-    let to_id = |e: &&Event| e.kind == "thread-handoff" && e.str("to") == Some(id);
-    let srcs: std::collections::BTreeSet<_> = events.iter().filter(to_id).filter_map(|e| e.str("from")).collect();
-    for s in srcs {
-        let d = json!({"thread": s, "from": "system", "via": id, "text": text});
-        let e = Event::new(ctx.now, &find(&events, s)?.fleet, None, "thread-msg", d);
-        emit(&ctx.state, cfg, e)?;
-    }
-    Ok(())
-}
-
-fn is_id(s: &str) -> bool {
+/// `s` is a drover thread id (`t<n>`).
+pub fn is_id(s: &str) -> bool {
     s.len() > 1 && s.starts_with('t') && s[1..].bytes().all(|b| b.is_ascii_digit())
 }
 
@@ -630,7 +574,7 @@ pub fn text_ok(text: &str) -> Result<()> {
     Ok(())
 }
 
-fn log(ctx: &Ctx, cfg: &Config, t: &Event, from: &str, (text, files): (&str, &[Value])) -> Result<()> {
+pub(crate) fn log(ctx: &Ctx, cfg: &Config, t: &Event, from: &str, (text, files): (&str, &[Value])) -> Result<()> {
     let mut d = json!({"thread": t.str("thread"), "from": from, "text": text});
     if !files.is_empty() {
         d.put("files", json!(files));
@@ -710,16 +654,6 @@ pub fn say(
     deliver(ctx, cfg, r, &t, &line)
 }
 
-/// A card's settle line into thread `id` as `system`: typed into a drover thread's orchestrator, logged for a cooee chat.
-pub fn tell(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, line: &str) {
-    let chat = working(&ctx.state).ok().and_then(|e| attached(&e, id).cloned());
-    match chat {
-        Some(t) => log(ctx, cfg, &t, "system", (line, &[])),
-        None => say(ctx, cfg, r, (id, line, &[]), ("system", false)).map(drop),
-    }
-    .ok();
-}
-
 thread_local! {
     static LATER: std::cell::RefCell<Option<Vec<(Event, String)>>> = const { std::cell::RefCell::new(None) };
 }
@@ -754,7 +688,11 @@ pub fn post(
 /// `say`'s second half: type `line` into thread `t`'s orchestrator, starting or resuming it first.
 pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Result<String> {
     let id = t.str("thread").unwrap_or_default();
-    let cur = thread_role(cfg, &working(&ctx.state)?, t)?.1;
+    let events = working(&ctx.state)?;
+    if attached(&events, id).is_some() {
+        return Ok(id.into());
+    }
+    let cur = thread_role(cfg, &events, t)?.1;
     let ms = harness_models(cfg, &cur.harness);
     if let Some(m) = cur.model.filter(|m| !ms.is_empty() && !ms.contains(&m.as_str())) {
         let text = format!("model {m} is not one of {ms:?}");
@@ -786,10 +724,32 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
     let id = t.str("thread").unwrap_or_default();
     let events = working(&ctx.state)?;
     let last = of(&events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
-    let agents = crate::session::live_on(r)?;
-    let awake = last
-        .filter(|s| s.kind == "orchestrator-start" && agents.iter().any(|a| Some(a.name.as_str()) == s.str("agent")));
-    let picked = awake.is_some_and(|s| of(&events, id).any(|e| e.kind == "thread-model" && e.seq > s.seq));
+    let own = format!("orchestrator-{id}");
+    let agent = last.and_then(|s| s.str("agent")).unwrap_or(&own);
+    let found = crate::session::get(r, agent)?;
+    if let Some(ended) = found.as_ref().filter(|a| a.status().is_none_or(|s| s == Status::Done)) {
+        let was = ended.status().map_or("exited", Status::word);
+        crate::session::transcript::archive(r, ctx, agent).ok();
+        let w = r.shed().context(crate::config::NO_RUNTIME)?.wire;
+        let target = json!(shed_proto::Target { name: agent.into() });
+        crate::shed::call(r, &w, shed_proto::Method::Kill, target.clone()).ok();
+        crate::shed::call(r, &w, shed_proto::Method::Rm, target)?;
+        return start(ctx, cfg, r, (t, Some(was)), &events, line);
+    }
+    let agents: Vec<Session> = found.into_iter().collect();
+    let begun = of(&events, id).rfind(|e| e.kind == "orchestrator-start");
+    let picked = begun.is_some_and(|s| of(&events, id).any(|e| e.kind == "thread-model" && e.seq > s.seq));
+    if last.is_some_and(|l| l.kind != "orchestrator-start") && !agents.is_empty() && !picked {
+        let mut was = begun.map(|s| s.data.clone()).unwrap_or_default();
+        was.remove("replaced");
+        let mut d = Value::Object(was);
+        d.put("thread", json!(id))
+            .put("agent", json!(agent))
+            .put("resumed", json!(true));
+        started(ctx, cfg, t, d)?;
+        return once(ctx, cfg, r, t, line);
+    }
+    let awake = last.filter(|s| s.kind == "orchestrator-start" && !agents.is_empty());
     let stuck = awake.and(hung(ctx, cfg, &events, &agents, id));
     let Some(s) = awake.filter(|_| !picked && stuck.is_none()) else {
         match (awake, stuck) {
@@ -803,29 +763,15 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
                     Event::new(ctx.now, &t.fleet, None, "orchestrator-sleep", d),
                 )?;
             }
+            (None, _) if !agents.is_empty() => term::close(ctx, r, agent).map(drop)?,
             _ => {}
         }
-        return start(ctx, cfg, r, t, &working(&ctx.state)?, line);
+        return start(ctx, cfg, r, (t, None), &working(&ctx.state)?, line);
     };
-    let (agent, pane) = (s.str("agent").unwrap_or_default(), s.str("pane").unwrap_or_default());
-    if acp(s) {
-        crate::shed::cli(r, &["send", agent, line])?;
-        held(ctx, cfg, r, t, &events, agents.iter().find(|a| a.name == agent))?;
-        return Ok(agent.into());
-    }
-    term::reply(
-        r,
-        s.str("harness") == Some("dsh"),
-        agent,
-        pane,
-        &line.replace('\n', " "),
-    )?;
-    held(ctx, cfg, r, t, &events, agents.iter().find(|a| a.name == agent))?;
+    let agent = s.str("agent").unwrap_or_default();
+    crate::shed::cli(r, &["send", agent, line])?;
+    held(ctx, cfg, r, t, &events, agents.first())?;
     Ok(agent.into())
-}
-
-fn acp(s: &Event) -> bool {
-    s.str("runtime") == Some("shed-acp")
 }
 
 /// Thread `id`'s awake ACP conductor reporting `working` with no CPU and no output for `stall_minutes`: its start and quiet seconds.
@@ -837,7 +783,7 @@ pub fn hung<'a>(
     id: &str,
 ) -> Option<(&'a Event, u64)> {
     let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
-    let s = last.filter(|e| e.kind == "orchestrator-start" && acp(e))?;
+    let s = last.filter(|e| e.kind == "orchestrator-start")?;
     let a = agents.iter().find(|a| Some(a.name.as_str()) == s.str("agent"))?;
     let out = crate::session::pulse::of(ctx, &a.name).map_or(0, |p| p.heard);
     let quiet = ctx.now.saturating_sub(out.max(s.ts));
@@ -857,7 +803,7 @@ fn end(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (t, s): (&Event, &Event), mut d:
     )
 }
 
-/// `drover stop <thread>`: end its conductor (an ACP session cancelled and killed, a pane sent Esc); logs `stop`.
+/// `drover stop <thread>`: end its conductor (its ACP session cancelled and killed); logs `stop`.
 pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> {
     let events = working(&ctx.state)?;
     let t = find(&events, id)?;
@@ -866,11 +812,7 @@ pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String>
         return refused("NO_SUCH_AGENT", format!("thread {id}'s orchestrator is asleep"));
     };
     let agent = s.str("agent").unwrap_or_default();
-    if acp(s) {
-        end(ctx, cfg, r, (t, s), json!({"why": "stopped"}))?;
-    } else {
-        term::keys(r, s.str("pane").unwrap_or_default(), "Escape")?;
-    }
+    end(ctx, cfg, r, (t, s), json!({"why": "stopped"}))?;
     let d = json!({"agent": agent, "thread": id});
     emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "stop", d))?;
     Ok(agent.into())
@@ -1076,48 +1018,29 @@ fn save(ctx: &Ctx, r: &dyn Runner, new: &str) -> Result<Config> {
     Ok(new_cfg)
 }
 
-fn uuid() -> Result<String> {
-    let mut b = crate::devices::random(16)?;
-    if let [_, _, _, _, _, _, x6, _, x8, ..] = b.as_mut_slice() {
-        (*x6, *x8) = (*x6 & 0x0f | 0x40, *x8 & 0x3f | 0x80);
-    }
-    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
-    Ok(format!(
-        "{}-{}-{}-{}-{}",
-        &h[..8],
-        &h[8..12],
-        &h[12..16],
-        &h[16..20],
-        &h[20..]
-    ))
-}
-
-fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], line: &str) -> Result<String> {
+fn start(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    (t, replaced): (&Event, Option<&str>),
+    events: &[Event],
+    line: &str,
+) -> Result<String> {
     let id = t.str("thread").unwrap_or_default();
     let (fleet, base) = thread_role(cfg, events, t)?;
     let f = cfg.fleet(fleet)?;
     let role = base;
     let h = providers::get(&role.harness);
-    let first =
-        of(events, id).find(|e| e.kind == "orchestrator-start" && e.str("harness") == Some(&role.harness) && !acp(e));
-    let session = first
-        .and_then(|e| e.str("session"))
-        .map_or_else(uuid, |s| Ok(s.into()))?;
-    let resume = first.is_some() && h.resumes();
     let dir = dir(ctx, cfg, id);
     let brief = dir.join(".brief.md");
     let on = crate::hosts::On::new(r, None);
     let thread = dir.join(".thread.md");
     on.write(&thread, &render(&items(events, id), name(cfg, id_of(t))))?;
-    let kick = if resume && line.len() <= 400 {
-        line.replace(char::is_control, " ")
-    } else {
-        format!(
-            "Read {} and act on it. The thread so far is in {}, the last message new.",
-            brief.display(),
-            thread.display()
-        )
-    };
+    let kick = format!(
+        "Read {} and act on it. The thread so far is in {}, the last message new.",
+        brief.display(),
+        thread.display()
+    );
     let agent = format!("orchestrator-{id}");
     let head = format!("{} · orchestrator {id}", t.fleet);
     let mut p = Plan {
@@ -1141,7 +1064,6 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         mcp_file: dir.join(".mcp.lane.json"),
         title: crate::spawn::lane_title(&head, t.str("title").unwrap_or_default()),
         head,
-        session: Some((session.clone(), resume)),
         lane_key: None,
         sandbox: None,
     };
@@ -1149,31 +1071,27 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     p.env.insert("DROVER_ORCHESTRATOR".into(), id_of(t).into());
     let shed = cfg.shed_for(fleet).context(crate::config::NO_RUNTIME)?;
     let wire = r.shed().map_or(shed.wire.clone(), |w| w.wire);
-    let acp = match shed.acp.clone() {
-        Some(aid) => match crate::spawn::acp_cmd(ctx, r, &p, &aid, None) {
-            Ok(cmd) => Some(cmd),
-            Err(e) => {
-                if e.downcast_ref::<crate::gate::Refusal>().is_some() {
-                    log(
-                        ctx,
-                        cfg,
-                        t,
-                        "system",
-                        (&format!("the orchestrator does not start: {e:#}"), &[]),
-                    )?;
-                }
-                return Err(e);
+    let aid = shed.acp.clone().context(crate::config::NO_RUNTIME)?;
+    let acp = match crate::spawn::acp_cmd(ctx, r, &p, &aid, None) {
+        Ok(cmd) => cmd,
+        Err(e) => {
+            if e.downcast_ref::<crate::gate::Refusal>().is_some() {
+                log(
+                    ctx,
+                    cfg,
+                    t,
+                    "system",
+                    (&format!("the orchestrator does not start: {e:#}"), &[]),
+                )?;
             }
-        },
-        None => None,
+            return Err(e);
+        }
     };
     h.ready(ctx, r, &p)?;
     let text = brief::thread(cfg, t, fleet);
     on.write(&brief, &text)?;
     h.prepare(ctx, &on, &p)?;
-    if let Some(acp) = &acp {
-        crate::spawn::write_acp_mcp(&on, &p, acp)?;
-    }
+    crate::spawn::write_acp_mcp(&on, &p, &acp)?;
     let _secrets = crate::spawn::deliver(ctx, &on, &p)?;
     let labels = [
         ("fleet", fleet),
@@ -1186,28 +1104,15 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     ]
     .map(|(k, v)| (k, v.to_string()));
     let b = term::Shed(crate::shed::Shed { wire, ..shed });
-    b.start(
-        ctx,
-        r,
-        &agent,
-        &labels,
-        &dir.to_string_lossy(),
-        &acp.clone().unwrap_or_default(),
-    )?;
-    if acp.is_some() {
-        let kick = format!("The thread so far is in {}, the last message new.", thread.display());
-        let kicked = b.kick_acp(r, &agent, &format!("{}\n\n{kick}\n\n{line}", text.trim_end()))?;
-        let d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed-acp", "harness": p.harness,
-            "model": p.model, "effort": p.effort, "resumed": false,
-            "confirmed": kicked});
-        return started(ctx, cfg, t, d);
+    b.start(ctx, r, &agent, &labels, &dir.to_string_lossy(), &acp)?;
+    let kick = format!("The thread so far is in {}, the last message new.", thread.display());
+    let kicked = b.kick_acp(r, &agent, &format!("{}\n\n{kick}\n\n{line}", text.trim_end()))?;
+    let mut d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed-acp", "harness": p.harness,
+        "model": p.model, "effort": p.effort, "resumed": false,
+        "confirmed": kicked});
+    if let Some(was) = replaced {
+        d.put("replaced", json!(was));
     }
-    term::ok(r, &p.lane_cmd(&agent))?;
-    term::ok(r, &term::typed(&agent, &p.start_cmd(ctx, &agent)))?;
-    let kicked = h.kick(r, &p, &agent).unwrap_or(false);
-    let d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed", "harness": p.harness,
-        "model": p.model, "effort": p.effort, "session": session,
-        "resumed": resume, "confirmed": kicked});
     started(ctx, cfg, t, d)
 }
 
@@ -1334,6 +1239,11 @@ pub fn mark_read(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event) -> Result
 /// `drover thread show <id>`: the conversation; marks it read.
 pub fn show(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, id: &str, as_json: bool) -> Result<()> {
     let events = working(&ctx.state)?;
+    let events = if archived(&events, id) {
+        events::shared(&ctx.state)?
+    } else {
+        events
+    };
     let t = find(&events, id)?;
     let items = items(&events, id);
     mark_read(ctx, cfg, &events, t)?;
@@ -1354,6 +1264,9 @@ pub fn ls(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: Option<&str>, as_
         .filter(|e| e.kind == "thread-new" && fleet.is_none_or(|f| f == e.fleet))
     {
         let id = t.str("thread").unwrap_or_default();
+        if archived(&events, id) {
+            continue;
+        }
         let items = items(&events, id);
         let who = name(cfg, id_of(t));
         let last = items.last().map(|i| render(std::slice::from_ref(i), who));
@@ -1408,7 +1321,12 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
         };
         let heard = of(events, id).filter(|e| e.data.get("noreply").is_none());
         let quiet = heard.map(|e| e.ts).max().unwrap_or(0) + cfg.limits.orchestrator_idle_minutes * 60 <= ctx.now;
-        let a = agents.iter().find(|a| Some(a.name.as_str()) == s.str("agent"));
+        let name = s.str("agent").unwrap_or_default();
+        let listed = agents.iter().find(|a| a.name == name).cloned();
+        let Ok(a) = listed.map_or_else(|| crate::session::get(r, name), |a| Ok(Some(a))) else {
+            continue;
+        };
+        let a = a.as_ref();
         if a.is_some_and(Session::signed_out) {
             signed_out(ctx, cfg, r, t, s)?;
             continue;
@@ -1416,7 +1334,7 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
         if a.is_some() && pending(events, id).is_some() {
             continue;
         }
-        let gone = a.is_none() && acp(s);
+        let gone = a.is_none();
         if !gone && (!quiet || a.is_some_and(Session::busy)) {
             continue;
         }

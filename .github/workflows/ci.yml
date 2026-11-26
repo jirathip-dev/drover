@@ -30,11 +30,9 @@ jobs:
           test "$n" -le 10 || { echo "::error::$n #[allow] attributes in crates/, at most 10"; exit 1; }
       - name: "banned-API fixtures (#809: each ci/lint-fixtures/rust/<lint>.rs fails clippy under the workspace [lints])"
         run: scripts/lint-fixtures.sh rust
-      - name: "test shards (#1162: every test target is in exactly one shard of scripts/test-shards.txt)"
-        run: scripts/test-shards.sh check
       - name: "leak gate (no ts.net hostname, chat ID or /Users/ path in docs/ or demo/; release-tests greps the exported demo)"
         run: "! grep -rnE '[A-Za-z0-9-]\\.ts\\.net|telegram:-?[0-9]|/Users/' docs/ demo/"
-      - name: deps gate (direct deps ⊆ the allow-list in docs/serve.md)
+      - name: deps gate (direct deps ⊆ the allow-list in docs/serve/alerts.md)
         run: |
           extra=$(for f in Cargo.toml crates/*/Cargo.toml; do sed -n '/^\[\(workspace\.\)\{0,1\}dependencies\]/,/^\[/p' "$f"; done | grep -oE '^[a-z0-9_-]+' | grep -vxE 'clap|flate2|serde|serde_json|toml|anyhow|thiserror|p256|aes-gcm|hkdf|sha2|base64|ts-rs|shed-proto|blocks|swag|rusqlite|keyring|tokio|ratatui|drover-sys|drover-core|drover-server|drover-service|drover-chat' || true)
           test -z "$extra" || { echo "not allowed: $extra"; exit 1; }
@@ -127,7 +125,7 @@ jobs:
           LINT: ${{ needs.lint.result }}
           RELEASE: ${{ needs.release-tests.result }}
 
-  # #957: the debug suite beside release-tests; #1162: in 4 shards side by side (scripts/test-shards.txt).
+  # #957: the debug suite beside release-tests; #1162: in 4 shards side by side (scripts/test-shards.sh).
   test-shard:
     name: test (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest

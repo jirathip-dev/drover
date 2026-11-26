@@ -34,28 +34,26 @@ fn id(state: &str) -> String {
     state.split('(').next().unwrap_or(state).replace('-', "_")
 }
 
-/// The issue statechart and the timers' pass chart, at `limits`, with `counts` per state when live.
+/// The issue statechart (its edges the flow rows' `to`) and the timers' pass chart, at `limits`, with `counts` per state when live.
 pub fn charts(limits: &Limits, counts: Option<&BTreeMap<&str, usize>>) -> [Chart; 2] {
     let l = serde_json::to_value(limits).unwrap_or_default();
     let set = |k: &str| format!("{k} = {}", l.at(k));
-    let label = |text: &str| {
-        let words = text.split(' ').map(|w| match LIMIT_DOCS.iter().find(|d| d.0 == w) {
-            Some((k, _)) => set(k),
-            None => w.to_string(),
-        });
-        words.collect::<Vec<_>>().join(" ")
-    };
     let mut s = String::from("stateDiagram-v2\n    [*] --> queued\n");
     for (name, _) in STATES {
         let n = counts.map(|c| format!(" · {}", c.get(name).copied().unwrap_or_default()));
         writeln!(s, "    state \"{name}{}\" as {}", n.unwrap_or_default(), id(name)).ok();
     }
-    for (from, to) in STATES {
-        for (next, why) in *to {
-            writeln!(s, "    {} --> {} : {}", id(from), id(next), label(why)).ok();
+    let edges = crate::flow::table()
+        .ok()
+        .and_then(|t| t.flow("issue"))
+        .map(crate::flow::chart::edges);
+    for (name, _) in STATES {
+        let out: Vec<_> = edges.iter().flatten().filter(|e| id(&e.0) == id(name)).collect();
+        for (_, to, rows) in &out {
+            writeln!(s, "    {} --> {} : {}", id(name), id(to), rows.join(", ")).ok();
         }
-        if to.is_empty() {
-            writeln!(s, "    {} --> [*]", id(from)).ok();
+        if out.is_empty() {
+            writeln!(s, "    {} --> [*]", id(name)).ok();
         }
     }
     let mut p = String::from("flowchart TD\n");
@@ -120,11 +118,12 @@ pub fn markdown(charts: &[Chart; 2], at: &str) -> String {
     for (c, title) in charts.iter().zip(["Issue states", "Timers and the drive pass"]) {
         write!(m, "\n## {title}\n\n```mermaid\n{}```\n", c.source).ok();
     }
-    m + &crate::baseline::doc() + include_str!("compact/workflow.md")
+    m + &crate::baseline::doc() + include_str!("reroot.md")
 }
 
 /// `drover diagram [--live] [fleet]`: default `[limits]`, or the config's and per-state counts with `--live`.
 pub fn run(ctx: &Ctx, live: bool, fleet: Option<&str>, out: &mut dyn Write) -> Result<()> {
+    crate::flow::table()?;
     if !live {
         return Ok(write!(
             out,

@@ -3,7 +3,7 @@ use common::*;
 use drover::events::{append, fold, read, Event};
 use serde_json::json;
 
-const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"hermes\"\nprofile = \"fleet-verify\"\n";
+const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
 const BRANCH: &str = "gh api repos/jirathip-dev/sendmeter/branches/issue-12";
 const PR_BODY: &str = "gh pr view issue-12 -R jirathip-dev/sendmeter --json body";
 const RECIPE: &str = "gh api repos/jirathip-dev/sendmeter/contents/.drover/verify.md";
@@ -13,6 +13,10 @@ const HEAD_RUN: &str = "Head:\n```\ncargo test meter_total\n```\n```\ntest meter
 const VERIFY_BLOCK: &str = "Repro: verify\n> a pure visual bug: the meter's colour has no unit test path\n";
 const SECTION: &str = "Closes #12\n\n## Repro\n\nA pure visual bug: the meter's colour has no\nunit test path.\n\n\
 ## For humans\n\nx\n";
+
+fn started(sh: &FakeShed, lane: &str) -> bool {
+    !sh.sent(lane).is_empty()
+}
 
 fn sha() -> String {
     "a".repeat(40)
@@ -195,7 +199,7 @@ fn a_repro_verify_pass_goes_to_verify_outside_ui_paths() {
     let r = drive_fake().reply(RECIPE, "");
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
-    assert!(sh.called("run", "sendmeter-verify-12-r1"), "{out}");
+    assert!(started(&sh, "sendmeter-verify-12-r1"), "{out}");
     assert_eq!(state(&c), "verify(1)");
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/verify-12-r1/.brief.md")).unwrap();
     assert!(brief.contains("bug on the PR base"), "{brief}");
@@ -255,10 +259,7 @@ fn a_merge_no_repro_on_a_fleet_without_verify_is_needs_human_not_a_rerun() {
         assert_eq!(code, 0, "{out}");
     }
     assert_eq!(state(&c), "needs-human");
-    assert!(
-        !sh.called("run", "sendmeter-rev-12-r2"),
-        "rev respawned at the same head"
-    );
+    assert!(!started(&sh, "sendmeter-rev-12-r2"), "rev respawned at the same head");
     assert!(!r.called("gh pr merge"));
     let ev = read(&c.state).unwrap();
     let nh = ev.iter().find(|e| e.kind == "needs-human").unwrap();
@@ -312,10 +313,7 @@ fn a_merge_gate_refusal_at_a_passed_head_is_needs_human_once_and_no_rev_rerun() 
     let (code, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert!(code == 3 && out.contains("REFUSED NO_REPRO"), "{out}");
     assert_eq!(state(&c), "needs-human");
-    assert!(
-        !sh.called("run", "sendmeter-rev-12-r2"),
-        "rev respawned at the same head"
-    );
+    assert!(!started(&sh, "sendmeter-rev-12-r2"), "rev respawned at the same head");
     assert!(!r.called("gh pr merge"));
     let nh = kinds(&c, "needs-human");
     assert_eq!(nh.len(), 1, "{nh:?}");
@@ -364,7 +362,7 @@ fn a_later_run_pass_at_the_head_does_not_force_the_verify_stage() {
     let r = drive_fake().reply(RECIPE, "");
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
-    assert!(!sh.called("run", "sendmeter-verify-12-r1"), "{out}");
+    assert!(!started(&sh, "sendmeter-verify-12-r1"), "{out}");
     let skip = kinds(&c, "verify-skipped");
     assert_eq!(skip.len(), 1, "{out}");
     assert!(!skip[0].str("reason").unwrap().contains("Repro: verify"), "{skip:?}");

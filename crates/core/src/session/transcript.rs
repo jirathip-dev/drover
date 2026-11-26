@@ -38,6 +38,7 @@ pub fn of(r: &dyn Runner, s: &super::Session, before: Option<u64>, n: Option<usi
         events: s.acp,
         before: before.filter(|_| s.acp),
         n: n.filter(|_| s.acp),
+        since: None,
     };
     let got: ReadResult = serde_json::from_value(crate::shed::call(r, &w, Method::Read, json!(p))?)?;
     Ok(if s.acp {
@@ -114,7 +115,7 @@ fn last_event(e: &EventKind) -> String {
     };
     match e {
         EventKind::ToolCall { title, status, .. } => format!("tool call {} ({status})", one(title)),
-        EventKind::Turn { prompt } => format!("turn {}", one(prompt)),
+        EventKind::Turn { prompt, .. } => format!("turn {}", one(prompt)),
         EventKind::Text { text } => format!("text {}", one(text)),
         EventKind::Reply { stop_reason, .. } => format!("reply ({stop_reason})"),
         k => serde_json::to_value(k)
@@ -134,6 +135,7 @@ pub fn last_words(r: &dyn Runner, w: &crate::shed::Wire, names: &[&str]) -> Vec<
             events: false,
             before: None,
             n: None,
+            since: None,
         };
         let acp = ReadParams {
             lines: None,
@@ -210,7 +212,7 @@ pub fn said(t: &Transcript) -> [Vec<String>; 3] {
     let mut ids = std::collections::BTreeSet::new();
     for e in ev {
         match &e.kind {
-            EventKind::Turn { prompt } => out[0].push(one(prompt)),
+            EventKind::Turn { prompt, .. } => out[0].push(one(prompt)),
             EventKind::Reply { text, .. } if !text.trim().is_empty() => out[1].push(one(text)),
             EventKind::ToolCall { id, title, kind, .. } if kind.as_deref() == Some("execute") && ids.insert(id) => {
                 out[2].push(one(title));

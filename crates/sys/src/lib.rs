@@ -15,6 +15,61 @@ extern "C" {
     fn getrusage(who: i32, usage: *mut [i64; 18]) -> i32;
 }
 
+/// macOS's memory pressure level (`kern.memorystatus_vm_pressure_level`: 1 normal, 2 warn, 4 critical), read with no process.
+#[cfg(target_os = "macos")]
+pub fn pressure_level() -> Option<i32> {
+    extern "C" {
+        fn sysctlbyname(name: *const u8, old: *mut i32, len: *mut usize, new: *const u8, newlen: usize) -> i32;
+    }
+    let (mut v, mut len) = (0i32, std::mem::size_of::<i32>());
+    // SAFETY: a NUL-terminated name and a one-int out buffer whose size `len` gives; nothing is written to the kernel.
+    let rc = unsafe {
+        sysctlbyname(
+            c"kern.memorystatus_vm_pressure_level".as_ptr().cast(),
+            &raw mut v,
+            &raw mut len,
+            std::ptr::null(),
+            0,
+        )
+    };
+    (rc == 0).then_some(v)
+}
+
+/// No memory pressure level off macOS.
+#[cfg(not(target_os = "macos"))]
+pub fn pressure_level() -> Option<i32> {
+    None
+}
+
+/// The host's CPU ticks since boot, `(idle, total)` over all CPUs, from `host_statistics`: no process is started.
+#[cfg(target_os = "macos")]
+pub fn cpu_ticks() -> Option<(u64, u64)> {
+    extern "C" {
+        fn mach_host_self() -> u32;
+        fn host_statistics(host: u32, flavor: i32, info: *mut [u32; 4], count: *mut u32) -> i32;
+    }
+    let (mut t, mut n) = ([0u32; 4], 4u32);
+    // SAFETY: HOST_CPU_LOAD_INFO (3) writes at most `count` (4) ints, the buffer's size.
+    let rc = unsafe { host_statistics(mach_host_self(), 3, &raw mut t, &raw mut n) };
+    let [user, system, idle, nice] = t.map(u64::from);
+    (rc == 0).then_some((idle, user + system + idle + nice))
+}
+
+/// The host's CPU ticks since boot, `(idle, total)`, from `/proc/stat`'s `cpu` line (iowait counts as idle).
+#[cfg(not(target_os = "macos"))]
+pub fn cpu_ticks() -> Option<(u64, u64)> {
+    let stat = std::fs::read_to_string("/proc/stat").ok()?;
+    let t: Vec<u64> = stat
+        .lines()
+        .next()?
+        .split_whitespace()
+        .skip(1)
+        .filter_map(|w| w.parse().ok())
+        .collect();
+    let idle = t.get(3)? + t.get(4).unwrap_or(&0);
+    Some((idle, t.iter().sum()))
+}
+
 /// `c` keeps the listeners `fds` open across its exec.
 pub fn keep_fds(c: &mut Command, fds: Vec<i32>) {
     // SAFETY: fcntl is async-signal-safe; between fork and exec it only clears close-on-exec on the listeners.

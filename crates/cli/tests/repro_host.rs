@@ -17,7 +17,7 @@ fn setup() -> drover::Ctx {
 }
 
 fn hosts_with(name: &str, needs: &str, mini: [&str; 2], bazzite: [&str; 2]) -> drover::Ctx {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     let base = base.replace(
         "integration = \"staging\"",
         &format!("integration = \"staging\"\n{needs}"),
@@ -39,9 +39,9 @@ fn hosts_with(name: &str, needs: &str, mini: [&str; 2], bazzite: [&str; 2]) -> d
 fn fake(diff: &str) -> Fake {
     Fake::default()
         .reply("which shed", "/opt/shed/bin/shed\n")
-        .reply("sysctl -n vm.loadavg", "{ 0.4 1 1 }")
+        .reply("iostat", &iostat(90))
         .reply("sysctl -n hw.ncpu", "4")
-        .reply(&format!("{SSH}'cat' '/proc/loadavg'"), "8 1 1 1/9 42")
+        .reply(&format!("{SSH}'vmstat' '1' '2'"), &vmstat(40))
         .reply(&format!("{SSH}'nproc'"), "4")
         .reply("gh pr diff issue-12", diff)
 }

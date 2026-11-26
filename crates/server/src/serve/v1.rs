@@ -68,6 +68,18 @@ impl Server<'_> {
         let paired_op = |op: &str| PAIRED_OPS.contains(&op) || LANE_OPS.contains(&op) || V1_PAIRED.contains(&op);
         match (method, p.strip_prefix("/api/v1/")) {
             ("POST", _) if self.addr.is_none() => reply("405 Method Not Allowed", "READ_ONLY", "GET only"),
+            ("GET", Some(x))
+                if super::rows::is(x) && (Self::plugin(ctx, head) || paired && self.allowed(ctx, head)) =>
+            {
+                out("200 OK", &super::rows::get(ctx, x, &f))
+            }
+            ("GET", Some(x)) if super::rows::is(x) => reply("401 Unauthorized", "UNPAIRED", "pair this device first"),
+            ("POST", Some(x)) if x.starts_with("thread/") && x.ends_with("/said") => {
+                if !Self::plugin(ctx, head) {
+                    return reply("401 Unauthorized", "UNPAIRED", "the plugin token");
+                }
+                said(ctx, x, body)
+            }
             _ if !self.allowed(ctx, head) => reply("403 Forbidden", "FORBIDDEN", "foreign Host or Origin"),
             (_, Some(x))
                 if busy(auth)
@@ -811,6 +823,18 @@ fn fields(body: &str) -> BTreeMap<String, String> {
     )
 }
 
+fn said(ctx: &Ctx, x: &str, body: &str) -> Res {
+    let id = x
+        .strip_prefix("thread/")
+        .and_then(|t| t.strip_suffix("/said"))
+        .unwrap_or_default();
+    let s = serde_json::from_str::<crate::api::Said>(body).context("the body is no `Said`");
+    done(s.and_then(|s| {
+        let cfg = Config::kept(ctx)?;
+        crate::orchestrator::said(ctx, &cfg, id, (&s.id, &s.from, &s.text))
+    }))
+}
+
 fn done(r: Result<String>) -> Res {
     r.map_or_else(
         |e| match e.downcast_ref::<Refusal>() {
@@ -1157,7 +1181,7 @@ pub(super) fn acp_numbered(events: &[crate::shed::proto::Logged]) -> Vec<(u64, B
     };
     for e in events {
         match &e.kind {
-            E::Turn { prompt } => out.push(Block::Prompt { text: prompt.clone() }),
+            E::Turn { prompt, .. } => out.push(Block::Prompt { text: prompt.clone() }),
             E::Text { text } => match out.last_mut() {
                 Some(Block::Reply { markdown }) => markdown.push_str(text),
                 _ => out.push(Block::Reply { markdown: text.clone() }),
@@ -1170,6 +1194,7 @@ pub(super) fn acp_numbered(events: &[crate::shed::proto::Logged]) -> Vec<(u64, B
                 title,
                 status,
                 kind,
+                ..
             } => {
                 let was = out
                     .iter_mut()
@@ -1201,7 +1226,7 @@ pub(super) fn acp_numbered(events: &[crate::shed::proto::Logged]) -> Vec<(u64, B
                     None => out.push(p),
                 }
             }
-            E::ApprovalRequest { tool, options } => out.push(Block::Approval {
+            E::ApprovalRequest { tool, options, .. } => out.push(Block::Approval {
                 tool: tool.clone(),
                 options: options
                     .iter()

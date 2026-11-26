@@ -5,7 +5,7 @@ use drover::runner::{Out, Runner};
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-const SLOW: &str = "\n[fleet.slowfleet]\nrepo = \"jirathip-dev/slowfleet\"\nlocal = \"/tmp/does-not-matter/slowfleet\"\nintegration = \"staging\"\n\n[fleet.slowfleet.role.impl]\nharness = \"hermes\"\nprofile = \"fleet-impl\"\n\n[fleet.slowfleet.role.rev]\nharness = \"hermes\"\nprofile = \"fleet-rev\"\n";
+const SLOW: &str = "\n[fleet.slowfleet]\nrepo = \"jirathip-dev/slowfleet\"\nlocal = \"/tmp/does-not-matter/slowfleet\"\nintegration = \"staging\"\n\n[fleet.slowfleet.role.impl]\nharness = \"claude\"\nprofile = \"fleet-impl\"\n\n[fleet.slowfleet.role.rev]\nharness = \"claude\"\nprofile = \"fleet-rev\"\n";
 
 struct Gate {
     f: Fake,
@@ -155,7 +155,6 @@ fn a_hung_pass_ends_itself_at_pass_max_secs_and_names_its_step() {
         .env("FLEET_CONFIG", &c.config)
         .env("FLEET_STATE", &c.state)
         .env("FLEET_WORKTREES", &c.worktrees)
-        .env("FLEET_HERMES_PROFILES", &c.homes["hermes"])
         .output()
         .unwrap();
     let secs = t.elapsed().as_secs_f64();
@@ -202,4 +201,31 @@ fn a_wake_starts_its_fleets_pass_within_a_second() {
     assert_eq!(pass("sendmeter"), before.0 + 1, "the wake started sendmeter's pass");
     assert!(ms < 1000, "sendmeter's pass started {ms} ms after its wake");
     assert_eq!(pass("slowfleet"), before.1, "a wake starts its own fleet's pass only");
+}
+
+#[test]
+fn a_service_that_answers_a_wake_but_runs_no_pass_never_leaves_a_fleets_last_pass_stale() {
+    let c = ctx(&tmpdir("loops-1625-deaf"), CONFIG);
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    let _sh = FakeShed::attached(&c);
+    let deaf = std::os::unix::net::UnixListener::bind(drover::service::sock(&c)).unwrap();
+    std::thread::spawn(move || {
+        for s in deaf.incoming().flatten() {
+            let mut line = String::new();
+            std::io::BufRead::read_line(&mut std::io::BufReader::new(&s), &mut line).ok();
+            std::io::Write::write_all(&mut &s, b"{\"pid\": 1}\n").ok();
+        }
+    });
+    assert!(drover::service::wake(&c, "sendmeter"), "the service answers a wake");
+    let last = c.state.with_file_name("drive-sendmeter.last");
+    let detached = "sh -c nohup '/opt/drover/bin/drover' drive sendmeter";
+    let r = Fake::default().reply("sh -c nohup", "4321\n");
+    std::fs::write(&last, c.now.to_string()).unwrap();
+    let (code, out) = run_only(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(r.count(detached), 0, "a fresh pass: the wake is trusted: {out}");
+    std::fs::write(&last, (c.now - 900).to_string()).unwrap();
+    let (code, out) = run_only(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(r.count(detached), 1, "a 15 min old pass: drive starts it itself: {out}");
 }

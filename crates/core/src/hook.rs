@@ -1,5 +1,6 @@
 use crate::config::{Config, Deny};
 use crate::events::Json;
+use crate::heavy::Heavy;
 use crate::providers::dialects;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -69,13 +70,9 @@ impl Rules {
         let mut branches: Vec<String> = ["main", "master", "staging"].map(String::from).to_vec();
         branches.extend(cfg.fleet.values().map(|f| f.integration.clone()));
         let family = f.map(|f| f.family(role));
-        let h = cfg.hosts.get(host);
-        let heavy = f.filter(|f| !f.heavy.is_empty()).map(|f| crate::heavy::Heavy {
-            kinds: f.heavy.clone(),
-            max: h.and_then(|h| h.heavy_max).unwrap_or(3),
-            kind_max: h.map(|h| h.heavy_kind_max.clone()).unwrap_or_default(),
-            wait_minutes: h.and_then(|h| h.heavy_wait_minutes).unwrap_or(30),
-        });
+        let heavy = f
+            .map(|f| Heavy::of(f, cfg.hosts.get(host)))
+            .filter(|h| !h.kinds.is_empty());
         Rules {
             heavy,
             branches,
@@ -207,7 +204,7 @@ pub fn pre_call(input: &Value) -> bool {
     ev.is_empty() || dialects().any(|d| d.pre == ev)
 }
 
-/// Some(reason) denies a shell (`Bash`, `terminal`) or file-writing call; `git` runs git in a dir (its HEAD, its remote).
+/// Some(reason) denies a shell (`Bash`) or file-writing call; `git` runs git in a dir (its HEAD, its remote).
 pub fn decide(input: &Value, p: &Policy, git: &dyn Fn(&str, &[&str]) -> Option<String>) -> Option<String> {
     let cur_branch = |d: &str| git(d, &["rev-parse", "--abbrev-ref", "HEAD"]);
     let origin = |d: &str| git(d, &["remote", "get-url", "origin"]);
@@ -215,7 +212,7 @@ pub fn decide(input: &Value, p: &Policy, git: &dyn Fn(&str, &[&str]) -> Option<S
     let ti = tool_input(input);
     if dialects().any(|d| d.shell == tool) {
         let cmd = ti["command"].as_str().unwrap_or_default();
-        let cwd = ti["workdir"].as_str().or(input["cwd"].as_str()).unwrap_or(".");
+        let cwd = input["cwd"].as_str().unwrap_or(".");
         let leak = p
             .hygiene
             .as_ref()
@@ -1003,10 +1000,10 @@ fn git_push(t: &[&str], cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Opti
     None
 }
 
-/// The repo dir of a `git push` in a Bash/terminal call (for the co-author warning).
+/// The repo dir of a `git push` in a Bash call (for the co-author warning).
 pub fn push_dir(input: &Value) -> Option<String> {
     let ti = tool_input(input);
-    let cwd = ti["workdir"].as_str().or(input["cwd"].as_str()).unwrap_or(".");
+    let cwd = input["cwd"].as_str().unwrap_or(".");
     ti["command"]
         .as_str()?
         .split([';', '|', '&', '\n', '(', ')', '`'])
@@ -1121,14 +1118,18 @@ pub fn turn_end(input: &Value, mark: &Path, builds: impl FnOnce() -> bool) -> Op
     Some(again(TURN_ASK))
 }
 
-/// A shell call matching a heavy kind, rewritten (in a dialect that can) to run in a host slot under `exe heavy`.
-pub fn heavy(input: &Value, h: &crate::heavy::Heavy, exe: &str) -> Option<Value> {
+/// A shell call matching a heavy kind, rewritten (in a dialect that can) to run under `exe heavy`: on its route's build machines from the lane's worktree (`git`'s top level of its `cwd`), else in a host slot.
+pub fn heavy(input: &Value, h: &Heavy, exe: &str, git: &dyn Fn(&str, &[&str]) -> Option<String>) -> Option<Value> {
     let tool = input["tool_name"].as_str()?;
     let rewrite = dialects().find(|d| (d.sent)(input) && d.shell == tool)?.rewrite?;
     let mut ti = tool_input(input).clone();
     let cmd = ti.at("command").as_str()?;
     let kind = h.kind(cmd)?;
-    ti.put("command", h.wrap(exe, kind, cmd).into());
+    let cwd = input.at("cwd").as_str().filter(|_| h.routes.contains_key(kind));
+    let dir = cwd
+        .and_then(|d| git(d, &["rev-parse", "--show-toplevel"]))
+        .filter(|t| !t.is_empty());
+    ti.put("command", h.wrap(exe, kind, cmd, dir.as_deref()).into());
     Some(rewrite(ti))
 }
 

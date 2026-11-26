@@ -45,9 +45,6 @@ fn setup(name: &str) -> drover::Ctx {
         &d,
         &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
-    std::fs::create_dir_all(&profile).unwrap();
-    std::fs::write(profile.join("settings.json"), "{}").unwrap();
     c
 }
 
@@ -853,13 +850,13 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
 }
 
 #[test]
-fn a_restored_shed_thread_resumes_its_orchestrators_session() {
+fn a_restored_thread_starts_its_orchestrator_again() {
     let c = setup("chat-archive-shed");
     let b = FakeShed::attached(&c);
     let r = Fake::default();
     assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).0, 0);
     assert_eq!(run(&c, &r, &["thread", "say", "t1", "hi"]).0, 0);
-    assert!(b.called("run", "orchestrator-t1"), "{:?}", b.methods());
+    assert!(b.has("orchestrator-t1"), "{:?}", b.methods());
     assert_eq!(run(&c, &r, &["thread", "archive", "t1"]).0, 0);
     assert!(
         b.called("kill", "orchestrator-t1") && !b.has("orchestrator-t1"),
@@ -868,14 +865,18 @@ fn a_restored_shed_thread_resumes_its_orchestrators_session() {
     );
     assert_eq!(run(&c, &r, &["thread", "restore", "t1"]).0, 0);
     assert_eq!(run(&c, &r, &["thread", "say", "t1", "back again"]).0, 0);
-    let st: Vec<_> = drover::events::read(&c.state)
+    let starts = drover::events::read(&c.state)
         .unwrap()
         .iter()
         .filter(|e| e.kind == "orchestrator-start")
-        .map(|e| (e.str("session").unwrap().to_string(), e.val("resumed") == true))
-        .collect();
-    assert_eq!(st.len(), 2, "{st:?}");
-    assert!(st[1].1 && st[1].0 == st[0].0, "the same session resumed: {st:?}");
+        .count();
+    assert_eq!(starts, 2);
+    assert!(b.has("orchestrator-t1"), "{:?}", b.methods());
+    let sent = b.sent("orchestrator-t1");
+    assert!(
+        sent.last().is_some_and(|l| l.ends_with("[t1] owner: back again")),
+        "{sent:?}"
+    );
 }
 
 #[test]

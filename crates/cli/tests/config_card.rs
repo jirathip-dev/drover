@@ -214,14 +214,11 @@ fn applying_a_new_fleet_kicks_its_first_queued_issue() {
 }
 
 #[test]
-fn applying_a_new_role_syncs_its_profile_and_hook_approval() {
+fn applying_a_new_role_syncs_its_profile() {
     let c = setup("cfg-sync");
-    let yaml = c.homes["hermes"].join("fleet-verify/config.yaml");
-    std::fs::create_dir_all(yaml.parent().unwrap()).unwrap();
-    std::fs::write(&yaml, "model: x\n").unwrap();
     let old = std::fs::read_to_string(&c.config).unwrap();
     let file = c.config.with_file_name("proposed.toml");
-    let role = "\n[fleet.sendmeter.role.verify]\nharness = \"hermes\"\nprofile = \"fleet-verify\"\n";
+    let role = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
     std::fs::write(&file, format!("{old}{role}")).unwrap();
     let r = Fake::default();
     assert_eq!(
@@ -230,9 +227,6 @@ fn applying_a_new_role_syncs_its_profile_and_hook_approval() {
     );
     let (code, out) = run(&c, &r, &["config", "apply", "c1"]);
     assert_eq!(code, 0, "{out}");
-    let allow = std::fs::read_to_string(c.homes["hermes"].join("fleet-verify/shell-hooks-allowlist.json")).unwrap();
-    assert!(allow.contains("hook --role rev"), "{allow}");
-    assert!(std::fs::read_to_string(&yaml).unwrap().contains("hooks:"));
     let settings = drover::providers::profiles_root(&c).join("fleet-verify/settings.json");
     assert!(std::fs::read_to_string(settings).unwrap().contains("hook --role rev"));
 }

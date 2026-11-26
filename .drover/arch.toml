@@ -1,4 +1,12 @@
-frozen = ["ci/cap.toml", "crates/core/src/events/passive.rs", "crates/core/src/events/push.rs"]
+frozen = [
+    "ci/cap.toml",
+    "crates/core/src/events/passive.rs",
+    "crates/core/src/events/push.rs",
+    "docs/serve.md",
+    "docs/lanes.md",
+    "docs/hosts.md",
+    "docs/config.md",
+]
 generated = [
     "assets/types/api.d.ts",
     "web/dist/board.js",
@@ -11,13 +19,18 @@ generated = [
     "crates/cli/tests/golden/briefs/impl-update.md",
     "crates/cli/tests/golden/briefs/rev.md",
     "crates/cli/tests/golden/briefs/rev-repro.md",
+    "docs/config/limits.md",
+    "fleet.example.toml",
+    "docs/flow.md",
 ]
 generate = "just gen"
+append_only = ["crates/cli/tests/golden/contract/v1/*.keys"]
 shared = [
     "crates/core/src/check.rs",
     "crates/core/src/cli.rs",
     "crates/core/src/cloud.rs",
     "crates/core/src/config.rs",
+    "crates/core/src/config/limit_docs.rs",
     "crates/core/src/doctor.rs",
     "crates/core/src/drive.rs",
     "crates/core/src/events.rs",
@@ -34,11 +47,36 @@ shared = [
     "crates/server/src/serve/chat.rs",
     "crates/server/src/serve/v1.rs",
     "crates/*/tests/**",
+    "web/src/main.ts",
 ]
+
+[[collect]]
+dir = "crates/core/flow"
+glob = "**/*.toml"
 
 [[collect]]
 dir = "ci/cap.d"
 glob = "*.toml"
+
+[[collect]]
+dir = "scripts/test-shards.d"
+glob = "*.txt"
+
+[[collect]]
+dir = "docs/serve"
+glob = "*.md"
+
+[[collect]]
+dir = "docs/lanes"
+glob = "*.md"
+
+[[collect]]
+dir = "docs/hosts"
+glob = "*.md"
+
+[[collect]]
+dir = "docs/config"
+glob = "*.md"
 
 [comments]
 policy = "strict"
@@ -46,9 +84,9 @@ except = ["assets/types/**", "web/dist/**", "web/lint-fixtures/**"]
 
 [docs]
 paths = ["docs/**/*.md", "README.md"]
-watch = ["crates/core/src/cli.rs", "crates/core/src/config.rs", "crates/server/src/api.rs"]
+watch = ["crates/core/src/cli.rs", "crates/core/src/config.rs", "crates/core/src/config/limit_docs.rs", "crates/server/src/api.rs"]
 cli = true
-skip = [".drover/**", "roles/usage-tail.md"]
+skip = [".drover/**", "roles/usage-tail.md", "scripts/test-shards.txt"]
 
 [[ban]]
 pattern = "claude"
@@ -222,6 +260,11 @@ max_fn_lines = 150
 paths = ["crates/*/tests/**/*.rs"]
 max_file_lines = 1500
 
+[[size]]
+paths = ["web/src/**/*.ts"]
+max_file_lines = 800
+max_fn_lines = 80
+
 [[ban]]
 pattern = "pane_id"
 paths = ["crates/*/src/**"]
@@ -310,3 +353,14 @@ pattern = ".build_screen("
 paths = ["crates/server/src/**"]
 except = ["crates/server/src/serve/hub.rs", "crates/server/src/screens.rs", "crates/server/src/screens_local.rs"]
 reason = "#1318: a screen is built once per change by the hub (serve/hub.rs); a request and a stream read its cache"
+
+[[ban]]
+pattern = ".gatekeeper/run"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/gatekeeper.rs"]
+reason = "#1643: one module builds the gatekeeper command and reads its report"
+
+[[ban]]
+pattern = "/plugin/"
+paths = ["crates/*/src/**"]
+reason = "#1571: drover never calls cooee; it serves rows and actions in /api/v1"

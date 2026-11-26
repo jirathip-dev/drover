@@ -726,6 +726,22 @@ fn premerge_passing_merges_and_logs_its_time() {
 }
 
 #[test]
+fn premerge_runs_the_cap_through_the_gatekeeper_wrapper() {
+    let (_d, c, local, wt) = premerge_setup("pre-gk-cap", true, "");
+    std::fs::create_dir_all(format!("{wt}/.gatekeeper")).unwrap();
+    std::fs::write(format!("{wt}/.gatekeeper/run"), "").unwrap();
+    let r = premerge_fake(&local).once("sh -c", 1, "FAIL core/cap: 14885 / cap 14700\n");
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 3, "{out}");
+    let want = "REFUSED STAGING_WOULD_BREAK: ./.gatekeeper/run check --gate core/cap: FAIL core/cap: 14885 / cap 14700";
+    assert!(out.contains(want), "{out}");
+    let cap = format!("sh -c cd \"$0\" && ./.gatekeeper/run check --gate core/cap {wt}");
+    assert!(r.called(&cap), "{:#?}", r.calls.borrow());
+    assert!(!r.called("cap-check"), "{:#?}", r.calls.borrow());
+    assert!(!r.called("gh pr merge"));
+}
+
+#[test]
 fn premerge_logs_the_shadow_lesson_checks() {
     let (_d, c, local, wt) = premerge_setup("pre-shadow", false, "");
     std::fs::create_dir_all(format!("{wt}/.drover")).unwrap();
@@ -945,4 +961,48 @@ fn a_squash_merge_keeps_the_cap_trailer_so_cap_check_passes() {
     let out = String::from_utf8_lossy(&o.stdout);
     assert_eq!(o.status.code(), Some(0), "{body}\n{out}");
     assert!(body.contains("\nCap: 100 → 200 (#12, q7)"), "{body}");
+}
+
+#[test]
+fn a_merge_closes_each_issue_its_pr_body_names_and_skips_one_with_its_own_open_pr() {
+    let (_d, c) = setup("named", CONFIG, &[("PASS", HEAD)]);
+    let _sh = FakeShed::attached(&c);
+    let body = "Closes #12\n- Closes #5\n\nMoot: #6, #7, #8\n";
+    let open = json!({"number": 34, "state": "OPEN", "baseRefName": "staging", "headRefOid": HEAD, "statusCheckRollup": green()});
+    let r = Fake::default()
+        .reply("gh pr view issue-12", &open.to_string())
+        .reply(
+            "gh pr view issue-8",
+            &json!({"number": 41, "state": "OPEN"}).to_string(),
+        )
+        .reply("gh pr merge 34", "")
+        .reply(
+            "gh pr view 34",
+            &json!({"mergeCommit": {"oid": "m3rg3"}, "body": body}).to_string(),
+        )
+        .once("gh issue comment 7", 1, "")
+        .reply("gh issue", "");
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 0, "{out}");
+    let repo = "-R jirathip-dev/sendmeter";
+    assert_eq!(r.count("gh issue comment 12 "), 1, "{:?}", r.calls.borrow());
+    assert!(r.called(&format!(
+        "gh issue comment 5 {repo} --body Closed by PR #34 (#12) → `staging` @ `m3rg3`"
+    )));
+    assert!(r.called(&format!(
+        "gh issue comment 6 {repo} --body Moot by PR #34 (#12) → `staging` @ `m3rg3`"
+    )));
+    assert_eq!(r.count("gh issue comment 7 "), 2, "retried once");
+    assert!(r.called(&format!("gh issue close 5 {repo} --reason completed")));
+    for n in [6, 7] {
+        assert!(
+            r.called(&format!("gh issue close {n} {repo} --reason not planned")),
+            "#{n}"
+        );
+    }
+    assert!(
+        !r.called("gh issue comment 8 ") && !r.called("gh issue close 8 "),
+        "#8 has its own PR"
+    );
+    assert!(out.contains("skipped #8: it has an open PR"), "{out}");
 }

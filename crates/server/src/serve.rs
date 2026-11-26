@@ -36,6 +36,7 @@ mod hub;
 mod jobs;
 #[path = "screens_kit.rs"]
 mod kit;
+mod rows;
 #[path = "screens.rs"]
 mod screens;
 pub use screens::local::{Done, Local, Place};
@@ -732,8 +733,8 @@ fn wait_of(l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> Option<crate::
 
 fn herd_host(h: Host, lim: &Limits) -> HerdHost {
     HerdHost {
-        load: h.load_per_cpu,
-        limit: lim.load_per_cpu,
+        load: h.cpu_idle.map(|i| 100.0 - i),
+        limit: 100.0 - lim.min_cpu_idle,
         gate: host::admit(&h, lim).err(),
         pressure: h.pressure,
         swapouts: h.swapout,
@@ -925,6 +926,9 @@ impl<'a> Server<'a> {
             return Ok(false);
         }
         drop(clients);
+        if req.starts_with("GET ") && path == "/api/v1/rows/stream" {
+            return self.rows_stream(s, &req).map(|()| false);
+        }
         if req.starts_with("GET ") && path.starts_with("/screens/") && path.ends_with("/stream") {
             return self.stream(s, &req, path, query).map(|()| false);
         }
@@ -961,7 +965,7 @@ impl<'a> Server<'a> {
 
     fn tell(&self, ctx: &Ctx, l: &lanes::Lane, fleet: &str, text: &str) {
         let pane = l.pane().unwrap_or_default();
-        match term::reply(&l.on(&self.r), l.harness == "dsh", &l.name, pane, text) {
+        match term::reply(&l.on(&self.r), &l.name, pane, text) {
             Ok(()) => {
                 if let Some(n) = l.issue {
                     crate::drive::kick(ctx, &self.r, fleet, n, "board");
@@ -2207,7 +2211,7 @@ impl<'a> Server<'a> {
         let h = forced.map_or_else(
             || self.sample(),
             |(k, p)| Host {
-                load_per_cpu: Some(k * lim.load_per_cpu),
+                cpu_idle: Some(100.0 - k * (100.0 - lim.min_cpu_idle)),
                 pressure: Some(p.into()),
                 swapout: Some(0.0),
                 ..Host::default()
@@ -2493,28 +2497,24 @@ impl<'a> Server<'a> {
     }
 
     fn cards(&self, ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], hs: &Host) -> Vec<HostCard> {
-        let (lim, seen, hist, now) = (
-            &cfg.limits,
-            crate::hosts::cached(ctx),
-            crate::hosts::history(ctx),
-            ctx.now,
-        );
+        let (seen, hist, now) = (crate::hosts::cached(ctx), crate::hosts::history(ctx), ctx.now);
         let mut out = vec![];
         for (name, h) in crate::hosts::cards(cfg, r) {
             let (main, on) = (h.is_none_or(|h| h.machine.is_none()), h.is_none_or(|h| h.enabled));
+            let lim = &cfg.limits_on(h.and_then(|h| h.machine.as_deref()));
             let mut mem = vec![];
             let mut s = seen.get(&name).cloned().unwrap_or_default();
             let word = |p: Option<u8>| p.and_then(|p| ["normal", "warn", "critical"].get(usize::from(p)).copied());
             let mut gate = Host {
                 pressure: word(s.pressure).map(String::from),
                 swapout: s.swap,
-                load_per_cpu: s.load,
+                cpu_idle: s.idle,
                 free_mem_gb: s.mem,
                 ..Host::default()
             };
             if main {
                 gate = hs.clone();
-                (s.up, s.seen, s.load, s.mem, s.swap) = (true, now, hs.load_per_cpu, hs.free_mem_gb, hs.swapout);
+                (s.up, s.seen, s.idle, s.mem, s.swap) = (true, now, hs.cpu_idle, hs.free_mem_gb, hs.swapout);
                 ((s.disk, s.disk_total), s.mem_total) = (host::df(r).unzip(), hs.mem_total_gb);
                 let all = crate::session::live_on(r).unwrap_or_default();
                 s.top = host::top(r, &all);
@@ -2610,11 +2610,11 @@ impl<'a> Server<'a> {
             };
             let of = |l: f64| format!("/ {l}");
             let (lt, lv) = val(
-                s.load,
-                s.load,
-                lim.load_per_cpu,
-                None,
-                (2, "", "", of(lim.load_per_cpu), vec![]),
+                s.idle,
+                s.idle,
+                lim.min_cpu_idle,
+                Some((100.0 - s.idle.unwrap_or(100.0), 100.0)),
+                (0, "idle ", "%", String::new(), vec![]),
             );
             let avg = gate.swap_median.map(|m| format!("· {m:.0} avg"));
             let sw = (0, "", "", of(lim.swapout_rate), avg.into_iter().collect());
@@ -2654,7 +2654,7 @@ impl<'a> Server<'a> {
                 ..Cell::default()
             };
             let mut rows = vec![
-                row("load/cpu", "load", grey(lt), lv, Some(lim.load_per_cpu)),
+                row("cpu", "idle", grey(lt), lv, Some(lim.min_cpu_idle)),
                 row("swap-out", "swap", grey(st), sv, Some(lim.swapout_rate)),
                 row("memory", "mem", grey(mt), mv, Some(lim.min_free_mem_gb)),
             ];
@@ -2687,7 +2687,7 @@ impl<'a> Server<'a> {
             let worst = [lt, st, mt, dt].map(rank).into_iter().max().unwrap_or(0);
             let dot = grey("gar".get(worst..=worst).unwrap_or("g"));
             let why: Vec<String> = [
-                (lt, "load", "limit"),
+                (lt, "cpu idle", "floor"),
                 (st, "swap-out", "limit"),
                 (mt, "memory", "floor"),
                 (dt, "disk", "floor"),

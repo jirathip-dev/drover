@@ -1,7 +1,6 @@
 # Providers and keys
 
-drover supports two model providers: Anthropic (Claude Code lanes) and DeepSeek (dsh lanes, and
-Hermes lanes that use DeepSeek).
+drover runs Claude Code lanes (Anthropic). It can also show a DeepSeek key's balance.
 
 **No secrets in fleet.toml, ever.** fleet.toml holds only the *names* of env variables. drover
 checks every fleet.toml value on load. A value shaped like a token fails with `SECRET_IN_CONFIG`
@@ -36,7 +35,7 @@ scrollback, the event log or a file left behind.
 `drover hosts on <host>` ([accounts](accounts.md)). Claude lanes run `drover statusline` as their status line; it prints
 the lane's fleet and issue.
 
-## DeepSeek (dsh lanes, Hermes lanes using DeepSeek)
+## DeepSeek balance
 
 The key lives in an env file (mode 0600, else refused `SECRET_FILE_OPEN`):
 
@@ -52,11 +51,6 @@ The key goes in a curl config on stdin, never in argv, so `ps` can't show it. `G
 `deepseek · USD 2.28 · ok`. The row is hidden when no key is set. If `env_file` is set but unreadable, or
 lacks the variable, a dim `deepseek · key not found in <file>` row shows instead (or the refusal, for a loose file).
 `drover check` logs `provider-low` once each time the balance drops below `warn_below`.
-
-## Hermes lanes
-
-Hermes profiles own their provider keys, in `~/.hermes/profiles/<profile>/.env`. drover never
-reads them.
 
 ## Adding a provider (#806)
 

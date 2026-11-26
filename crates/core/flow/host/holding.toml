@@ -1,0 +1,14 @@
+flow = "host"
+states = ["holding"]
+reads = []
+ignores = ["lane", "host", "pr", "verdict", "ask", "turn"]
+
+[[row]]
+id = "refusing"
+when = {  }
+do = "wait"
+then = ["raise-card"]
+owner = "drive"
+timeout = "host_wait_minutes"
+escalate = "orchestrator"
+say = "a host refuses every start"

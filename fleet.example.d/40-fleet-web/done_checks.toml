@@ -1,0 +1,1 @@
+# done_checks = ["npm run format:check", "drover arch-check"]   # #1362: `turn done` runs these in the lane's worktree (gate_check_minutes each) before any review; unset = `drover arch-check` with .drover/arch.toml, `cargo fmt --check` with a Cargo.toml

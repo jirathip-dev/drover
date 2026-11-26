@@ -59,9 +59,6 @@ fn setup(name: &str, role_extra: &str, extra: &str) -> drover::Ctx {
     let d = tmpdir(name);
     let cfg = format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n{role_extra}\n{extra}");
     let c = ctx(&d, &cfg);
-    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
-    std::fs::create_dir_all(&profile).unwrap();
-    std::fs::write(profile.join("settings.json"), "{}").unwrap();
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).1,
         "t1\n"

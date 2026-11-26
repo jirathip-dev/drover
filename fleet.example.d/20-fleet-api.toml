@@ -1,0 +1,18 @@
+[fleet.api]
+repo = "acme/api"
+local = "~/Projects/api"
+integration = "staging"          # drover merge target; main is never a target
+# paused = true                  # `drover pause|resume api`: no next, impl/rev spawns refuse PAUSED
+# baseline = "<40-hex sha>"      # `drover baseline api`: lanes see history since it only (docs/workflow.md); remove to undo
+
+[fleet.api.role.impl]
+harness = "claude"
+profile = "lane-impl"
+model = "opus"
+effort = "xhigh"                 # none|low|medium|high|xhigh: Claude effort
+mcp = ["supabase-dev"]        # only these servers from the repo's .mcp.json; default none
+
+[fleet.api.role.rev]
+harness = "claude"
+profile = "lane-rev"
+

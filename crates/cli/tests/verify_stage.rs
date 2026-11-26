@@ -7,7 +7,7 @@ use drover::serve::Server;
 use drover::waiting::waiting_on;
 use serde_json::json;
 
-const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"hermes\"\nprofile = \"fleet-verify\"\n";
+const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
 const RECIPE: &str = "gh api repos/jirathip-dev/sendmeter/contents/.drover/verify.md";
 const ADDR: &str = "127.0.0.1:7777";
 
@@ -49,8 +49,9 @@ fn fake(head: &str, files: &str) -> Fake {
 }
 
 fn started(sh: &FakeShed, prefix: &str) -> bool {
-    let runs = sh.all("run");
-    runs.iter()
+    let sends = sh.all("send");
+    sends
+        .iter()
         .any(|p| p["name"].as_str().is_some_and(|n| n.starts_with(prefix)))
 }
 
@@ -128,7 +129,7 @@ fn a_pr_touching_ui_paths_goes_from_rev_pass_to_a_verify_lane() {
     let (c, head, sh) = passed("verify-ui", &config(), false);
     let r = fake(&head, "src/a.rs\nweb/src/queue.ts\n").reply(RECIPE, "");
     drive(&c, &r);
-    assert!(sh.called("run", "sendmeter-verify-12-r1"), "{:?}", r.calls.borrow());
+    assert!(started(&sh, "sendmeter-verify-12-r1"), "{:?}", r.calls.borrow());
     assert!(!r.called("gh pr merge"));
     assert_eq!(state(&c), "verify(1)");
     assert!(kinds(&c, "verify-skipped").is_empty());
@@ -173,7 +174,7 @@ fn a_design_stage_issue_always_verifies() {
     let (c, head, sh) = passed("verify-design", &config(), true);
     let r = fake(&head, "src/a.rs\n").reply(RECIPE, "");
     drive(&c, &r);
-    assert!(sh.called("run", "sendmeter-verify-12-r1"));
+    assert!(started(&sh, "sendmeter-verify-12-r1"));
     assert!(kinds(&c, "verify-skipped").is_empty());
 }
 
@@ -221,7 +222,7 @@ fn verify_off_skips_the_stage_and_verify_on_forces_it() {
     assert!(ls.contains("verify on"), "{ls}");
     let r = fake(&head, "src/a.rs\n").reply(RECIPE, "");
     drive(&c, &r);
-    assert!(sh.called("run", "sendmeter-verify-12-r1"));
+    assert!(started(&sh, "sendmeter-verify-12-r1"));
     assert!(kinds(&c, "verify-skipped").is_empty());
 }
 
@@ -509,7 +510,7 @@ fn a_pass_drive_records_on_a_ui_pr_without_a_recipe_logs_verify_no_recipe_and_me
 fn a_pass_drive_records_on_a_ui_pr_with_a_recipe_spawns_verify_not_rev() {
     let (c, r, _, sh) = rev_wrote_pass("verify-599-recipe", "src/a.rs\nweb/src/queue.ts\n", true);
     after_pass(&c, &r, &sh, 3);
-    assert!(sh.called("run", "sendmeter-verify-12-r1"), "{:?}", r.calls.borrow());
+    assert!(started(&sh, "sendmeter-verify-12-r1"), "{:?}", r.calls.borrow());
     assert!(!r.called("gh pr merge"));
     assert_eq!(state(&c), "verify(1)");
 }
@@ -699,7 +700,7 @@ fn a_pr_that_rewrites_the_recipe_is_verified_by_the_integration_recipe() {
             recipe,
         );
     drive(&c, &r);
-    assert!(sh.called("run", "sendmeter-verify-12-r1"), "{:?}", r.calls.borrow());
+    assert!(started(&sh, "sendmeter-verify-12-r1"), "{:?}", r.calls.borrow());
     assert_eq!(std::fs::read_to_string(wt.join(".verify.md")).unwrap(), recipe);
     let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
     assert!(
@@ -754,7 +755,7 @@ fn a_verify_lane_that_recorded_its_verdict_is_superseded_by_the_next_verify() {
         (Some("verify"), Some("sendmeter-verify-12-r1"), Some(b.as_str())),
         "{out}"
     );
-    assert!(sh.called("run", "sendmeter-verify-12-r1"), "{:?}", sh.methods());
+    assert!(started(&sh, "sendmeter-verify-12-r1"), "{:?}", sh.methods());
 }
 
 #[test]
@@ -763,7 +764,7 @@ fn a_same_name_verify_lane_without_a_verdict_is_still_lane_live() {
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "verify"]);
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("REFUSED LANE_LIVE: live agent(s)"), "{out}");
-    assert!(kinds(&c, "supersede").is_empty() && !sh.called("run", "sendmeter-verify-12-r1"));
+    assert!(kinds(&c, "supersede").is_empty() && !started(&sh, "sendmeter-verify-12-r1"));
 }
 
 fn extend_ask(c: &drover::Ctx, ts: u64) {
@@ -867,4 +868,118 @@ fn an_extend_ask_a_log_left_open_closes_on_the_next_read() {
     let all = says(&c, &r, &["asks", "sendmeter", "--all"]);
     let row = all.lines().find(|l| l.contains("q5")).unwrap_or_default();
     assert!(row.contains("closed: superseded"), "{all}");
+}
+
+#[test]
+fn a_superseded_verify_lanes_scratch_with_a_home_path_is_never_pushed() {
+    let (c, mut r, sh, _) = verify_r1_live("verify-1515-scratch", true);
+    let wt = c
+        .worktrees
+        .join("sendmeter/verify-12-r1")
+        .to_string_lossy()
+        .into_owned();
+    let diff = "diff --git a/e2e-dir.txt b/e2e-dir.txt\n+++ b/e2e-dir.txt\n@@ -0,0 +1 @@\n+/Users/me/scratch/e2e\n";
+    let mine = Fake::default()
+        .reply(&format!("git -C {wt} status --porcelain"), "?? e2e-dir.txt\n")
+        .reply(&format!("git -C {wt} diff --cached --name-only"), "")
+        .reply(&format!("git -C {wt} diff --cached"), diff);
+    r.replies.splice(0..0, mine.replies);
+    let out = drive(&c, &r);
+    assert!(!out.contains("PUBLIC_LEAK"), "{out}");
+    assert!(started(&sh, "sendmeter-verify-12-r1"), "{out}");
+    assert_eq!(kinds(&c, "supersede")[0].val("wip"), &json!(null), "{out}");
+    for verb in ["add", "commit", "push"] {
+        assert!(
+            !r.called(&format!("git -C {wt} {verb}")),
+            "{verb}: {:?}",
+            r.calls.borrow()
+        );
+    }
+}
+
+#[test]
+fn a_verify_start_refused_the_same_way_every_pass_shows_its_code_then_one_needs_human() {
+    let cfg = config() + "mcp = [\"supabase-prod\"]\n";
+    let (c, head, sh) = passed("verify-1515-refused", &cfg, false);
+    let r = fake(&head, "web/src/queue.ts\n").reply(RECIPE, "");
+    let at = |mins: u64| drover::Ctx {
+        now: c.now + mins * 60,
+        ..c.clone()
+    };
+    for mins in [0, 5, 10] {
+        drive(&at(mins), &r);
+        let mut slot = kinds(&c, "driven").pop().unwrap();
+        slot.data.insert("code".into(), json!("SPAWN_PENDING"));
+        slot.data
+            .insert("result".into(), json!("REFUSED SPAWN_PENDING: #12 is starting"));
+        ev(&c, at(mins).now + 1, "driven", json!(slot.data));
+        let (code, out) = run(&at(mins), &r, &["waiting", "sendmeter"]);
+        assert_eq!(code, 0, "{out}");
+        assert!(out.contains("MCP_FORBIDDEN"), "pass at {mins}m: {out}");
+        assert!(!out.contains(drover::waiting::SLOT), "{out}");
+    }
+    assert!(!started(&sh, "sendmeter-verify") && kinds(&c, "needs-human").is_empty());
+    for mins in [31, 40] {
+        drive(&at(mins), &r);
+    }
+    let nh = kinds(&c, "needs-human");
+    assert_eq!(nh.len(), 1, "{nh:?}");
+    assert_eq!(nh[0].str("code"), Some("MCP_FORBIDDEN"), "{nh:?}");
+    assert!(nh[0].str("reason").unwrap().contains("supabase-prod"), "{nh:?}");
+    assert_eq!(state(&c), "needs-human");
+}
+
+#[test]
+fn a_ready_issue_whose_closed_rev_session_still_reports_working_merges_beside_other_work() {
+    let (c, head, sh) = passed("verify-1681", &config(), false);
+    let rev = "sendmeter-rev-12-r1";
+    ev(
+        &c,
+        35,
+        "lane-closed",
+        json!({"agent": rev, "reason": "verdict recorded"}),
+    );
+    ev(
+        &c,
+        50,
+        "verify-skipped",
+        json!({"sha": head, "stage": "verify", "reason": "r"}),
+    );
+    sh.lane(rev, "working", "/x");
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "13"]).0, 0);
+    let mut r = fake(&head, "src/a.rs\n");
+    let spec = Fake::default().reply("gh issue view 13", r#"{"title":"t","body":"b"}"#);
+    r.replies.splice(0..0, spec.replies);
+    let out = drive(&c, &r);
+    let merges = kinds(&c, "driven");
+    let merge = merges.iter().find(|e| e.str("step") == Some("merge"));
+    assert_eq!(
+        merge.and_then(|e| e.str("cmd")),
+        Some("drover merge sendmeter 12"),
+        "{out}"
+    );
+    assert_eq!(state(&c), "merged", "{out}");
+}
+
+#[test]
+fn a_merge_refused_in_a_drive_pass_logs_its_code_and_waiting_shows_it() {
+    let (c, head, _sh) = passed("verify-1681-refused", &config(), false);
+    ev(
+        &c,
+        50,
+        "verify-skipped",
+        json!({"sha": head, "stage": "verify", "reason": "r"}),
+    );
+    let mut pr: serde_json::Value = serde_json::from_str(&pr(&head)).unwrap();
+    pr["baseRefName"] = json!("other");
+    let mut r = fake(&head, "src/a.rs\n");
+    let moved = Fake::default().reply("gh pr view issue-12", &pr.to_string());
+    r.replies.splice(0..0, moved.replies);
+    let out = drive(&c, &r);
+    let driven = kinds(&c, "driven");
+    let merge = driven.iter().find(|e| e.str("step") == Some("merge"));
+    assert_eq!(merge.and_then(|e| e.str("code")), Some("BASE_MISMATCH"), "{out}");
+    let (code, w) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert_eq!(code, 0, "{w}");
+    assert!(w.contains("BASE_MISMATCH") && !w.contains("merging next pass"), "{w}");
 }

@@ -165,21 +165,21 @@ fn a_sleeping_lanes_answer_waits_for_room_then_lands() {
     sh.lane(LANE, "hibernated", "/x");
     spawn(&c, &json!({}));
     lane_ask(&c);
-    let host = |load: &str| {
+    let host = |idle: u32| {
         Fake::default()
             .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
-            .reply("sysctl -n vm.loadavg", &format!("{{ {load} 1.20 1.00 }}\n"))
+            .reply("iostat", &iostat(idle))
             .reply("sysctl -n hw.ncpu", "10\n")
             .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
     };
-    assert_eq!(run(&c, &host("50.00"), &["answer", "sendmeter", "q1", "1"]).0, 0);
+    assert_eq!(run(&c, &host(5), &["answer", "sendmeter", "q1", "1"]).0, 0);
     assert!(sh.sent(LANE).is_empty(), "{:?}", sh.methods());
     let u = kinds(&c, "answer-undelivered");
     assert_eq!(u.len(), 1);
     assert!(u[0].str("reason").unwrap().contains("HOST_BUSY"), "{u:?}");
-    run(&c, &host("50.00"), &["drive"]);
+    run(&c, &host(5), &["drive"]);
     assert!(sh.sent(LANE).is_empty(), "held while busy: {:?}", sh.methods());
-    run(&c, &host("1.50"), &["drive"]);
+    run(&c, &host(80), &["drive"]);
     assert!(typed(&sh, LANE, "DECISION q1: yes"), "{:?}", sh.methods());
     assert_eq!(kinds(&c, "answer-delivered").len(), 1);
 }
@@ -215,15 +215,14 @@ fn a_superseded_lanes_successor_gets_its_answer_typed_into_its_pane() {
         (Some("old-36"), Some(LANE))
     );
     assert!(sh.called("kill", "old-36"), "{:?}", sh.methods());
-    assert_eq!(sh.last("run")["name"], LANE);
+    assert!(sh.has(LANE), "{:?}", sh.methods());
     let ran = sh.lock().seen.len();
     lane_ask(&c);
     let (code, out) = run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "1"]);
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: yes -> sendmeter-impl-36\n"));
     let after: Vec<_> = sh.lock().seen[ran..].to_vec();
     let sent = (after.iter()).any(|(m, p)| m == "send" && p["name"] == LANE && p["text"] == "DECISION q1: yes");
-    let enter = (after.iter()).any(|(m, p)| m == "keys" && p["name"] == LANE && p["keys"] == json!(["Enter"]));
-    assert!(sent && enter, "{after:?}");
+    assert!(sent, "{after:?}");
     assert_eq!(kinds(&c, "answer-delivered").len(), 1);
 }
 

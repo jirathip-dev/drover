@@ -34,7 +34,7 @@ fn at(c: &drover::Ctx, now: u64) -> drover::Ctx {
 
 fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     let other = "[fleet.other]\nrepo = \"jirathip-dev/other\"\nlocal = \"/tmp/does-not-matter/other\"\n\
-                 integration = \"staging\"\n\n[fleet.other.role.impl]\nharness = \"hermes\"\n\n\
+                 integration = \"staging\"\n\n[fleet.other.role.impl]\nharness = \"claude\"\n\n\
                  [fleet.other.role.orchestrator]\nharness = \"claude\"\n";
     let conf = format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n\n{other}");
     let c = ctx(&tmpdir(name), &conf);

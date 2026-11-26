@@ -52,6 +52,8 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
   user or operator, no code identifiers. `drover merge` copies it into the merge commit.
 - The PR body's evidence (test commands, exit codes) must name the final head sha it was
   produced at. Refresh it after every push (`gh pr edit --body`) so it never lags the head.
+- For each other issue your change fixes or makes moot, put a line in the PR body: `Closes #N`, or
+  `Moot: #N, #M`. `drover merge` closes them with yours (moot ones as not planned).
 
 ## Write tests that would fail without your change
 

@@ -49,27 +49,51 @@ fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64), role:
     }
     let (on, wt) = (On::of(r, Some(sp)), sp.str("worktree").unwrap_or_default());
     let git = |a: &[&str]| {
-        on.run("git", &argv(&[&["-C", wt][..], a].concat()))
-            .ok()
-            .filter(|o| o.code == 0)
-            .map(|o| o.stdout.trim().to_string())
+        let mut last = String::new();
+        for _ in 0..3 {
+            match on.run("git", &argv(&[&["-C", wt][..], a].concat())) {
+                Ok(o) if o.code == 0 && !o.stdout.trim().is_empty() => return Ok(o.stdout.trim().to_string()),
+                Ok(o) => last = format!("exit {}{}", o.code, if o.code == 0 { ", no output" } else { "" }),
+                Err(e) => last = format!("{e:#}"),
+            }
+        }
+        Err(format!(
+            "could not check: `git {}` in the worktree failed 3 times ({last}): retry `drover turn done`",
+            a.join(" ")
+        ))
     };
     let refuse = |code: &'static str, why: String| Ok(Some((head.clone(), Some((code, why)))));
-    let at = git(&["rev-parse", "HEAD"]).unwrap_or_default();
+    let at = git(&["rev-parse", "HEAD"]).or_else(|e| crate::gate::refused(CODE, e))?;
     if !at.eq_ignore_ascii_case(&head) {
         let why = format!("push first: the worktree is at {at:.7}, the PR head is {head:.7}");
         return refuse(CODE, why);
     }
-    let subject = |c: &str| git(&["log", "-1", "--format=%s", c]);
-    let parent = |c: &str| git(&["rev-parse", &format!("{c}^1")]);
+    let failed = std::cell::RefCell::new(None);
+    let read = |a: &[&str]| git(a).map_err(|e| failed.replace(Some(e))).ok();
+    let subject = |c: &str| read(&["log", "-1", "--format=%s", c]);
+    let parent = |c: &str| read(&["rev-parse", &format!("{c}^1")]);
     let text = pr.at("body").as_str().unwrap_or_default();
     if let Err(e) = body(text, &head, &f.integration, &subject, &parent) {
+        if let Some(e) = failed.take() {
+            return crate::gate::refused(CODE, e);
+        }
         return refuse("PR_BODY", e);
     }
     let limit = Duration::from_secs(cfg.limits.gate_check_minutes * 60);
+    let pr = crate::gatekeeper::Pr {
+        head: &head,
+        body: text,
+    };
+    let heavy = crate::heavy::Heavy::of(f, sp.str("host").and_then(|h| cfg.hosts.get(h)));
+    let via = on.machine.is_none().then_some((&heavy, ctx.exe.as_str()));
     for c in checks(f, &on, Path::new(wt)) {
-        let sh = argv(&["-c", &format!("cd \"$0\" && {c}"), wt]);
-        let o = match on.run_for("sh", &sh, "", limit) {
+        let o = if c == crate::gatekeeper::CHECK {
+            crate::gatekeeper::check(&on, Path::new(wt), &pr, &f.private_names, limit, via)
+        } else {
+            let line = via.map_or_else(|| c.clone(), |(h, exe)| h.gate(exe, &c, wt));
+            on.run_for("sh", &argv(&["-c", &format!("cd \"$0\" && {line}"), wt]), "", limit)
+        };
+        let o = match o {
             Ok(o) if o.code == 0 => continue,
             Ok(o) => o,
             Err(e) => return refuse(CODE, format!("`{c}` cannot start: {e:#}")),
@@ -92,14 +116,14 @@ fn checks(f: &Fleet, on: &On, wt: &Path) -> Vec<String> {
         return c.clone();
     }
     let (gk, arch, cargo) = (
-        wt.join(".gatekeeper/run"),
+        crate::gatekeeper::wrapper(wt),
         wt.join(".drover/arch.toml"),
         wt.join("Cargo.toml"),
     );
     let (gk, arch, cargo) = (gk.to_string_lossy(), arch.to_string_lossy(), cargo.to_string_lossy());
     let there = on.existing(&[&gk, &arch, &cargo]);
     if there.contains(gk.as_ref()) {
-        return vec!["./.gatekeeper/run check".into()];
+        return vec![crate::gatekeeper::CHECK.into()];
     }
     [(&arch, "drover arch-check"), (&cargo, "cargo fmt --check")]
         .into_iter()

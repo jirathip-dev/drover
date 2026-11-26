@@ -51,9 +51,6 @@ fn recorded(name: &str) -> drover::Ctx {
         &tmpdir(name),
         &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
-    std::fs::create_dir_all(&profile).unwrap();
-    std::fs::write(profile.join("settings.json"), "{}").unwrap();
     let ev =
         |ts: u64, fleet: &str, kind: &str, d: Value| append(&c.state, &Event::new(ts, fleet, None, kind, d)).unwrap();
     let msg = |ts, from: &str, text: &str| {
@@ -423,12 +420,12 @@ fn parity_34_each_composer_op_reaches_its_thread_op_and_the_screen_shows_it() {
     let retry = json!({"thread": "t2", "msg": failed.seq});
     assert_eq!(post("thread-retry", retry), "retrying");
 
-    let new = json!({"repo": "sendmeter", "text": "Pick hermes", "harness": "hermes"});
+    let new = json!({"repo": "sendmeter", "text": "Pick claude", "harness": "claude"});
     post("thread-new", new);
     let made = log().into_iter().rfind(|e| e.kind == "thread-new").unwrap();
     assert_eq!(
         (made.str("title"), made.str("harness")),
-        (Some("Pick hermes"), Some("hermes"))
+        (Some("Pick claude"), Some("claude"))
     );
 }
 
