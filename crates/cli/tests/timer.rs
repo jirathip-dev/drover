@@ -735,14 +735,7 @@ fn doctor_shows_the_service_missing_then_running() {
         line(&out).starts_with("✗ service — not running"),
         "a dead socket: {out}"
     );
-    let sock = std::os::unix::net::UnixListener::bind(drover::service::sock(&c)).unwrap();
-    std::thread::spawn(move || {
-        for s in sock.incoming().flatten() {
-            let mut l = String::new();
-            std::io::BufRead::read_line(&mut std::io::BufReader::new(&s), &mut l).ok();
-            std::io::Write::write_all(&mut &s, b"{\"pid\": 4242}\n").ok();
-        }
-    });
+    fake_service(&c, 4242);
     let (_, out) = run(&c, &r, &["doctor"]);
     assert_eq!(line(&out), "✓ service — running (pid 4242)", "{out}");
     assert!(!out.contains("fast job"), "{out}");

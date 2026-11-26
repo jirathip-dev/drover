@@ -66,6 +66,7 @@ fn setup(name: &str, harness: &str) -> (drover::Ctx, PathBuf) {
         write(&st.join(format!("{w}.at")), &(c.now - 60).to_string(), 0o644);
     }
     assert_eq!(run(&c, &good(), &["timer", "install", "--no-load"]).0, 0);
+    fake_service(&c, 4242);
     (c, d)
 }
 
