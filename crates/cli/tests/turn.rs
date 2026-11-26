@@ -630,3 +630,25 @@ fn a_red_pr_body_leg_is_rerun_once_after_pr_body_passes_at_its_head() {
     turn(&at(&c, 20), &r, &["done"]);
     assert_eq!(r.count("gh run rerun"), 1, "once a head");
 }
+
+#[test]
+fn ci_flaky_retries_0_never_reruns_a_red_pr_body_leg() {
+    let head = sha("abc");
+    let check = json!({"__typename": "CheckRun", "name": "evidence", "status": "COMPLETED",
+        "conclusion": "FAILURE", "completedAt": "1970-01-12T13:40:00Z",
+        "detailsUrl": "https://github.com/jirathip-dev/sendmeter/actions/runs/555/job/5"});
+    let body = format!("## For humans\n\nx\n\n## Evidence (head {head})");
+    let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
+        "statusCheckRollup": [check], "body": body})
+    .to_string();
+    let (c, r, _sh) = lane_at("turn-body-leg-off", true, Some(&pr), Some(&sha("def")));
+    let off = CONFIG.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\nci_flaky_retries = 0",
+    );
+    std::fs::write(&c.config, off).unwrap();
+    let r = r.reply("gh run rerun", "");
+    turn(&at(&c, 10), &r, &["done"]);
+    assert!(!r.called("gh run rerun"), "ci_flaky_retries = 0 never re-runs");
+    assert!(kinds(&c, "ci-rerun").is_empty());
+}

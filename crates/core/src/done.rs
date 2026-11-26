@@ -95,7 +95,8 @@ fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64), role:
         .filter(|c| BODY_LEGS.contains(&c.name.as_str()))
         .collect();
     let k = (fleet, Some(n));
-    crate::gh::retry(ctx, r, &mut std::io::sink(), k, &events, (&f.repo, &head, 1), &legs)?;
+    let max = f.ci_flaky_retries.unwrap_or(cfg.limits.ci_flaky_retries);
+    crate::gh::retry(ctx, r, &mut std::io::sink(), k, &events, (&f.repo, &head, max), &legs).ok();
     let limit = Duration::from_secs(cfg.limits.gate_check_minutes * 60);
     let pr = crate::gatekeeper::Pr {
         head: &head,
