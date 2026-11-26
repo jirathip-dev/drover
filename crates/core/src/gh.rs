@@ -73,6 +73,29 @@ pub fn is_pr(v: &Value) -> bool {
     v["url"].as_str().is_some_and(|u| u.contains("/pull/"))
 }
 
+/// The number of an issue, open or closed, titled exactly `title`.
+pub fn titled(cfg: &Config, r: &dyn Runner, fleet: &str, title: &str) -> Result<Option<u64>> {
+    let repo = &cfg.fleet(fleet)?.repo;
+    let search = format!("\"{title}\" in:title");
+    let a = [
+        "issue",
+        "list",
+        "-R",
+        repo,
+        "--state",
+        "all",
+        "--search",
+        &search,
+        "--json",
+        "number,title",
+    ];
+    let list = json(r, "gh", &a)?;
+    let hit = (list.as_array().into_iter().flatten())
+        .find(|i| (i.at("title").as_str()).is_some_and(|t| t == title))
+        .and_then(|i| i.at("number").as_u64());
+    Ok(hit)
+}
+
 /// The cached issue title, if any (else the last backlog read's, for a row queued from it); never calls GitHub.
 pub fn cached_title(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
     let t = |v: &Value| v.at("title").as_str().map(String::from);

@@ -106,7 +106,7 @@ own `triage` key.
 |---|---|---|
 | `drover lesson <fleet>` | generalise | the `job` verb with the fleet and `lesson` |
 | `drover triage <fleet>` | generalise | the `job` verb with `triage` |
-| `drover deps <fleet>` | generalise | the `job` verb with `deps` (and `advisory`) |
+| the `deps` verb | generalise | the `job` verb with `deps` (and `advisory`) |
 | `drover hotspots [fleet]`, the filing half | generalise | the `job` verb with `hotspots` |
 | `drover hotspots [fleet]`, the report | keep | report only, stores the list, exits 1 with any hot file |
 | `drover lesson digest` | keep | gains a minimum-FAILs flag that sets the exit code |

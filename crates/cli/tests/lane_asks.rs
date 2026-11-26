@@ -149,7 +149,7 @@ fn chat(c: &drover::Ctx, now: u64) -> Vec<serde_json::Value> {
     let c = at(c, now);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", now);
-    let chat: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, now, "chat")).unwrap();
+    let chat: serde_json::Value = chat_all(&s, ADDR, &cookie, now);
     chat["threads"]
         .as_array()
         .unwrap()

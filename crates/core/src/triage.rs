@@ -10,13 +10,11 @@ use std::io::Write;
 /// The head of a folded issue's `<details>` block, which holds its text before the fold.
 pub const FOLDED: &str = "<details><summary>Earlier text";
 
-/// `drover triage [<fleet> | close|fold|label|docs …]`.
+/// `drover triage close|fold|label|docs …`, a triage lane's verbs.
 #[derive(clap::Args)]
-#[command(args_conflicts_with_subcommands = true)]
 pub struct Args {
     #[command(subcommand)]
-    cmd: Option<Verb>,
-    fleet: Option<String>,
+    cmd: Verb,
 }
 
 #[derive(clap::Subcommand)]
@@ -66,47 +64,20 @@ enum Verb {
     },
 }
 
-/// Run `drover triage`: exit 4 when the lane's prompt was not confirmed.
+/// Run a triage lane's verb.
 pub fn cli(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, a: Args) -> Result<i32> {
     match a.cmd {
-        Some(Verb::Close {
+        Verb::Close {
             fleet,
             issue,
             why,
             evidence,
-        }) => close(ctx, cfg, r, out, (&fleet, issue), (&why, &evidence))?,
-        Some(Verb::Fold { fleet, issue, spec }) => fold_spec(ctx, cfg, r, out, (&fleet, issue), &spec)?,
-        Some(Verb::Label { fleet, issue, labels }) => label(ctx, cfg, r, out, (&fleet, issue), &labels)?,
-        Some(Verb::Docs { fleet, findings, root }) => docs(ctx, cfg, r, out, &fleet, (&findings, &root))?,
-        None => {
-            let fleet = a
-                .fleet
-                .context("usage: drover triage <FLEET> | drover triage close|fold|label|docs …")?;
-            return Ok(if run(ctx, cfg, r, out, &fleet)? { 0 } else { 4 });
-        }
+        } => close(ctx, cfg, r, out, (&fleet, issue), (&why, &evidence))?,
+        Verb::Fold { fleet, issue, spec } => fold_spec(ctx, cfg, r, out, (&fleet, issue), &spec)?,
+        Verb::Label { fleet, issue, labels } => label(ctx, cfg, r, out, (&fleet, issue), &labels)?,
+        Verb::Docs { fleet, findings, root } => docs(ctx, cfg, r, out, &fleet, (&findings, &root))?,
     }
     Ok(0)
-}
-
-/// `drover triage <fleet>`: file this week's triage issue, queue it on top and spawn its `triage` lane; false when the lane's prompt was not confirmed (exit 4).
-pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<bool> {
-    let title = format!("triage: {fleet} week of {}", crate::lesson::ymd(ctx.now / 86400));
-    let body = include_str!("../roles/triage-issue.md").replace("{fleet}", fleet);
-    crate::lesson::file(ctx, cfg, r, out, (fleet, "triage", None), (&title, &body))
-}
-
-/// `tick`'s triage run, once per 7 days for each fleet with `triage = "weekly"` (a paused fleet waits).
-pub fn weekly(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let on = |f: &crate::config::Fleet| f.triage.as_deref() == Some("weekly") && !f.paused;
-    for name in cfg.fleet.iter().filter(|(_, f)| on(f)).map(|x| x.0) {
-        if !crate::timer::due(ctx, &format!("triage-{name}"), 7 * 86400)? {
-            continue;
-        }
-        if let Err(e) = run(ctx, cfg, r, out, name) {
-            writeln!(out, "{name} triage: {e:#}")?;
-        }
-    }
-    Ok(())
 }
 
 /// `body` without its folded block: the text a later amendment or fold reads.
@@ -338,58 +309,24 @@ fn orphans(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<(
     Ok(rooted.into_iter().filter(|(_, root)| shut(root)).collect())
 }
 
-/// A triage lane's `done --no-change <note>`: `stale?` on each open issue whose `Root cause` is closed, then the summary of what it closed, folded and flagged (each with its undo) goes to the fleet's orchestrator thread, and closes its issue.
-pub fn done(
+/// A triage job's lane's `done`: `stale?` on each open issue whose `Root cause` is closed.
+pub fn flag_orphans(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
     out: &mut dyn Write,
     (fleet, n): (&str, u64),
-    note: &str,
 ) -> Result<()> {
+    if crate::jobs::of(&working(&ctx.state)?, fleet, n) != Some("triage") {
+        return Ok(());
+    }
     for (o, root) in orphans(ctx, cfg, r, fleet)? {
         let flag = labeled(ctx, cfg, r, out, (fleet, o), &["stale?".into()], json!({"root": root}));
         if let Err(e) = flag {
             writeln!(out, "{fleet}#{o}: root #{root} closed, not flagged: {e:#}")?;
         }
     }
-    let events = working(&ctx.state)?;
-    let mine: Vec<&Event> = (events.iter())
-        .filter(|e| e.fleet == fleet && e.issue == Some(n) && e.kind.starts_with("triage-"))
-        .collect();
-    let count = |k: &str| mine.iter().filter(|e| e.kind == k).count();
-    let mut s = format!(
-        "triage {fleet}#{n}: {} closed, {} folded, {} flagged\n",
-        count("triage-closed"),
-        count("triage-folded"),
-        count("triage-labeled")
-    );
-    for e in &mine {
-        let what = match e.kind.as_str() {
-            "triage-closed" => format!(
-                "closed ({}: {})",
-                e.str("why").unwrap_or_default(),
-                e.str("evidence").unwrap_or_default()
-            ),
-            "triage-folded" => format!("folded ({} amendments)", e.val("amendments")),
-            "triage-docs" => format!("docs issue ({} findings)", e.val("findings")),
-            _ => match e.val("root").as_u64() {
-                Some(root) => format!(
-                    "labeled {}: root #{root} closed; close as moot, or re-root",
-                    e.val("labels")
-                ),
-                None => format!("labeled {}", e.val("labels")),
-            },
-        };
-        let undo = e.str("undo").unwrap_or_default();
-        s += &format!("- #{} {what} · undo: `{undo}`\n", e.val("target"));
-    }
-    s += &format!("note: {note}");
-    match crate::thread::route::route(cfg, &events, fleet) {
-        Some(id) => crate::orchestrator::reply(ctx, cfg, id, &s, &[])?,
-        None => writeln!(out, "{fleet}: no orchestrator thread; the summary is on #{n}")?,
-    }
-    crate::lesson::close(ctx, cfg, r, out, (fleet, n), &s)
+    Ok(())
 }
 
 /// `drover triage docs`: file the run's one `docs:` issue from the `findings` file (one per line); no finding, no issue; a README with no non-goals goes first.

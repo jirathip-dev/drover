@@ -67,7 +67,7 @@ fn only_the_archived_thread_reads_archived_in_the_chat_api() {
     let r = Fake::default();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let tab: Value = serde_json::from_str(&api(&s, ADDR, &cookie, T + 5, "chat")).unwrap();
+    let tab: Value = chat_all(&s, ADDR, &cookie, T + 5);
     let pages: Vec<(String, bool)> = tab["threads"]
         .as_array()
         .unwrap()

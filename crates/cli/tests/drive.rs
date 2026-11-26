@@ -2521,6 +2521,7 @@ fn a_no_repro_verdict_refiled_and_refused_again_is_one_owner_card() {
 
 fn lesson(name: &str, live: bool) -> (drover::Ctx, Fake) {
     let c = setup(name);
+    ev(&c, 9, "job-filed", json!({"job": "lesson", "role": "lesson"}));
     let wt = lane(&c, 10, "lesson", "sendmeter-lesson-12", "issue-12");
     let list = [("sendmeter-lesson-12", "idle", wt.to_string_lossy().to_string())];
     let r = fake(if live { &list[..] } else { &[] })
@@ -2540,11 +2541,11 @@ fn a_lesson_lane_ending_without_a_push_is_prompted_once_then_closed_never_lane_e
     };
     let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
     assert!(
-        out.contains("#12 drive: lesson lane ended without a push: prompting it once"),
+        out.contains("#12 drive: job lane ended without a push: prompting it once"),
         "{out}"
     );
     let (out, _) = drive(&c, &r);
-    assert!(out.contains("sendmeter #12 lesson lane prompted: sent"), "{out}");
+    assert!(out.contains("sendmeter #12 job lane prompted: sent"), "{out}");
     let prompt = || {
         let line = "no repeated class? end with `drover done --no-change \"no repeated class\" sendmeter 12`";
         typed("sendmeter-lesson-12", line)

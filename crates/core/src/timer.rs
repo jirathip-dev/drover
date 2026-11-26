@@ -14,7 +14,7 @@ pub const FAST: &str = "dev.drover.fast";
 pub const SERVICE: &str = "dev.drover.service";
 pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive"])];
 /// The tick's steps in order (`tick.step` names the running one) and the `[limits]` keys that time them.
-pub const TICK_STEPS: [(&str, &[&str]); 10] = [
+pub const TICK_STEPS: [(&str, &[&str]); 8] = [
     (
         "check",
         &[
@@ -33,9 +33,7 @@ pub const TICK_STEPS: [(&str, &[&str]); 10] = [
     ("drive", &[]),
     ("clean", &[]),
     ("trim", &[]),
-    ("lesson", &[]),
-    ("triage", &[]),
-    ("deps", &[]),
+    ("jobs", &[]),
     ("soak", &[]),
     ("hotspots", &[]),
     ("compact", &[]),
@@ -458,7 +456,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         if over {
             writeln!(
                 out,
-                "tick: past its {budget} s budget; skipped: clean, lesson, triage, deps, soak, hotspots, compact"
+                "tick: past its {budget} s budget; skipped: clean, jobs, soak, hotspots, compact"
             )?;
         }
         let at = ctx.state.with_file_name("clean.at");
@@ -479,12 +477,8 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         if over {
             return driven;
         }
-        pass.step("lesson");
-        crate::lesson::weekly(ctx, cfg, &pass, out)?;
-        pass.step("triage");
-        crate::triage::weekly(ctx, cfg, &pass, out)?;
-        pass.step("deps");
-        crate::deps::monthly(ctx, cfg, &pass, out)?;
+        pass.step("jobs");
+        crate::jobs::tick(ctx, cfg, &pass, out)?;
         pass.step("soak");
         crate::soak::nightly(ctx, cfg, &pass)?;
         pass.step("hotspots");

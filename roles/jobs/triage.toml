@@ -1,3 +1,6 @@
+every = "1d"
+title = "triage: {fleet} {date}"
+body = """
 This week's triage for `{fleet}`, worked by a `triage` lane (#1100).
 
 1. Read the open issues, the recent merged PRs, the code on the integration branch and the owner's decisions.
@@ -9,5 +12,7 @@ This week's triage for `{fleet}`, worked by a `triage` lane (#1100).
    (`drover triage docs`); no finding, no issue. Never edit docs, never propose a change to the README's intent.
 4. Never touch an issue with a live lane, an open PR, an open ask or the `keep` label (drover refuses it); closing a
    queued one drops it from the queue.
-5. End with `drover done --no-change "<one line>" {fleet} <this issue>`: the summary, with an undo for each change,
-   goes to the fleet's orchestrator thread.
+5. End with `drover done --no-change "<one line>" {fleet} <this issue>`: drover closes this issue with that line and
+   an undo for each change."""
+role = "triage"
+empty = "nothing to triage"
