@@ -138,7 +138,7 @@ pub fn on_event(ctx: &Ctx, cfg: &Config, w: &crate::shed::Wire, e: &shed_proto::
     pulse::hear(ctx, &e.name, &e.kind, e.replay)?;
     if let (EventKind::Account { account, was, why }, Some(t)) = (&e.kind, e.labels.get("thread").filter(|_| !e.replay))
     {
-        crate::orchestrator::moved(ctx, cfg, (&fleet, t), (account, was.as_deref()), why)?;
+        crate::orchestrator::account_moved(ctx, cfg, (&fleet, t), (account, was.as_deref()), why)?;
     }
     let Some(issue) = issue else {
         return Ok(false);

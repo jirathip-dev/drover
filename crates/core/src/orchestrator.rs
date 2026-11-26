@@ -1306,7 +1306,7 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
 }
 
 /// Shed moved thread `id`'s orchestrator to account `now` (`why` `limit` or `owner`): one row, `<was> hit its limit; now on <now>` or `switched to <now>`; none at its `start`.
-pub fn moved(
+pub fn account_moved(
     ctx: &Ctx,
     cfg: &Config,
     (fleet, id): (&str, &str),
