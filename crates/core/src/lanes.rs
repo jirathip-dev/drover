@@ -218,11 +218,6 @@ pub fn health(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &Sessions, s:
         Seen::Unreachable => return Health::Unknown,
         Seen::Absent if ctx.now < sp.ts + crate::stall::START_SECS => return Health::Unknown,
         Seen::Absent => return Health::Dead(stamp::exit(events, lane)),
-        Seen::Here(x) if x.key_refused() => {
-            return Health::Stalled {
-                since: stamp::since(events, lane).unwrap_or(sp.ts).max(sp.ts),
-            }
-        }
         Seen::Here(x) if held(events, x) => return Health::Fine,
         Seen::Here(x) => match x.status() {
             Some(st) => st,

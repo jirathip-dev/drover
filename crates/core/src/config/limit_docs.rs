@@ -208,11 +208,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "shed_read_millis",
         "how long drive's intake waits for shed's state changes",
     ),
-    ("proxy_connect_secs", "the token proxy's liveness connect timeout"),
-    (
-        "proxy_retry_secs",
-        "a proxy lane's sign-out holds its host only if no call gets through the token proxy this long after it",
-    ),
     (
         "service_call_secs",
         "a call to the running service's socket times out after this long",

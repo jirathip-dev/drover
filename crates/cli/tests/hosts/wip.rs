@@ -94,7 +94,6 @@ fn on_bazzite(
         .reply("date -r", "20261120-120000\n");
     let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
     bazzite.lane(agent, "idle", &wt);
-    remote::proxied(&c);
     let r = RealGit(acp(&f, &bazzite), wt);
     let (code, out) = run(&c, &r, args);
     let wip = git(&[

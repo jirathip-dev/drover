@@ -1518,7 +1518,6 @@ impl Server<'_> {
             ),
             "/screens/ask" => ask_sheet(ctx, q)?,
             "/screens/hosts" => return self.hosts_sheet(ctx),
-            "/screens/proxy-token" => return Self::proxy_how(ctx),
             p if p == "/screens/threads" || p.starts_with("/screens/threads/") => {
                 return self.threads_screen(ctx, &p[16..], q.get("before"), paired)
             }
