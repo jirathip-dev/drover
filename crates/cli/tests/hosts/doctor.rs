@@ -27,7 +27,7 @@ fn doctor_flags_each_host_without_just_on_the_done_checks_path() {
         "sh -c export PATH='{}'; command -v just",
         drover::timer::job_path(&c, &cfg, &base())
     );
-    let remote = format!("{SSH}'sh' '-c' '{}command -v just'", drover::cloud::SH);
+    let remote = format!("{SSH}'sh' '-c' 'command -v just'");
     let r = base().reply(&main, "/usr/bin/just\n").reply(&remote, "/usr/bin/just\n");
     let (_, out) = run(&c, &two(&r, &bazzite), &["doctor"]);
     assert!(!out.contains("just —"), "{out}");
@@ -35,7 +35,7 @@ fn doctor_flags_each_host_without_just_on_the_done_checks_path() {
     let r = base().reply(&main, "/usr/bin/just\n");
     let (_, out) = run(&c, &two(&r, &bazzite), &["doctor"]);
     assert!(
-        out.contains("\n! just — missing on bazzite → drover hosts bootstrap bazzite\n"),
+        out.contains("\n! just — missing on bazzite → install just on bazzite\n"),
         "{out}"
     );
     assert!(!out.contains("missing on mini"), "{out}");

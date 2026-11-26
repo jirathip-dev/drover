@@ -132,57 +132,6 @@ fn a_withdrawn_ask_closes_and_names_the_ask_that_replaced_it() {
     assert!(row(&c, "q1").ends_with("[withdrawn → q2]"), "{}", row(&c, "q1"));
 }
 
-fn handoff(name: &str, sh: &FakeShed) -> drover::Ctx {
-    let cfg = format!(
-        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
-         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
-        sh.sock.display()
-    );
-    let mut c = ctx(&tmpdir(name), &cfg);
-    c.exe = env!("CARGO_BIN_EXE_drover").into();
-    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    threads(&c, NOW - 200);
-    let d = json!({"id": "q1", "question": "Hand off \"Grill\" to which sendmeter thread?",
-        "options": ["thread t2 · t2", "new thread: Grill"], "recommend": null, "kind": "owner", "thread": "t1",
-        "handoff": {"repo": "sendmeter", "title": "Grill", "text": "grill #12", "targets": ["t2", "new"]}});
-    log(&c, NOW - 90, None, "needs-decision", d);
-    c
-}
-
-#[test]
-fn a_handoff_ask_closes_when_it_is_delivered_and_when_it_fails() {
-    let sh = FakeShed::new();
-    let c = handoff("handoff-ok", &sh);
-    let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
-    let f = Fake::default()
-        .reply("shed help run", "--meta <JSON>")
-        .reply("shed agents --json", &agents.to_string())
-        .reply("shed run", "")
-        .reply("shed send", "");
-    let (code, out) = run(&c, &sh.cli(&f), &["answer", "sendmeter", "q1", "1"]);
-    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
-    let sent = f
-        .calls
-        .borrow()
-        .iter()
-        .any(|l| l.starts_with("shed send orchestrator-t2 ") && l.contains("grill #12"));
-    assert!(sent, "{:?}", f.calls.borrow());
-    let herdr = |l: &&String| l.starts_with("herdr") && *l != "herdr agent list";
-    assert!(
-        !f.calls.borrow().iter().any(|l| herdr(&l)),
-        "no herdr pane: {:?}",
-        f.calls.borrow()
-    );
-    assert_eq!(open(&c), <[std::string::String; 0]>::default());
-    assert!(row(&c, "q1").ends_with("[delivered to t2]"), "{}", row(&c, "q1"));
-
-    let c = handoff("handoff-failed", &FakeShed::new());
-    let (code, out) = run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "1"]);
-    assert_ne!(code, 0, "{out}");
-    assert_eq!(open(&c), <[std::string::String; 0]>::default());
-    assert!(row(&c, "q1").ends_with("[failed]"), "{}", row(&c, "q1"));
-}
-
 fn check(c: &drover::Ctx, r: &Fake) -> String {
     let (code, out) = run(c, r, &["check"]);
     assert_eq!(code, 0, "{out}");

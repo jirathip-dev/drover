@@ -10,6 +10,7 @@ The cooee plugin token (`Authorization: Bearer …`) or a paired device reads th
 
 | Route | Answer |
 |---|---|
+| `GET /api/v1/manifest` | `Manifest`: name, version, `api` (the base URL the client reached), `screens` (the places), `actions`, `destructive` and `threads`, the chat paths (`/cooee/profiles`, `/cooee/thread-started`, attach, detach, rows, stream, a thread's rows and `said`); `cooee-plugin.toml` is `just gen`'s copy of it |
 | `GET /api/v1/rows?since=<seq>&n=<1..500>` | `Rows`: the rows after `since`, oldest first; `more` when more follow |
 | `GET /api/v1/rows?open=1` | `Rows`: each key's newest row while it is still open, `prompt` and `push` null |
 | `GET /api/v1/rows/stream` | server-sent events: `id:` the row's seq, `data:` one row; from `Last-Event-ID`, else from now |

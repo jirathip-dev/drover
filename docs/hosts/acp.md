@@ -34,8 +34,7 @@ over ssh). The brief is the first prompt, and every later prompt goes through th
   until a look answers again. A lane that dies on `ECONNREFUSED` is gone with cause `ECONNREFUSED: proxy tunnel
   down`, not `adapter crash`. The proxy checks the key, then forwards the call to `upstream` with the one
   `[proxy] token-file` token (#923: `claude setup-token`'s, 0600, [accounts](../accounts.md); only the proxy reads it;
-  a remote ACP spawn without it is refused `NO_PROXY_TOKEN` with that step; #1131: so is starting a `shed-acp`
-  cloud host, by `hosts bootstrap` or drive, before the recipe's first call, so no VM is made or billed; doctor's
+  a remote ACP spawn without it is refused `NO_PROXY_TOKEN` with that step; doctor's
   proxy row, the Hosts screen's Token proxy card and the `proxy-token-expiring` / `proxy-token-rejected` alerts are
   in [accounts](../accounts.md)) and the `oauth-2025-04-20` beta added. curl sends it, with the token in its config on stdin and never in
   argv, and the answer streams back as it comes. The token never leaves the main host.
@@ -44,12 +43,6 @@ over ssh). The brief is the first prompt, and every later prompt goes through th
   spawned again, the last of which revokes the older key at once). `drover hosts keys` lists them with their state.
   `drover hosts keys revoke <id>` (owner only) ends one at once and logs `proxy-key-revoked`. A refused key gets a
   401 and nothing goes upstream.
-- **Bootstrap.** `hosts bootstrap <name>` on a `shed-acp` host: git, gh, Claude Code,
-  rust, shed once from its latest main (`cargo install --git …/shed --branch main`, skipped when `shed --version` answers;
-  shed updates itself after that),
-  shed's job (`shed install`, then systemd `enable --now` or launchd `bootstrap`; `shed doctor` is the read-back),
-  node and npx, `shed agents add claude-acp`, and drover. No Claude login is opened there. gh is the only login,
-  and it must be done by hand over ssh until the git relay lands. `hosts snapshot` saves that state as before.
 
 **Proof (2026-11-08, the mini).** A throwaway proxy on 127.0.0.1 swapped a lane key for the subscription token
 (`CLAUDE_CODE_OAUTH_TOKEN`) and added `anthropic-beta: oauth-2025-04-20`. A Claude Code 2.1.311 client was started

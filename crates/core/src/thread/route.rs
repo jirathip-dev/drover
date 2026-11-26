@@ -87,7 +87,9 @@ pub fn to_owner(ctx: &Ctx, cfg: &Config, id: &str, a: &Event, rec: Option<u64>, 
 /// A one-line row from thread `id` into each thread that handed off to it (an issue filed, an ask answered).
 pub fn flow(ctx: &Ctx, cfg: &Config, id: &str, text: &str) -> Result<()> {
     let events = working(&ctx.state)?;
-    let to_id = |e: &&Event| e.kind == "thread-handoff" && e.str("to") == Some(id);
+    let to_id = |e: &&Event| {
+        e.kind == "thread-handoff" && e.str("to") == Some(id) && crate::orchestrator::moved(&events, e.seq).is_none()
+    };
     let srcs: std::collections::BTreeSet<_> = events.iter().filter(to_id).filter_map(|e| e.str("from")).collect();
     for s in srcs {
         let d = json!({"thread": s, "from": "system", "via": id, "text": text});

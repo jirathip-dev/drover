@@ -118,17 +118,14 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             }
         }
     }
+    for (kind, d) in crate::accounts::alerts(cfg, r, &events) {
+        fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
+    }
     let (stall, remote) = (cfg.limits.stall_minutes * 60, crate::hosts::survey(ctx, cfg, r, false));
     crate::session::stamp::observe(ctx, cfg, r, &sessions)?;
     let events = working(&ctx.state)?;
-    crate::cloud::tick(ctx, cfg, r, &remote, out)?;
     for (name, a) in &remote {
-        let stopped = || crate::cloud::state(&events, name) == "stopped";
-        if cfg
-            .hosts
-            .get(name)
-            .is_none_or(|h| h.machine.is_none() || h.cloud.is_some() && stopped())
-        {
+        if cfg.hosts.get(name).is_none_or(|h| h.machine.is_none()) {
             continue;
         }
         let was = |e: &&Event| e.str("host") == Some(name) && matches!(e.kind.as_str(), "host-offline" | "host-online");
@@ -158,19 +155,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
     }
     crate::setup::reap(ctx, r, &events).and_then(|()| stranded::alert(ctx, cfg, out, &events))?;
-    match crate::runners::tick(ctx, cfg, r, &events) {
-        Some(Ok((on, want))) => {
-            let was = |e: &&Event| matches!(e.kind.as_str(), "runners-low" | "runners-ok");
-            let last = events.iter().rev().find(was);
-            if (on < want) != last.is_some_and(|e| e.kind == "runners-low") {
-                let kind = if on < want { "runners-low" } else { "runners-ok" };
-                let d = json!({"key": last.map_or(0, |e| e.ts), "reason": format!("CI runners {on}/{want} online")});
-                fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
-            }
-        }
-        Some(Err(e)) => crate::stderr!("drover check: CI runners: {e:#}"),
-        None => {}
-    }
     for (k, w) in cfg.warnings() {
         let d = json!({"key": k, "reason": format!("{k} is {w}")});
         fire(ctx, cfg, out, &events, ("drover", None), "config-warning", d)?;
@@ -317,7 +301,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 ));
             }
             if let Some(a) = agent {
-                if let Some(sp) = spawned {
+                if let Some(sp) = spawned.filter(|sp| !crate::hosts::on_account(sp)) {
                     let seen = match a.status() {
                         Some(Status::Limited) => Some(("usage-limit", "hit the usage limit")),
                         _ if a.signed_out() => Some(("signed-out", "is signed out")),
@@ -2460,7 +2444,20 @@ fn snapshot(
     let (staged, log) = snap().map_err(undo)?;
     let diff = format!("{staged}\n{log}");
     let secret = |a: &str| Some(crate::lanes::redact(a.trim())).filter(|m| m != a.trim());
-    let leak = chk.and_then(|c| Some((c, crate::hygiene::hits(&diff, |l| c.find(l)).into_iter().next()?)));
+    let differs = (chk.and_then(|c| c.tree.as_ref())).and_then(|(_, b)| {
+        let at = format!("origin/{b}");
+        git(&["diff", "--cached", "--name-only", "--no-renames", "-z", &at, "--"]).ok()
+    });
+    let public = |at: &str| {
+        let file = at.rsplit_once(':').map_or(at, |a| a.0);
+        differs.as_ref().is_some_and(|d| !d.split('\0').any(|p| p == file))
+    };
+    let leak = chk.and_then(|c| {
+        let staged = crate::hygiene::hits(&staged, |l| c.find(l))
+            .into_iter()
+            .filter(|h| !public(&h.1));
+        Some((c, staged.chain(crate::hygiene::hits(&log, |l| c.find(l))).next()?))
+    });
     let hit = match crate::hygiene::hits(&diff, secret)
         .into_iter()
         .find(|h| !unscanned(&h.1))

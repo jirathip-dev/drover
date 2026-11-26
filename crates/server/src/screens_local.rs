@@ -23,7 +23,7 @@ impl Server<'_> {
             return crate::gate::refused("NOT_PERMITTED", "a secret is entered on a paired device only");
         }
         if !permitted(name) && (!owner || !THREAD_ACTIONS.contains(&name) && !HOST_ACTIONS.contains(&name)) {
-            let why = format!("`{name}` is not in cooee-plugin.toml's [permissions] actions");
+            let why = format!("`{name}` is not in the manifest's actions");
             return crate::gate::refused("NOT_PERMITTED", why);
         }
         let by = match who {

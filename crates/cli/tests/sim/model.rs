@@ -310,6 +310,7 @@ fn shed(w: &mut World, a: &[&str]) -> Out {
     let name = p["name"].as_str().unwrap_or_default().to_string();
     let gone = || err(1, "NO_SUCH_TERMINAL");
     match *m {
+        "account.ls" => ok(json!([{"provider": "claude", "name": "work", "state": "ready"}]).to_string()),
         "ls" => ok(Value::from(
             w.model
                 .panes

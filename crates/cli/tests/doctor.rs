@@ -422,7 +422,7 @@ fn retired_account_keys_warn_until_they_are_dropped() {
         "profile = \"fleet-impl\"\naccount = \"main\"\n",
     ) + "\n[accounts]\nmain = \"TOKEN_MAIN\"\naccounts_env = \"/x/tokens.env\"\n";
     std::fs::write(&c.config, &old).unwrap();
-    let warn = "! config — [accounts] is removed (#923): lanes run on the host's own CLI login; delete [accounts], fleet.demo.role.impl.account";
+    let warn = "! config — [accounts] is removed (#1576): accounts are shed's, a role or fleet names one with `account`; delete [accounts]";
 
     let r = good();
     let (code, out) = run(&c, &r, &["doctor"]);

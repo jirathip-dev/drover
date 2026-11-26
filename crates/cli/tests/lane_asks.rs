@@ -54,11 +54,11 @@ fn setup(name: &str, extra: &str, threads: &[&str]) -> (drover::Ctx, FakeShed) {
         &format!("integration = \"staging\"\n{extra}"),
     );
     let conf = format!(
-        "{conf}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\naccount = \"C\"\n\n[[notify]]\ntype = \"webpush\"\nsub = \"mailto:owner@example.com\"\n"
+        "{conf}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n\n[[notify]]\ntype = \"webpush\"\nsub = \"mailto:owner@example.com\"\n"
     );
     let sh = FakeShed::new();
     let conf = format!(
-        "{conf}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        "{conf}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n",
         sh.sock.display()
     );
     let mut c = ctx(&d, &conf);

@@ -876,7 +876,7 @@ fn parity_r8_broad_kills_are_denied_and_pid_kills_allowed() {
     }
     let cfg = format!(
         "{CONFIG}\n[fleet.other]\nrepo = \"o/r\"\nlocal = \"/tmp/x\"\nintegration = \"staging\"\ndeny_commands = []\n\
-         [hosts.cloud1]\nmachine = \"cloud1\"\ncloud = \"boat\"\nallow_commands = [\"pkill\"]"
+         [hosts.cloud1]\nmachine = \"cloud1\"\nallow_commands = [\"pkill\"]"
     );
     let input = json!({"tool_name": "Bash", "cwd": "/", "tool_input": {"command": "pkill node"}});
     let vars = [("DROVER_LANE", Some("other:7:impl")), ("DROVER_HOST", Some("cloud1"))];
@@ -917,27 +917,20 @@ fn host_stress_is_refused_and_test_runs_allowed() {
 }
 
 #[test]
-fn docker_is_allowed_on_a_cloud_host_and_denied_on_a_mac() {
+fn docker_is_denied_on_a_mac() {
     let run = |hosts: &str, host: &str, cmd: &str| {
-        let cfg = format!("{CONFIG}\n[hosts.mini]\n\n[hosts.cloud1]\nmachine = \"cloud1\"\ncloud = \"boat\"\n{hosts}");
+        let cfg = format!("{CONFIG}\n[hosts.mini]\n{hosts}");
         let input = json!({"tool_name": "Bash", "cwd": "/", "tool_input": {"command": cmd}});
         let vars = [("DROVER_LANE", Some("sendmeter:7:impl")), ("DROVER_HOST", Some(host))];
         hook_cfg(&cfg, &vars, "impl", &input).0
     };
     let denied = |o: String| o.contains("NO_CONTAINERS") || o.contains("NO_COMMAND");
     for cmd in ["docker ps", "docker compose up -d db", "supabase start"] {
-        assert!(run("", "cloud1", cmd).is_empty(), "{cmd} allowed on the cloud host");
         assert!(denied(run("", "mini", cmd)), "{cmd} denied on the Mac");
         assert!(denied(run("", "", cmd)), "{cmd} denied with no host");
     }
-    assert!(denied(run("", "cloud1", "podman run x")), "the rest of the ban stays");
-    assert!(
-        denied(run("allow_commands = []", "cloud1", "docker ps")),
-        "a cloud host can keep the ban"
-    );
     let add = "deny_commands_add = [\"terraform apply\"]";
-    assert!(denied(run(add, "cloud1", "terraform apply")));
-    assert_eq!(run(add, "cloud1", "docker ps"), "");
+    assert!(denied(run(add, "mini", "terraform apply")));
     let mac = "\n[hosts.mini2]\nallow_commands = [\"docker\"]";
     assert!(run(mac, "mini2", "docker ps").is_empty(), "a Mac may opt in");
 }
@@ -1442,7 +1435,8 @@ fn the_stop_hook_asks_for_the_turn_only_in_impl_lanes() {
     for lane in [None, Some("sendmeter:-:orchestrator"), Some("sendmeter:-:conductor")] {
         assert_eq!(stop(lane, "orchestrator"), "", "{lane:?} ends its turn freely");
     }
-    let out = stop(Some("sendmeter:24:impl"), "impl");
+    let lane = [("DROVER_LANE", Some("sendmeter:24:impl")), ("DROVER_OUTBOX", Some("1"))];
+    let out = hook_env(&lane, "impl", &json!({"hook_event_name": "Stop"}));
     let v: Value = serde_json::from_str(out.trim()).unwrap();
     assert_eq!(
         (&v["decision"], &v["reason"]),
