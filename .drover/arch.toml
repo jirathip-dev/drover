@@ -28,7 +28,6 @@ generated = [
     "crates/cli/tests/golden/private-names/expect",
 ]
 generate = "sh scripts/arch-gen.sh"
-append_only = ["crates/cli/tests/golden/contract/v1/*.keys"]
 shared = [
     "crates/core/src/check.rs",
     "crates/core/src/cli.rs",

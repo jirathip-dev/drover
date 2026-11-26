@@ -1,0 +1,9 @@
+about = "no line of an append-only file (the /api/v1 contract keys) is removed or retyped"
+fix = "add a key instead: a breaking change is /api/v2"
+budget_secs = 600
+setup = ["rust"]
+paths = ["crates/cli/tests/golden/contract/**", ".drover/append-only.toml"]
+run = '''
+set -- {--base}
+cargo run --quiet --locked --bin drover -- arch-check --config .drover/append-only.toml --base "${2:-HEAD^1}"
+'''

@@ -7,7 +7,7 @@
 - don't put a ts.net hostname, chat ID or /Users/ path in docs/, demo/ or the demo export (enforced by: local/leak-docs, local/demo-leak)
 - don't add a direct dependency outside .gatekeeper/deps.toml with its reason (enforced by: core/deps)
 - don't make core depend on server or cli, server on cli, or spawn a process outside core's runner.rs (enforced by: local/layers, tests/runner_limits.rs)
-- don't let ts-rs into the release build, let assets/types/ drift from `just types`, hand-copy a generated type, remove or retype a key of crates/cli/tests/golden/contract/v1/, call a client, or type into a chat a client runs: a breaking change is /api/v2, and a line for a client's chat is a row's prompt (enforced by: local/no-ts-rs, local/ts-types, core/arch `append_only` and the `/plugin/` ban, crates/cli/tests/contract_v1.rs, D2's test that a lane ask to an attached chat starts no shed session)
+- don't let ts-rs into the release build, let assets/types/ drift from `just types`, hand-copy a generated type, remove or retype a key of crates/cli/tests/golden/contract/v1/, call a client, or type into a chat a client runs: a breaking change is /api/v2, and a line for a client's chat is a row's prompt (enforced by: local/no-ts-rs, local/ts-types, local/append-only, core/arch's `/plugin/` ban, crates/cli/tests/contract_v1.rs, D2's test that a lane ask to an attached chat starts no shed session)
 - don't build HTML in crates/server outside the page shell and the lifeboat (enforced by: local/no-rust-html)
 - don't hard-code a Duration in crates/core/src: make it a [limits] key (enforced by: local/timing, scripts/timing-check.sh)
 - don't push src/ over ci/cap.toml's line_cap, or edit ci/cap.toml from a lane (enforced by: core/cap, the lane hook)
