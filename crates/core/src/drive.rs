@@ -824,7 +824,7 @@ fn one(
     laps.lap("closed issues");
     mark("PR reads, gates, steps");
     let mut res = failed(
-        pass(ctx, cfg, (r, seen), out, name),
+        lanes(ctx, cfg, r, out, name).and_then(|l| l.map_or(Ok(()), |s| pass(ctx, cfg, (r, seen), out, name, &s))),
         out,
         name,
         "PR reads, gates, steps",
@@ -852,8 +852,7 @@ fn one(
     res.map_or(Ok(()), Err)
 }
 
-/// Each host's sessions, the main host polled again when its view went stale; None: it did not answer, its lane checks skip this pass.
-pub(crate) fn lanes(
+fn lanes(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
@@ -1175,11 +1174,9 @@ fn pass(
     (r, seen): (&dyn Runner, &dyn Runner),
     out: &mut dyn Write,
     fleet: &str,
+    sessions: &crate::session::Sessions,
 ) -> Result<()> {
     let f = cfg.fleet(fleet)?;
-    let Some(sessions) = lanes(ctx, cfg, r, out, fleet)? else {
-        return Ok(());
-    };
     let agents = sessions.running();
     let ev = working(&ctx.state)?;
     let st = fold(&ev);
@@ -1487,7 +1484,7 @@ fn pass(
                 updated = true;
                 catch_up(ctx, cfg, r, out, fleet)?;
             }
-        } else if let Some(a) = stall::stalled(ctx, cfg, &events, &sessions, w) {
+        } else if let Some(a) = stall::stalled(ctx, cfg, &events, sessions, w) {
             let start = matches!(
                 &a,
                 stall::Act::Respawn(_, "failed start") | stall::Act::Escalate("START_FAILED", _)
