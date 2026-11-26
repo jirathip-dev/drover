@@ -95,6 +95,23 @@ fn an_account_holding_a_setup_is_refused_acp_unguarded() {
     assert!(shed_run(&f).is_none());
 }
 
+#[test]
+fn the_default_account_runs_when_named_and_auto_never_takes_it() {
+    let b = FakeShed::new();
+    b.lock().accounts = vec![acct("default", "ready")];
+    let c = acp_ctx("acct-default-auto", &acp_config(&b.sock, "claude"));
+    let f = acp_fake(&["echo", "claude-agent-acp"]);
+    let (code, out) = run(&c, &b.cli(&f), &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 3, "auto skips default: {out}");
+    assert!(out.contains("REFUSED LOGIN_NEEDED"), "{out}");
+    let cfg = acp_config(&b.sock, "claude").replace("# never main\n", "# never main\naccount = \"default\"\n");
+    let c = acp_ctx("acct-default-named", &cfg);
+    let f = acp_fake(&["echo", "claude-agent-acp"]);
+    let (code, out) = run(&c, &b.cli(&f), &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(shed_run(&f).unwrap().contains(" --account default --label "));
+}
+
 fn rows(c: &drover::Ctx, id: &str) -> Vec<String> {
     let all = thread_events(c, "thread-msg").into_iter();
     let sys = all.filter(|e| e.str("thread") == Some(id) && e.str("from") == Some("system"));

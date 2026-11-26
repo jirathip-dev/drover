@@ -52,7 +52,7 @@ pub fn ls(cfg: &Config, r: &dyn Runner) -> Option<Vec<proto::Account>> {
 
 /// The hold on agent `agent` starting on `a`, from `all`: a named account missing, out, limited or holding a setup; for `auto`, no named one ready.
 pub fn of(all: &[proto::Account], agent: &str, a: &Account) -> Option<Hold> {
-    let mine = all.iter().filter(|x| x.provider == agent && x.name != "default");
+    let mine = all.iter().filter(|x| x.provider == agent);
     let hold = |name: Option<&str>, why| {
         Some(Hold {
             agent: agent.into(),
@@ -72,7 +72,8 @@ pub fn of(all: &[proto::Account], agent: &str, a: &Account) -> Option<Hold> {
             Some(x) => hold(Some(n), state(x)?),
         };
     }
-    let open: Vec<_> = mine.filter(|x| x.setup.is_empty()).map(|x| (x, state(x))).collect();
+    let auto = mine.filter(|x| x.name != "default" && x.setup.is_empty());
+    let open: Vec<_> = auto.map(|x| (x, state(x))).collect();
     if open.iter().any(|x| x.1.is_none()) {
         return None;
     }
