@@ -148,7 +148,7 @@ impl FakeShed {
     /// Inject `f` into every connection from now on.
     pub fn fault(&self, f: Fault) {
         if f == Fault::Gone {
-            let _ = std::fs::remove_file(&self.sock);
+            std::fs::remove_file(&self.sock).ok();
         }
         self.lock().fault = f;
     }

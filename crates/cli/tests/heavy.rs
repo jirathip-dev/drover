@@ -400,7 +400,7 @@ fn the_remote_code_passes_through_without_a_local_run() {
             .unwrap();
         assert_eq!(st.code(), Some(code));
         assert_eq!(log(&d), "", "never run here");
-        assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0], "no slot held");
+        assert_eq!(tickets(&d), <[drover::heavy::Ticket; 0]>::default(), "no slot held");
         let args = std::fs::read_to_string(d.join("runners.log")).unwrap();
         let want = format!("run --tag linux --dir {top} --wait 5 --setup make deps --env CARGO_BUILD_JOBS --out target/shots -- bash -c sh test.sh a\n");
         assert_eq!(args, want);
@@ -495,7 +495,7 @@ fn a_routed_fleets_hold_runs_on_the_build_machine_and_holds_no_slot() {
         let st = routed_hold(&d, &path, &["sh", "test.sh", "h"]).status().unwrap();
         assert_eq!(st.code(), Some(code));
         assert_eq!(log(&d), "", "never run here");
-        assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0], "no slot held");
+        assert_eq!(tickets(&d), <[drover::heavy::Ticket; 0]>::default(), "no slot held");
         let here = d.canonicalize().unwrap();
         let args = std::fs::read_to_string(d.join("runners.log")).unwrap();
         assert_eq!(
