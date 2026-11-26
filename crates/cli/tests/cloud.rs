@@ -67,12 +67,12 @@ fn healthy(f: Fake) -> Fake {
         )
 }
 
-fn fake(mini: f64) -> Fake {
+fn fake(mini: u32) -> Fake {
     healthy(Fake::default())
         .reply("which shed", "/opt/shed/bin/shed\n")
-        .reply("sysctl -n vm.loadavg", &format!("{{ {} 1 1 }}", mini * 4.0))
+        .reply("iostat", &iostat(mini))
         .reply("sysctl -n hw.ncpu", "4")
-        .reply(&format!("{SSH}'cat' '/proc/loadavg'"), "0.4 1 1 1/9 42")
+        .reply(&format!("{SSH}'vmstat' '1' '2'"), &vmstat(90))
         .reply(&format!("{SSH}'nproc'"), "4")
         .reply(
             &format!("{SSH}'/opt/drover/bin/drover' 'profiles' 'sync' '--profile'"),
@@ -104,7 +104,7 @@ fn placed(c: &drover::Ctx, r: &Fake, force: Option<&str>) -> Result<String, Stri
     }
 }
 
-fn spawn_fake_at(mini: f64) -> Fake {
+fn spawn_fake_at(mini: u32) -> Fake {
     fake(mini)
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
         .reply(
@@ -118,7 +118,7 @@ fn spawn_fake_at(mini: f64) -> Fake {
 }
 
 fn spawn_fake() -> Fake {
-    spawn_fake_at(0.1)
+    spawn_fake_at(97)
 }
 
 fn on_cloud<'a>(f: &'a Fake, sh: &'a FakeShed) -> OverSsh<'a> {
@@ -191,27 +191,27 @@ fn a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns() {
 #[test]
 fn a_stopped_cloud_host_takes_overflow_only_after_the_locals_were_held_long_enough() {
     let c = setup("cloud-overflow");
-    let r = fake(0.1);
+    let r = fake(97);
     assert_eq!(placed(&c, &r, None).as_deref(), Ok("mini"));
     assert!(!r.called(SSH), "{:?}", r.calls.borrow());
-    let e = placed(&c, &fake(3.0), None).unwrap_err();
+    let e = placed(&c, &fake(10), None).unwrap_err();
     assert!(e.starts_with("HOST_BUSY: mini"), "{e}");
     let later = drover::Ctx {
         now: NOW + 601,
         ..c.clone()
     };
     assert_eq!(
-        placed(&later, &fake(3.0), None).unwrap_err(),
+        placed(&later, &fake(10), None).unwrap_err(),
         "CLOUD_STOPPED: cloud1: stopped"
     );
-    assert_eq!(placed(&later, &fake(0.1), None).as_deref(), Ok("mini"));
+    assert_eq!(placed(&later, &fake(97), None).as_deref(), Ok("mini"));
     assert!(!c.state.with_file_name("held-since").exists());
     let e = placed(
         &drover::Ctx {
             now: NOW + 700,
             ..c.clone()
         },
-        &fake(3.0),
+        &fake(10),
         None,
     )
     .unwrap_err();
@@ -221,7 +221,7 @@ fn a_stopped_cloud_host_takes_overflow_only_after_the_locals_were_held_long_enou
             now: NOW + 5 * 3600,
             ..c
         },
-        &fake(3.0),
+        &fake(10),
         None,
     )
     .unwrap_err();
@@ -253,12 +253,12 @@ fn cloud_up(name: &str) -> drover::Ctx {
 #[test]
 fn a_running_cloud_host_takes_a_lane_at_once_while_every_mac_is_busy_and_says_why() {
     let c = cloud_up("cloud-running-overflow");
-    assert_eq!(pick(&c, &fake(2.0)), ("mini".into(), None, None));
-    let (name, refusal, why) = pick(&c, &fake(3.0));
+    assert_eq!(pick(&c, &fake(40)), ("mini".into(), None, None));
+    let (name, refusal, why) = pick(&c, &fake(10));
     assert_eq!((name.as_str(), refusal), ("cloud1", None));
     let why = why.unwrap();
     assert!(
-        why.starts_with("HOST_BUSY mini: load/cpu 3.00 > ") && why.ends_with("; cloud1 is up with room"),
+        why.starts_with("HOST_BUSY mini: cpu idle 10% < ") && why.ends_with("; cloud1 is up with room"),
         "{why}"
     );
     run(
@@ -267,7 +267,7 @@ fn a_running_cloud_host_takes_a_lane_at_once_while_every_mac_is_busy_and_says_wh
         &["queue", "sendmeter", "add", "12", "--needs", "docker"],
     );
     let why = Some("needs docker: no local host has it".to_string());
-    assert_eq!(pick(&c, &fake(0.1)), ("cloud1".into(), None, why));
+    assert_eq!(pick(&c, &fake(97)), ("cloud1".into(), None, why));
 }
 
 #[test]
@@ -279,7 +279,7 @@ fn a_running_cloud_host_at_max_working_leaves_the_lane_held_on_the_busy_mac() {
         cfg.replace("size = \"small\"\n", "size = \"small\"\nmax_working = 0\n"),
     )
     .unwrap();
-    assert_eq!(pick(&c, &fake(3.0)).1, Some("HOST_BUSY"));
+    assert_eq!(pick(&c, &fake(10)).1, Some("HOST_BUSY"));
 }
 
 #[test]
@@ -287,8 +287,8 @@ fn an_issue_whose_last_lane_ran_on_the_busy_mac_goes_to_the_running_cloud_host()
     let c = cloud_up("cloud-sticky-busy");
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "host": "mini", "pane": "p1"});
     append(&c.state, &Event::new(NOW - 50, "sendmeter", Some(12), "spawn", d)).unwrap();
-    assert_eq!(pick(&c, &fake(0.1)), ("mini".into(), None, None));
-    let (name, refusal, why) = pick(&c, &fake(3.0));
+    assert_eq!(pick(&c, &fake(97)), ("mini".into(), None, None));
+    let (name, refusal, why) = pick(&c, &fake(10));
     assert_eq!((name.as_str(), refusal), ("cloud1", None), "{why:?}");
     assert!(why.is_some_and(|w| w.ends_with("cloud1 is up with room")));
 }
@@ -301,7 +301,7 @@ fn the_dry_run_names_the_host_it_picked_and_why() {
     sh.attach(&c);
     remote::proxied(&c);
     run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]);
-    let r = spawn_fake_at(3.0);
+    let r = spawn_fake_at(10);
     let cloud = FakeShed::new();
     let (code, out) = run(
         &c,
@@ -329,7 +329,7 @@ fn running(name: &str) -> (drover::Ctx, Config) {
 
 fn lane_fake() -> Fake {
     let git = format!("{SSH}'git' '--no-replace-objects' '-C' '{WT}'");
-    fake(0.1)
+    fake(97)
         .reply(&format!("{SSH}'test' '-e'"), "")
         .reply(&format!("{git} 'rev-list'"), "1\n")
         .reply(&git, "")
@@ -457,7 +457,7 @@ fn the_budget_warns_at_80_percent_and_refuses_when_used_up() {
     ev(&c, NOW - 39_000, "cloud-up");
     assert_eq!(card(&c)[1], "r");
     assert_eq!(
-        placed(&c, &fake(0.1), Some("cloud1")).unwrap_err(),
+        placed(&c, &fake(97), Some("cloud1")).unwrap_err(),
         "CLOUD_BUDGET: cloud1: spent $11.00 of $10 this month"
     );
     run(
@@ -466,11 +466,11 @@ fn the_budget_warns_at_80_percent_and_refuses_when_used_up() {
         &["queue", "sendmeter", "add", "12", "--needs", "docker"],
     );
     assert_eq!(
-        placed(&c, &fake(0.1), None).unwrap_err(),
+        placed(&c, &fake(97), None).unwrap_err(),
         "REFUSED NO_HOST: no host with docker (cloud host stopped or over budget)"
     );
     let cfg = Config::load(&c.config).unwrap();
-    let out = tick(&c, &cfg, &fake(0.1), &BTreeMap::from([("cloud1".into(), Some(vec![]))]));
+    let out = tick(&c, &cfg, &fake(97), &BTreeMap::from([("cloud1".into(), Some(vec![]))]));
     assert!(out[0].contains("stopped (spent $11.00 of $10 this month)"), "{out:?}");
     let c = drover::Ctx {
         now: 40 * 86_400,
@@ -489,15 +489,15 @@ fn the_ssh_include_rewrite_is_idempotent_and_keeps_other_blocks() {
     std::fs::create_dir_all(&dir).unwrap();
     let other = "# herdsman other\nHost other\n  HostName 1.2.3.4\n# end other\n";
     std::fs::write(dir.join("herdsman"), other).unwrap();
-    drover::cloud::start(&c, &cfg, &fake(0.1), "cloud1").unwrap();
+    drover::cloud::start(&c, &cfg, &fake(97), "cloud1").unwrap();
     let once = std::fs::read_to_string(dir.join("herdsman")).unwrap();
-    drover::cloud::start(&c, &cfg, &fake(0.1), "cloud1").unwrap();
+    drover::cloud::start(&c, &cfg, &fake(97), "cloud1").unwrap();
     assert_eq!(std::fs::read_to_string(dir.join("herdsman")).unwrap(), once);
     assert!(
         once.starts_with(other) && once.matches("Host cloud1").count() == 1,
         "{once}"
     );
-    let mut r = fake(0.1);
+    let mut r = fake(97);
     let stdout = "ubuntu@10.0.0.9 22\nssh-ed25519 AAAAC3fakekey\n".into();
     r.replies.insert(
         0,
@@ -524,13 +524,13 @@ fn a_lost_end_marker_keeps_later_blocks_and_a_bad_address_is_refused() {
     std::fs::create_dir_all(&dir).unwrap();
     let other = "# herdsman other\nHost other\n# end other\n";
     std::fs::write(dir.join("herdsman"), format!("# herdsman cloud1\nHost cloud1\n{other}")).unwrap();
-    drover::cloud::start(&c, &cfg, &fake(0.1), "cloud1").unwrap();
+    drover::cloud::start(&c, &cfg, &fake(97), "cloud1").unwrap();
     let now = std::fs::read_to_string(dir.join("herdsman")).unwrap();
     assert!(
         now.starts_with(other) && now.matches("Host cloud1").count() == 1,
         "{now}"
     );
-    let r = fake(0.1).once(
+    let r = fake(97).once(
         &rc("address"),
         0,
         "ubuntu@10.0.0.9 22 ProxyCommand sh\nssh-ed25519 BBBB\n",

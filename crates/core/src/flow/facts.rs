@@ -199,7 +199,8 @@ pub fn lane(view: &View, sp: Option<&Event>) -> (Lane, String) {
 
 fn over(s: &Sample, l: &Limits) -> Option<String> {
     let pressed = s.pressure.as_deref().filter(|p| *p != "normal");
-    let load = (s.load_per_cpu > l.load_per_cpu).then(|| format!("load {:.1} per CPU", s.load_per_cpu));
+    let low = s.cpu_idle.filter(|i| *i < l.min_cpu_idle);
+    let load = low.map(|i| format!("cpu idle {i:.0}%"));
     load.or_else(|| pressed.map(|p| format!("memory pressure {p}")))
 }
 

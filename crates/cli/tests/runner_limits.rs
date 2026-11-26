@@ -16,7 +16,7 @@ fn sleeper(dir: &Path, name: &str) -> String {
 fn idle() {
     let c = ctx(
         &tmpdir("idle"),
-        &CONFIG.replace("[limits]\n", "[limits]\nload_per_cpu = 1e9\n"),
+        &CONFIG.replace("[limits]\n", "[limits]\nmin_cpu_idle = -1.0\n"),
     );
     drover::config::Config::load(&c.config).unwrap();
 }

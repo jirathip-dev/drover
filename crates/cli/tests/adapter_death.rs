@@ -95,10 +95,10 @@ fn an_exit_heard_on_shed_events_carries_the_same_last_words() {
     );
 }
 
-fn host(load: &str) -> Fake {
+fn host(idle: u32) -> Fake {
     Fake::default()
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
-        .reply("sysctl -n vm.loadavg", &format!("{{ {load} 1.20 1.00 }}\n"))
+        .reply("iostat", &iostat(idle))
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("gh issue view", r#"{"title":"t","body":"b"}"#)
@@ -135,12 +135,12 @@ fn six_lanes_of_one_host_dying_in_a_minute_come_back_in_one_pass_with_one_alert(
     let c = alerted("adapter-wave");
     let _sh = FakeShed::attached(&c);
     crashed_together(&c, 6);
-    let (code, out) = run(&at(&c, T), &host("1.50"), &["check"]);
+    let (code, out) = run(&at(&c, T), &host(80), &["check"]);
     assert_eq!(code, 0, "{out}");
-    let (code, out) = run(&at(&c, T + 30), &host("50.00"), &["drive"]);
+    let (code, out) = run(&at(&c, T + 30), &host(5), &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(respawned(&c), Vec::<u64>::new(), "held while the host is busy: {out}");
-    let (code, out) = run(&at(&c, T + 90), &host("1.50"), &["drive"]);
+    let (code, out) = run(&at(&c, T + 90), &host(80), &["drive"]);
     assert_eq!(code, 0, "{out}");
     let mut back = respawned(&c);
     back.sort_unstable();

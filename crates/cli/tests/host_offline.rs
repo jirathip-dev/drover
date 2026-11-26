@@ -844,7 +844,7 @@ fn a_loaded_host_whose_frames_turned_late_keeps_its_lanes() {
         since: NOW - 3600,
         heard: Some(NOW - 600),
         sample: Some(drover::link::frame::Sample {
-            load_per_cpu: 9.0,
+            cpu_idle: Some(2.0),
             pressure: None,
             at: NOW - 600,
         }),
