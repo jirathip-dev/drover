@@ -479,13 +479,21 @@ pub fn by_fleet(v: &[(String, u64)]) -> String {
     by.into_iter().map(one).collect::<Vec<_>>().join("; ")
 }
 
-/// A first start of queued `n` in `fleet` against `max_in_flight_total`: every fleet's PRs in flight, the `pending` starts and the startable issues `fleet_priority` (then the oldest queue entry) puts ahead of it fill the free slots: (PRs, starts, ahead, cap).
+/// Why a first start waits on `max_in_flight_total`.
+pub struct TotalFull {
+    pub prs: Vec<(String, u64)>,
+    pub starts: usize,
+    pub ahead: usize,
+    pub cap: usize,
+}
+
+/// A first start of queued `n` in `fleet` against `max_in_flight_total`: every fleet's PRs in flight, the `pending` starts and the startable issues `fleet_priority` (then the oldest queue entry) puts ahead of it fill the free slots.
 pub fn total_full(
     ctx: &crate::Ctx,
     (events, st): (&[Event], &States),
     cfg: &crate::config::Config,
     (fleet, n, pending): (&str, u64, &[Event]),
-) -> Option<(Vec<(String, u64)>, usize, usize, usize)> {
+) -> Option<TotalFull> {
     let fresh = state(st, fleet, n) == "queued" && crate::gh::cached_pr(ctx, fleet, n).at("state") != "OPEN";
     let (v, cap) = total(ctx, st, cfg).filter(|_| fresh)?;
     let me = (fleet.to_string(), n);
@@ -498,7 +506,12 @@ pub fn total_full(
     } else {
         0
     };
-    (used + ahead >= cap).then_some((v, starts.len(), ahead, cap))
+    (used + ahead >= cap).then_some(TotalFull {
+        prs: v,
+        starts: starts.len(),
+        ahead,
+        cap,
+    })
 }
 
 fn ahead(
@@ -510,7 +523,9 @@ fn ahead(
 ) -> usize {
     let adds = crate::events::of_kind(events, &["queue"]);
     let entered = |g: &str, m: u64| {
-        let add = |e: &&Event| e.fleet == g && e.str("op") == Some("add") && nums(&e.data["issues"]).contains(&m);
+        let add = |e: &&Event| {
+            e.fleet == g && e.str("op") == Some("add") && e.data.get("issues").is_some_and(|v| nums(v).contains(&m))
+        };
         adds.iter().copied().rfind(add).map_or(0, |e| e.ts)
     };
     let order = &cfg.limits.fleet_priority;

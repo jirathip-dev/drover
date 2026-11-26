@@ -1647,12 +1647,10 @@ pub(crate) fn lane_admit(
             "{count}/{cap} PRs in flight in {fleet} ({})",
             named(crate::queue::hashes(&v), starting)
         )
-    } else if let Some((v, starting, ahead, cap)) =
-        crate::queue::total_full(ctx, (events, &lanes), cfg, (fleet, issue, &pending))
-    {
-        let count = v.len() + starting;
-        let ahead = (ahead > 0).then(|| format!("; {ahead} start(s) in other fleets go first"));
-        let all = named(crate::queue::by_fleet(&v), starting);
+    } else if let Some(t) = crate::queue::total_full(ctx, (events, &lanes), cfg, (fleet, issue, &pending)) {
+        let (count, cap) = (t.prs.len() + t.starts, t.cap);
+        let ahead = (t.ahead > 0).then(|| format!("; {} start(s) in other fleets go first", t.ahead));
+        let all = named(crate::queue::by_fleet(&t.prs), t.starts);
         format!(
             "{count}/{cap} PRs in flight across fleets ({all}){}",
             ahead.unwrap_or_default()
