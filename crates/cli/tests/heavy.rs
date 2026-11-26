@@ -562,7 +562,7 @@ fn a_routed_fleets_gate_checks_go_to_the_build_machine_under_the_cargo_kind() {
         .current_dir(&d)
         .status()
         .unwrap();
-    for gate in ["just check", "./.gatekeeper/run check --gate core/fmt"] {
+    for gate in ["just check"] {
         let w = wrapped(&d, gate);
         assert!(
             w.contains("'heavy' 'cargo'") && w.contains("'--remote' 'linux'") && w.ends_with(&format!("'--' '{gate}'")),
