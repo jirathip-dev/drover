@@ -176,7 +176,6 @@
 1 round_images
 3 run_card
 3 runner_limits
-3 runners
 3 runtime_breaker
 3 sbin_path
 3 scene_device
