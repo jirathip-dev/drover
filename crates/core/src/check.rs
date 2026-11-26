@@ -932,10 +932,22 @@ pub fn clean_all(
         held.then_some("host unreachable (not cleaned)").or(root)
     };
     let there = crate::hosts::present(r, spawns.iter().copied().filter(|e| held(e).is_none()));
+    let mut unset: BTreeMap<&str, BTreeMap<&str, u64>> = BTreeMap::new();
     for e in spawns {
         let (Some(n), Some(wt)) = (e.issue, e.str("worktree")) else {
             continue;
         };
+        if let Some(m) = e
+            .str("machine")
+            .filter(|m| lane.is_none() && !crate::hosts::configured(cfg, m))
+        {
+            unset
+                .entry(e.str("host").unwrap_or(m))
+                .or_default()
+                .entry(wt)
+                .or_insert(e.ts);
+            continue;
+        }
         let (on, held) = (On::of(r, Some(e)), held(e));
         let away = e.str("host").filter(|_| on.machine.is_some());
         let gone = |c: &Event| c.kind == "clean" && c.str("worktree") == Some(wt) && c.ts >= e.ts;
@@ -1083,6 +1095,15 @@ pub fn clean_all(
         removed += 1;
         writeln!(out, "removed {shown} ({}#{n} {why})", e.fleet)?;
         emit(&ctx.state, cfg, Event::new(ctx.now, &e.fleet, Some(n), "clean", d))?;
+    }
+    for c in events.iter().filter(|c| c.kind == "clean") {
+        let wt = c.str("worktree").unwrap_or_default();
+        for w in unset.values_mut().filter(|w| w.get(wt).is_some_and(|ts| c.ts >= *ts)) {
+            w.remove(wt);
+        }
+    }
+    for (host, w) in unset.iter().filter(|w| !w.1.is_empty()) {
+        writeln!(out, "{host}: {} worktrees, host not configured", w.len())?;
     }
     let sheds = r.shed().filter(|_| lane.is_none()).map(term::Shed);
     for (b, t) in sheds.iter().flat_map(|b| {
