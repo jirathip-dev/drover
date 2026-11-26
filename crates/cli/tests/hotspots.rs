@@ -8,7 +8,7 @@ use std::path::Path;
 
 const NOW: u64 = 1_700_000_000;
 const HOUR: u64 = 3600;
-const SECOND: &str = "\n[fleet.mirror]\nrepo = \"jirathip-dev/sendmeter\"\nlocal = \"/tmp/does-not-matter/mirror\"\nintegration = \"staging\"\nhotspots = \"off\"\n[fleet.mirror.role.impl]\nharness = \"hermes\"\n";
+const SECOND: &str = "\n[fleet.mirror]\nrepo = \"jirathip-dev/sendmeter\"\nlocal = \"/tmp/does-not-matter/mirror\"\nintegration = \"staging\"\nhotspots = \"off\"\n[fleet.mirror.role.impl]\nharness = \"claude\"\n";
 
 struct RealGit(Fake);
 impl Runner for RealGit {

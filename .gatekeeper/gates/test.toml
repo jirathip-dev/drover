@@ -1,4 +1,4 @@
-about = "the debug suite: every crate's tests, in 4 CI shards by scripts/test-shards.txt (#1162), CI only (a lane's host leaves it to CI, as before #1587); nextest runs the binaries side by side (#957)"
+about = "the debug suite: every crate's tests, in 4 CI shards by scripts/test-shards.sh (#1162, #1548), CI only (a lane's host leaves it to CI, as before #1587); nextest runs the binaries side by side (#957)"
 fix = "fix the failing test the log names"
 budget_secs = 900
 leg = "test"

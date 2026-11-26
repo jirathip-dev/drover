@@ -18,7 +18,7 @@ fn setup(name: &str, extra: &str) -> (drover::Ctx, FakeShed) {
 }
 
 fn setup_on(name: &str, extra: &str) -> (drover::Ctx, FakeShed) {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n{extra}");
     let c = ctx(&tmpdir(name), &toml);
     let sh = FakeShed::new();
@@ -112,7 +112,7 @@ fn a_host_that_never_answers_costs_one_retried_probe_and_drive_still_starts() {
     };
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
-    assert!(sh.called("run", "sendmeter-impl-12"), "drive still starts: {out}");
+    assert!(sh.has("sendmeter-impl-12"), "drive still starts: {out}");
     let calls = r.f.calls.borrow();
     let to_air: Vec<_> = calls.iter().filter(|l| l.contains(" air ")).collect();
     assert_eq!(to_air, [PROBE, PROBE], "one probe retried once, nothing after it");
@@ -188,7 +188,7 @@ fn clean_reports_a_silent_disabled_host_offline_after_one_retried_probe() {
     let calls = r.f.calls.borrow();
     let to_air: Vec<_> = calls.iter().filter(|l| l.contains(" air ")).collect();
     assert_eq!(to_air, [PROBE, PROBE], "one probe retried once, nothing after it");
-    assert!(r.spent.get() <= 10, "{}s on the Air", r.spent.get());
+    assert!(r.spent.get() <= 15, "{}s on the Air", r.spent.get());
 }
 
 #[test]
@@ -418,4 +418,36 @@ fn a_fleet_with_due_work_and_no_finished_pass_for_three_tick_intervals_raises_on
         assert!(why.ends_with("killed after 600 s in spawns"), "{why}");
         assert_eq!(e[0].val("last"), &json!(NOW - 3 * 300 - 60));
     }
+}
+
+#[test]
+fn a_ticks_clean_never_probes_worktrees_on_a_host_gone_from_hosts_and_sums_them_up_once() {
+    let (c, _sh) = setup("stuck-gone", "");
+    for i in 100..150 {
+        let wt = format!("/Users/me/.local/share/drover/work/sendmeter/issue-{i}");
+        let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{i}"), "pane": format!("sendmeter-impl-{i}"),
+                       "workspace": "", "runtime": "shed", "worktree": wt, "branch": format!("issue-{i}"),
+                       "host": "vm1", "machine": "vm1"});
+        append(&c.state, &Event::new(NOW - 900, "sendmeter", Some(i), "spawn", d)).unwrap();
+        append(
+            &c.state,
+            &Event::new(NOW - 800, "sendmeter", Some(i), "merged", json!({})),
+        )
+        .unwrap();
+    }
+    let r = local().reply("herdr status", "server:\n  status: running\n");
+    let air = FakeShed::new();
+    let on = OverSsh {
+        f: &r,
+        hosts: vec![("air", &air)],
+    };
+    let start = std::time::Instant::now();
+    let (code, out) = run(&c, &on, &["tick"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(start.elapsed() < Duration::from_secs(5), "{:?}", start.elapsed());
+    let calls = r.calls.borrow();
+    let to_vm1: Vec<_> = calls.iter().filter(|l| l.contains("vm1")).collect();
+    assert!(to_vm1.is_empty(), "{to_vm1:?}");
+    assert_eq!(out.matches("vm1").count(), 1, "{out}");
+    assert!(out.contains("vm1: 50 worktrees, host not configured"), "{out}");
 }

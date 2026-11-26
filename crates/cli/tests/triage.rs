@@ -8,10 +8,6 @@ const LANE: &str = "sendmeter:90:triage";
 const AMENDED: &str =
     "Do X.\n\n## Amendments\n- **Amendment (q1)**: a\n- **Amendment (q2)**: not a\n- **Amendment (q3)**: b\n";
 
-fn ev(c: &drover::Ctx, issue: Option<u64>, kind: &str, d: Value) {
-    append(&c.state, &Event::new(c.now, "sendmeter", issue, kind, d)).unwrap();
-}
-
 fn issue(body: &str, labels: &[&str]) -> String {
     let labels: Vec<Value> = labels.iter().map(|l| json!({"name": l})).collect();
     json!({"title": "an issue", "body": body, "labels": labels}).to_string()
@@ -29,7 +25,25 @@ fn fake() -> Fake {
         .reply("gh issue view 8 ", &issue(AMENDED, &["keep"]))
         .reply("gh issue view 9 ", &issue("Maybe?", &[]))
         .reply("gh issue view 12 ", &issue(AMENDED, &[]))
+        .reply("gh issue view 13 ", &issue("Old", &[]))
+        .reply("gh issue view 14 ", &issue("Busy", &[]))
+        .reply("gh issue view 15 ", &issue("In review", &[]))
+        .reply("gh issue view 20 ", &issue("Root cause: #3", &[]))
+        .reply("gh pr view issue-15", r#"{"number": 40, "state": "OPEN"}"#)
+        .reply(
+            "gh issue list -R jirathip-dev/sendmeter --state open",
+            &json!([{"number": 20, "body": "**Root cause:** #3", "labels": []},
+                    {"number": 21, "body": "Root cause: #4", "labels": []},
+                    {"number": 22, "body": "Root cause: #3", "labels": [{"name": "stale?"}]}])
+            .to_string(),
+        )
+        .reply(
+            "gh api graphql -f owner=jirathip-dev -f name=sendmeter -f query=",
+            r#"{"data": {"repository": {"i3": {"__typename": "Issue", "state": "CLOSED"},
+                "i4": {"__typename": "Issue", "state": "OPEN"}}}}"#,
+        )
         .reply("gh issue close", "")
+        .reply("gh issue list", "[]")
         .reply("gh issue edit", "")
         .reply(
             "git -C /tmp/does-not-matter/sendmeter merge-base --is-ancestor abc1234 origin/staging",
@@ -45,19 +59,18 @@ fn fake() -> Fake {
 }
 
 #[test]
-fn a_triage_lane_closes_done_folds_amended_skips_queued_and_reports_each_undo() {
+fn a_triage_lane_closes_done_and_queued_skips_live_work_flags_orphans_and_reports_each_undo() {
     set_env("DROVER_LANE", LANE);
     let c = ctx(&tmpdir("triage-run"), CONFIG);
     let sh = FakeShed::attached(&c);
-    ev(&c, None, "thread-new", json!({"thread": "t1", "title": "chat"}));
     let r = fake();
-    let (code, out) = run(&c, &r, &["triage", "sendmeter"]);
+    let (code, out) = run(&c, &r, &["job", "sendmeter", "triage"]);
     assert!(code == 0 || code == 4, "{code} {out}");
     assert!(
-        out.contains("filed sendmeter#90: triage: sendmeter week of 1970-01-12"),
+        out.contains("filed sendmeter#90: triage: sendmeter 1970-01-12"),
         "{out}"
     );
-    assert_eq!(sh.last("run")["name"], "sendmeter-triage-90", "{:?}", sh.methods());
+    assert!(sh.has("sendmeter-triage-90"), "{:?}", sh.methods());
     let events = read(&c.state).unwrap();
     let spawn = events.iter().find(|e| e.is("spawn", "sendmeter", 90)).expect("a lane");
     assert_eq!(
@@ -70,7 +83,12 @@ fn a_triage_lane_closes_done_folds_amended_skips_queued_and_reports_each_undo() 
         "{brief}"
     );
     assert!(!brief.contains("open a PR to"), "{brief}");
-    run(&c, &r, &["queue", "sendmeter", "add", "12"]);
+    run(&c, &r, &["queue", "sendmeter", "add", "12", "13", "14"]);
+    for (n, agent) in [(13, "sendmeter-impl-13"), (14, "sendmeter-impl-14")] {
+        let d = json!({"role": "impl", "agent": agent, "branch": format!("issue-{n}")});
+        append(&c.state, &Event::new(10, "sendmeter", Some(n), "spawn", d)).unwrap();
+    }
+    sh.lane("sendmeter-impl-14", "working", "/w/issue-14");
 
     let close = |n: &str, ev: &str| {
         run(
@@ -88,7 +106,24 @@ fn a_triage_lane_closes_done_folds_amended_skips_queued_and_reports_each_undo() 
     assert!(r.called(&want), "{:?}", r.calls.borrow());
     let (code, out) = close("6", "def5678");
     assert!(code == 3 && out.contains("NOT_ON_INTEGRATION"), "{code} {out}");
-    for (n, why) in [("12", "is queued"), ("8", "is labeled keep")] {
+    for n in ["12", "13"] {
+        let (code, out) = close(n, "abc1234");
+        assert!(
+            code == 0 && out.contains(&format!("closed sendmeter#{n}")),
+            "{n}: {code} {out}"
+        );
+    }
+    let events = read(&c.state).unwrap();
+    let left: Vec<u64> = drover::queue::view(&events, &fold(&events), "sendmeter")
+        .iter()
+        .map(|i| i.issue)
+        .collect();
+    assert_eq!(left, [90, 14], "a closed queued issue leaves the queue");
+    for (n, why) in [
+        ("14", "has a live lane"),
+        ("15", "has an open PR"),
+        ("8", "is labeled keep"),
+    ] {
         let (code, out) = close(n, "abc1234");
         assert!(
             code == 3 && out.contains("PROTECTED") && out.contains(why),
@@ -133,47 +168,26 @@ fn a_triage_lane_closes_done_folds_amended_skips_queued_and_reports_each_undo() 
     let (code, out) = run(&c, &r, &["done", "sendmeter", "90", "--no-change", "read 6 issues"]);
     assert_eq!(code, 0, "{out}");
     let events = read(&c.state).unwrap();
-    let msg = events
+    let closed = events
         .iter()
-        .rfind(|e| e.kind == "thread-msg")
-        .expect("a summary in the thread");
-    let text = msg.str("text").unwrap();
-    for line in [
-        "triage sendmeter#90: 1 closed, 1 folded, 1 flagged",
-        &format!("- #5 closed (done: {commit}) · undo: `gh issue reopen 5 {REPO}`"),
-        "- #7 folded (3 amendments) · undo: `its earlier text is in the folded block`",
-        &format!("- #9 labeled [\"stale?\"] · undo: `gh issue edit 9 {REPO} --remove-label stale?`"),
-        "note: read 6 issues",
+        .rfind(|e| e.is("closed", "sendmeter", 90))
+        .expect("closed");
+    let text = closed.str("why").unwrap();
+    assert!(text.starts_with("read 6 issues\n- "), "{text}");
+    for undo in [
+        format!("undo: `gh issue reopen 5 {REPO}`"),
+        "undo: `its earlier text is in the folded block`".into(),
+        format!("undo: `gh issue edit 9 {REPO} --remove-label stale?`"),
     ] {
-        assert!(text.contains(line), "missing {line:?}:\n{text}");
+        assert!(text.contains(&undo), "missing {undo:?}:\n{text}");
     }
-    assert_eq!(msg.str("thread"), Some("t1"));
+    assert!(
+        !r.called("gh issue edit 21 ") && !r.called("gh issue edit 22 "),
+        "open root, flagged already"
+    );
+    assert!(r.called("gh issue edit 20 "), "closed root #3 flags #20");
     assert!(r.called(&format!("gh issue close 90 {REPO} --comment {text}")));
     assert_eq!(fold(&events)[&("sendmeter".into(), 90)].state, "closed");
-}
-
-#[test]
-fn tick_runs_triage_weekly_only_where_the_fleet_turns_it_on() {
-    set_env("DROVER_LANE", LANE);
-    let on = CONFIG.replace(
-        "integration = \"staging\"   # never main",
-        "integration = \"staging\"\ntriage = \"weekly\"",
-    );
-    let filed = |cfg: &str, name: &str, days: &[u64]| -> Vec<usize> {
-        let c = ctx(&tmpdir(name), cfg);
-        let _sh = FakeShed::attached(&c);
-        let tick = |now: u64| {
-            let r = fake()
-                .reply("herdr status", "server:\n  status: running\n")
-                .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n");
-            let (code, out) = run(&drover::Ctx { now, ..c.clone() }, &r, &["tick"]);
-            assert_eq!(code, 0, "{out}");
-            r.count("gh issue create -R jirathip-dev/sendmeter --title triage: ")
-        };
-        days.iter().map(|d| tick(c.now + d * 86400)).collect()
-    };
-    assert_eq!(filed(&on, "triage-tick", &[0, 6, 7]), [1, 0, 1]);
-    assert_eq!(filed(CONFIG, "triage-off", &[0, 7]), [0, 0]);
 }
 
 #[test]
@@ -274,9 +288,7 @@ fn a_triage_lane_changes_issues_only_through_its_verbs_and_never_code() {
             assert!(hook(lane, cmd).contains("REFUSED ORCHESTRATOR_ONLY"), "{lane}: {cmd}");
         }
     }
-    assert_eq!(hook("tangelo:-:orchestrator", "drover triage tangelo"), "");
     for (cmd, why) in [
-        ("drover triage tangelo", "REFUSED ORCHESTRATOR_ONLY"),
         ("gh issue close 5 -R o/tangelo", "REFUSED TRIAGE_VERBS"),
         ("gh issue edit 7 -R o/tangelo --body x", "REFUSED TRIAGE_VERBS"),
         ("gh issue comment 5 -b x", "never comment"),

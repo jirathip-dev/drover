@@ -7,3 +7,6 @@ npm --prefix web ci --no-audit --no-fund
 npm --prefix web run build
 cargo run -q --locked -p drover -- diagram > docs/workflow.md
 BLESS=1 cargo test -q --locked -p drover --test brief_golden
+BLESS=1 cargo test -q --locked -p drover --test flow_table
+cargo run -q --locked -p drover -- config show --md > docs/config/limits.md
+find fleet.example.d -type f | LC_ALL=C sort | xargs cat > fleet.example.toml

@@ -15,7 +15,7 @@ pub const NAMES_ENV: &str = "DROVER_PRIVATE_NAMES";
 pub const NAMES_SECRET: &str = "PRIVATE_NAMES";
 const VISIBILITY_SECS: u64 = 86_400;
 
-/// A public fleet's patterns beyond the built-in home paths and session ids: its hosts, private names and session folders.
+/// A public fleet's patterns beyond the built-in home paths: its hosts, private names, session folders and the agent session ids it knows.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Check {
     pub repo: String,
@@ -24,6 +24,15 @@ pub struct Check {
     pub dirs: Vec<String>,
     #[serde(default)]
     pub private_repos: Vec<String>,
+    /// Folders whose file names carry this host's agent session ids: each provider's session folder.
+    #[serde(default)]
+    pub session_dirs: Vec<String>,
+    /// The event log whose `session` fields are agent session ids.
+    #[serde(default)]
+    pub events: Option<String>,
+    /// The fleet's clone and integration branch: a UUID already there is public.
+    #[serde(default)]
+    pub tree: Option<(String, String)>,
 }
 
 impl Check {
@@ -35,13 +44,7 @@ impl Check {
             (low.match_indices(&d.to_lowercase()))
                 .any(|(i, m)| low.get(i + m.len()..).is_some_and(|r| r.starts_with(name)))
         };
-        let uuid = (text.split(|c: char| !c.is_ascii_hexdigit() && c != '-')).any(|w| {
-            w.split('-')
-                .map(str::len)
-                .collect::<Vec<_>>()
-                .windows(5)
-                .any(|l| l == [8, 4, 4, 4, 12])
-        });
+        let uuid = uuids(text).any(|u| self.session(&u));
         let hit = if ["/users/", "/home/"].iter().any(|d| under(d)) {
             "home-path".to_string()
         } else if self.dirs.iter().any(|d| under(d)) {
@@ -55,6 +58,44 @@ impl Check {
         };
         Some(hit)
     }
+
+    fn session(&self, id: &str) -> bool {
+        let logged = || {
+            (self.events.as_deref().map(Path::new))
+                .filter(|p| crate::db::file(p).exists())
+                .and_then(|p| crate::events::read(p).ok())
+                .is_some_and(|l| {
+                    l.iter()
+                        .any(|e| e.str("session").is_some_and(|s| s.eq_ignore_ascii_case(id)))
+                })
+        };
+        let public = || {
+            self.tree.as_ref().is_some_and(|(dir, branch)| {
+                let at = format!("origin/{branch}");
+                ok(&crate::runner::Real, "git", &["-C", dir, "grep", "-qiF", "-e", id, &at]).is_ok()
+            })
+        };
+        (self.session_dirs.iter().any(|d| filed(Path::new(d), id, 4)) || logged()) && !public()
+    }
+}
+
+fn uuids(text: &str) -> impl Iterator<Item = String> + '_ {
+    (text.split(|c: char| !c.is_ascii_hexdigit() && c != '-')).flat_map(|w| {
+        let parts: Vec<&str> = w.split('-').collect();
+        (parts.windows(5))
+            .filter(|p| p.iter().map(|s| s.len()).eq([8, 4, 4, 4, 12]))
+            .map(|p| p.join("-").to_lowercase())
+            .collect::<Vec<_>>()
+    })
+}
+
+fn filed(dir: &Path, id: &str, depth: u8) -> bool {
+    (std::fs::read_dir(dir).into_iter().flatten().flatten()).any(|e| {
+        e.file_name().to_string_lossy().to_lowercase().contains(id)
+            || depth
+                .checked_sub(1)
+                .is_some_and(|d| e.file_type().is_ok_and(|t| t.is_dir()) && filed(&e.path(), id, d))
+    })
 }
 
 fn named(names: &[String], low: &str) -> Option<String> {
@@ -147,6 +188,11 @@ pub fn of(ctx: &Ctx, r: Option<&dyn Runner>, cfg: &Config, name: &str) -> Option
             .filter(|(n, _)| !public(ctx, None, cfg, n))
             .map(|(_, f)| slug(&f.repo))
             .collect(),
+        session_dirs: (crate::providers::all().filter_map(|p| p.sessions()))
+            .map(|d| home.join(d).to_string_lossy().into_owned())
+            .collect(),
+        events: Some(ctx.state.to_string_lossy().into_owned()),
+        tree: Some((f.local_path().to_string_lossy().into_owned(), f.integration.clone())),
     })
 }
 
@@ -210,13 +256,6 @@ pub fn hits(log: &str, find: impl Fn(&str) -> Option<String>) -> Vec<(String, St
         }
     }
     out
-}
-
-/// The pre-push check: the first hit in the commits `sha` pushes (`git log -p`, messages included), as its refusal.
-pub fn pushed(r: &dyn Runner, c: &Check, sha: &str) -> Option<String> {
-    let log = ok(r, "git", &["log", "-p", sha, "--not", "--remotes"]).ok()?;
-    let (s, at, p) = hits(&log, |l| c.find(l)).into_iter().next()?;
-    Some(why(&c.repo, &format!("commit {s:.7} {at}"), &p))
 }
 
 /// `drover hygiene`'s verbs.

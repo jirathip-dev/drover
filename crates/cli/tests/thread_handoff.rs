@@ -8,22 +8,6 @@ use std::process::{Command, Stdio};
 
 const ADDR: &str = "127.0.0.1:7777";
 
-fn setup(name: &str) -> drover::Ctx {
-    let d = tmpdir(name);
-    let c = ctx(
-        &d,
-        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
-    );
-    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
-    std::fs::create_dir_all(&profile).unwrap();
-    std::fs::write(profile.join("settings.json"), "{}").unwrap();
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill #12"]).1,
-        "t1\n"
-    );
-    c
-}
-
 fn acp_setup(name: &str, b: &FakeShed) -> drover::Ctx {
     let cfg = format!(
         "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
@@ -322,7 +306,7 @@ fn a_handoff_to_a_repo_posts_a_choice_card_of_its_threads_and_delivers_nothing_b
     let r = b.on(&f);
     let s = Server::new(&at, &r, Some(ADDR.into()));
     let cookie = pair(&s, &at, "Mozilla/5.0 (iPhone)", at.now);
-    let chat: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, at.now, "chat")).unwrap();
+    let chat: serde_json::Value = chat_all(&s, ADDR, &cookie, at.now);
     let t1 = chat["threads"]
         .as_array()
         .unwrap()
@@ -452,7 +436,7 @@ fn a_forward_marks_the_received_row_and_a_handoff_after_the_owner_wrote_does_not
     let r = b.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
-    let chat = api(&s, ADDR, &cookie, c.now, "chat");
+    let chat = chat_all(&s, ADDR, &cookie, c.now).to_string();
     assert_eq!(
         chat.matches("\"text\":\"handoff to Test · t2: add facets (forwarded)\"")
             .count(),
@@ -560,7 +544,7 @@ fn the_chat_api_links_each_linked_row_and_thread_row() {
     let r = b.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
-    let chat: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, c.now, "chat")).unwrap();
+    let chat: serde_json::Value = chat_all(&s, ADDR, &cookie, c.now);
     let thread = |t: &str| {
         chat["threads"]
             .as_array()
@@ -596,11 +580,6 @@ fn the_chat_api_links_each_linked_row_and_thread_row() {
     let links = |t: &str| rows.clone().find(|r| r["id"] == t).unwrap()["links"].clone();
     assert_eq!(links("t1"), json!([link("t2", "continued in")]));
     assert_eq!(links("t2"), json!([link("t1", "from")]));
-}
-
-fn starts(b: &FakeShed) -> Vec<String> {
-    let sent = b.sent("orchestrator-t2").into_iter();
-    sent.filter(|l| l.starts_with("exec ")).collect()
 }
 
 fn long_text() -> String {
@@ -649,44 +628,6 @@ fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one() {
     assert_eq!(prompts.len(), 2, "{prompts:?}");
     for p in &prompts {
         assert!(p.ends_with(&format!("\n\n[t2] t1: {line}")), "{p}");
-    }
-}
-
-#[test]
-fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_the_shells_line_limit() {
-    let c = setup("handoff-long");
-    let b = FakeShed::attached(&c);
-    let r = Fake::default();
-    let text = long_text();
-    assert_eq!(text.len(), 2400);
-    assert_eq!(to_new(&c, &r, "sendmeter", "Big plan", &text), "t2");
-    let first = kinds(&c, "thread-msg")
-        .into_iter()
-        .find(|e| e.str("thread") == Some("t2"))
-        .unwrap();
-    let line = format!("handoff to Big plan · t2: {text}");
-    assert_eq!(
-        (first.str("from"), first.str("text")),
-        (Some("t1"), Some(line.as_str()))
-    );
-    let md = c.state.with_file_name("orchestrator").join("t2/.thread.md");
-    assert_eq!(std::fs::read_to_string(&md).unwrap(), format!("from t1: {line}\n"));
-
-    b.remove("orchestrator-t2");
-    let (code, out) = run(&c, &r, &["thread", "handoff", "t1", "t2", "More", &text]);
-    assert_eq!((code, out.as_str()), (0, "t2\n"));
-    assert!(
-        std::fs::read_to_string(&md)
-            .unwrap()
-            .ends_with(&format!("from t1: {line}\n")),
-        "{}",
-        std::fs::read_to_string(&md).unwrap()
-    );
-    let s = starts(&b);
-    assert_eq!(s.len(), 2, "{s:?}");
-    assert!(s[1].contains("--resume"), "{}", s[1]);
-    for l in &s {
-        assert!(l.len() <= 1024, "a {}-byte start line: {l}", l.len());
     }
 }
 

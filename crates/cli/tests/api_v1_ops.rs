@@ -189,9 +189,9 @@ fn herd_and_roles_read_through_api_v1() {
     assert_eq!(
         (
             &roles["chat"]["harness"],
-            roles["chat"]["harnesses"].as_array().map(Vec::len).unwrap() > 1
+            roles["chat"]["harnesses"].as_array().map(Vec::len)
         ),
-        (&Value::Null, true)
+        (&Value::Null, Some(drover::providers::lane_names().len()))
     );
     let (status, v) = req(&s, "GET", "/api/v1/roles?fleet=nope", "", "");
     assert_eq!((status.as_str(), &v["code"]), ("404 Not Found", &json!("NOT_FOUND")));

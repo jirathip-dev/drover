@@ -11,7 +11,7 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     all.into_iter().filter(|e| e.kind == kind).collect()
 }
 
-fn hog(name: &str, load: &str) -> (drover::Ctx, Fake, FakeShed) {
+fn hog(name: &str, idle: u32) -> (drover::Ctx, Fake, FakeShed) {
     let c = ctx(&tmpdir(name), CONFIG);
     let sh = FakeShed::attached(&c);
     sh.add(LANE, json!({}));
@@ -30,7 +30,7 @@ fn hog(name: &str, load: &str) -> (drover::Ctx, Fake, FakeShed) {
     }
     let r = Fake::default()
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
-        .reply("sysctl -n vm.loadavg", &format!("{{ {load} 20.0 10.0 }}\n"))
+        .reply("iostat", &iostat(idle))
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("ps -Ao", &ps)
@@ -55,7 +55,7 @@ fn pass(c: &drover::Ctx, r: &Fake, secs: u64) {
 
 #[test]
 fn a_busy_lane_on_a_host_under_its_load_limit_is_left_alone() {
-    let (c, r, sh) = hog("lane-hog-calm", "10.0");
+    let (c, r, sh) = hog("lane-hog-calm", 60);
     for p in 0..5 {
         pass(&c, &r, p * 300);
     }
@@ -65,7 +65,7 @@ fn a_busy_lane_on_a_host_under_its_load_limit_is_left_alone() {
 
 #[test]
 fn a_lane_over_half_the_cpu_three_passes_running_is_paused_once_and_killed_only_on_the_owners_tap() {
-    let (c, r, sh) = hog("lane-hog", "30.0");
+    let (c, r, sh) = hog("lane-hog", 5);
     let pass = |secs: u64| {
         pass(&c, &r, secs);
     };

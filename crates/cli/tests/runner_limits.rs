@@ -13,6 +13,14 @@ fn sleeper(dir: &Path, name: &str) -> String {
     p.to_string_lossy().into_owned()
 }
 
+fn idle() {
+    let c = ctx(
+        &tmpdir("idle"),
+        &CONFIG.replace("[limits]\n", "[limits]\nmin_cpu_idle = -1.0\n"),
+    );
+    drover::config::Config::load(&c.config).unwrap();
+}
+
 fn exec_fresh<T>(call: impl Fn() -> anyhow::Result<T>) -> T {
     for _ in 0..50 {
         match call() {
@@ -164,6 +172,7 @@ fn a_folder_whose_listing_hangs_is_hung_and_probed_once() {
     use drover::runner::hung;
     use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
     use std::sync::Arc;
+    idle();
     let dir = tmpdir("hung-probe").to_string_lossy().into_owned();
     let probes = Arc::new(AtomicUsize::new(0));
     let slow = |n: Arc<AtomicUsize>| {
@@ -200,6 +209,7 @@ fn a_folder_that_answers_is_not_hung() {
 
 #[test]
 fn a_git_call_on_a_hung_folder_fails_at_once() {
+    idle();
     let dir = tmpdir("hung-git").to_string_lossy().into_owned();
     assert!(drover::runner::hung(&dir, Duration::from_millis(100), |_| {
         std::thread::sleep(Duration::from_secs(5));
@@ -242,6 +252,7 @@ fn a_disk_marked_hung_fails_every_folder_on_it() {
 
 #[test]
 fn read_file_returns_bytes_and_gives_up_on_a_hung_folder() {
+    idle();
     let ok = tmpdir("read-ok");
     std::fs::write(ok.join("shot.png"), b"png").unwrap();
     assert_eq!(drover::runner::read_file(ok.join("shot.png")).unwrap(), b"png");

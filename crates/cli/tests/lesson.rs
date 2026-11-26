@@ -103,88 +103,33 @@ fn digest_shows_the_last_week_and_redacts_secrets() {
     assert!(out.contains("old unwrap") && out.contains("def5678"), "{out}");
 }
 
-const OFF: &str = "\n[fleet.quiet]\nrepo = \"acme/quiet\"\nlocal = \"/tmp/does-not-matter/quiet\"\nintegration = \"staging\"\nlessons = \"off\"\n[fleet.quiet.role.impl]\nharness = \"hermes\"\n";
+const OFF: &str = "\n[fleet.quiet]\nrepo = \"acme/quiet\"\nlocal = \"/tmp/does-not-matter/quiet\"\nintegration = \"staging\"\nlessons = \"off\"\n[fleet.quiet.role.impl]\nharness = \"claude\"\n";
 
 #[test]
-fn tick_runs_lesson_once_a_week_and_never_when_off() {
-    let c = ctx(&tmpdir("lesson-tick"), &(CONFIG.to_string() + OFF));
-    let _sh = FakeShed::attached(&c);
+fn the_lesson_job_files_only_when_the_digest_holds_two_fails_and_never_when_off() {
+    let c = ctx(&tmpdir("lesson-tick"), CONFIG);
     ev(&c, OLD, Some(3), "verdict", fail("old unwrap on None"));
     ev(&c, NOW, Some(12), "verdict", fail("unwrap on a missing config"));
+    let r = Fake::default().reply("git -C", "");
+    let digest = ["lesson", "digest", "sendmeter", "--days", "7", "--min-fails", "2"];
+    let (code, out) = run(&c, &r, &digest);
+    assert_eq!(code, 0, "one FAIL in the week: the check passes\n{out}");
     ev(&c, NOW, Some(13), "verdict", fail("unwrap on a missing env"));
-    let fake = || {
-        Fake::default()
-            .reply("herdr status", "server:\n  status: running\n")
-            .reply("which shed", "/opt/shed/bin/shed\n")
-            .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
-            .reply(
-                "gh issue create",
-                "https://github.com/jirathip-dev/sendmeter/issues/77\n",
-            )
-    };
-    let tick = |now: u64| {
-        let r = fake();
-        let (code, out) = run(&drover::Ctx { now, ..c.clone() }, &r, &["tick"]);
-        assert_eq!(code, 0, "{out}");
-        let calls: Vec<String> = r
-            .calls
-            .borrow()
-            .iter()
-            .filter(|l| l.starts_with("gh issue create"))
-            .cloned()
-            .collect();
-        calls
-    };
-    let first = tick(NOW);
-    assert_eq!(first.len(), 1, "{first:?}");
-    assert!(
-        first[0].contains("-R jirathip-dev/sendmeter --title lessons: sendmeter week of 1970-01-12"),
-        "{first:?}"
-    );
-    let q = drover::queue::replay(&read(&c.state).unwrap(), "sendmeter");
-    assert_eq!(q.first().map(|i| i.issue), Some(77));
-    assert!(tick(NOW + 6 * 86400).is_empty(), "within the week");
-    assert_eq!(tick(NOW + 7 * 86400).len(), 1, "a week on");
-}
+    let (code, out) = run(&c, &r, &digest);
+    assert_eq!(code, 1, "two FAILs: the check fails and the job files\n{out}");
+    assert!(out.contains("unwrap on a missing env"), "{out}");
+    let (code, _) = run(&c, &r, &digest[..5]);
+    assert_eq!(code, 0, "no --min-fails: a plain read");
 
-#[test]
-fn tick_skips_lesson_for_a_young_or_quiet_fleet() {
-    let c = ctx(&tmpdir("lesson-young"), CONFIG);
-    let _sh = FakeShed::attached(&c);
-    let r = Fake::default()
-        .reply("herdr status", "server:\n  status: running\n")
-        .reply("which shed", "/opt/shed/bin/shed\n")
-        .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
-        .reply(
-            "gh issue create",
-            "https://github.com/jirathip-dev/sendmeter/issues/77\n",
-        );
-    let skipped = |c: &drover::Ctx| -> Vec<Event> {
-        read(&c.state)
-            .unwrap()
-            .to_vec()
-            .into_iter()
-            .filter(|e| e.kind == "lesson-skipped")
-            .collect()
-    };
-    ev(&c, NOW - 86400, Some(12), "verdict", fail("unwrap on a missing config"));
-    ev(&c, NOW - HOUR, Some(13), "verdict", fail("unwrap on a missing env"));
-    let (code, out) = run(&c, &r, &["tick"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(!r.called("gh issue create"), "{out}");
-    let s = skipped(&c);
-    assert_eq!(
-        (s.len(), s[0].fleet.as_str(), s[0].str("why")),
-        (1, "sendmeter", Some("fleet under a week old"))
-    );
-    let c = ctx(&tmpdir("lesson-quiet"), CONFIG);
-    let _sh = FakeShed::attached(&c);
-    ev(&c, OLD, Some(3), "verdict", fail("old unwrap on None"));
-    ev(&c, NOW - HOUR, Some(12), "verdict", fail("unwrap on a missing config"));
-    let (code, out) = run(&c, &r, &["tick"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(!r.called("gh issue create"), "{out}");
-    assert_eq!(skipped(&c)[0].str("why"), Some("under 2 FAIL verdicts this week"));
+    let cfg = drover::config::Config::parse(&(CONFIG.to_string() + OFF)).unwrap();
+    let lesson = &cfg.fleet["sendmeter"].jobs["lesson"];
+    assert_eq!(lesson.every, 7 * 86400);
+    assert!(lesson
+        .check
+        .as_deref()
+        .unwrap_or_default()
+        .contains("lesson digest {fleet} --days 7 --min-fails 2"));
+    assert_eq!(cfg.fleet["quiet"].jobs["lesson"].every, 0, "lessons = off");
 }
 
 fn spawner(n: u64) -> Fake {
@@ -193,6 +138,8 @@ fn spawner(n: u64) -> Fake {
             &format!("gh issue view {n}"),
             r#"{"title":"lessons","body":"the template"}"#,
         )
+        .reply("gh issue list", "[]")
+        .reply("sh -c", "")
         .reply(
             "gh issue create",
             &format!("https://github.com/jirathip-dev/sendmeter/issues/{n}\n"),
@@ -207,7 +154,7 @@ fn lesson_files_queues_and_spawns_a_lesson_lane_that_may_close_with_no_change() 
     let c = ctx(&tmpdir("lesson-run"), CONFIG);
     let sh = FakeShed::attached(&c);
     let r = spawner(80);
-    let (code, out) = run(&c, &r, &["lesson", "sendmeter"]);
+    let (code, out) = run(&c, &r, &["job", "sendmeter", "lesson"]);
     assert!(code == 0 || code == 4, "{code} {out}");
     assert!(
         out.contains("filed sendmeter#80: lessons: sendmeter week of 1970-01-12"),
@@ -218,7 +165,7 @@ fn lesson_files_queues_and_spawns_a_lesson_lane_that_may_close_with_no_change() 
         drover::queue::replay(&events, "sendmeter").first().map(|i| i.issue),
         Some(80)
     );
-    assert_eq!(sh.last("run")["name"], "sendmeter-lesson-80", "{:?}", sh.methods());
+    assert_eq!(sh.last("send")["name"], "sendmeter-lesson-80", "{:?}", sh.methods());
     let spawn = events.iter().find(|e| e.is("spawn", "sendmeter", 80)).expect("a lane");
     assert_eq!(
         (spawn.str("role"), spawn.str("profile"), spawn.str("stage")),
@@ -494,51 +441,6 @@ fn briefs_carry_the_shared_pack_before_the_repo_rules() {
 }
 
 #[test]
-fn lessons_missed_fires_once_after_8_days_and_never_when_off() {
-    let c = ctx(&tmpdir("lesson-missed"), &(CONFIG.to_string() + OFF));
-    let sh = FakeShed::attached(&c);
-    let r = Fake::default();
-    append(
-        &c.state,
-        &Event::new(OLD - 2 * 86400, "quiet", Some(1), "queued", json!({})),
-    )
-    .unwrap();
-    ev(&c, NOW - 7 * 86400, None, "lesson-skipped", json!({"why": "quiet"}));
-    let check = |now: u64| {
-        let (code, out) = run(&drover::Ctx { now, ..c.clone() }, &r, &["check"]);
-        assert_eq!(code, 0, "{out}");
-        out.lines()
-            .filter(|l| l.contains("lessons-missed"))
-            .map(String::from)
-            .collect::<Vec<_>>()
-    };
-    assert!(check(NOW).is_empty(), "7 days: not yet");
-    let missed = check(NOW + 2 * 86400);
-    assert_eq!(missed.len(), 1, "{missed:?}");
-    assert!(
-        missed[0].contains("sendmeter") && missed[0].contains("9 days"),
-        "{missed:?}"
-    );
-    assert!(check(NOW + 3 * 86400).is_empty(), "once per last run");
-    ev(
-        &c,
-        NOW + 3 * 86400,
-        Some(80),
-        "spawn",
-        json!({"role": "lesson", "agent": "sendmeter-lesson-80"}),
-    );
-    assert!(check(NOW + 10 * 86400).is_empty(), "7 days after the lane");
-    assert_eq!(check(NOW + 12 * 86400).len(), 1);
-    let c = ctx(
-        &tmpdir("lesson-missed-paused"),
-        &sh.config(&CONFIG.replace("[fleet.sendmeter]\n", "[fleet.sendmeter]\npaused = true\n")),
-    );
-    ev(&c, OLD - 86400, Some(1), "queued", json!({}));
-    let (code, out) = run(&c, &r, &["check"]);
-    assert!(code == 0 && !out.contains("lessons-missed"), "{out}");
-}
-
-#[test]
 fn a_prose_only_lesson_pr_is_a_fail() {
     let head = "b".repeat(40);
     let prose = "diff --git a/roles/impl.md b/roles/impl.md\n--- a/roles/impl.md\n+++ b/roles/impl.md\n@@ -1 +1,2 @@\n x\n+- be careful with unwrap\n";
@@ -654,6 +556,8 @@ fn a_lesson_pr_is_reviewed_by_its_own_rules_as_before() {
     std::fs::create_dir_all(wt.join(".drover")).unwrap();
     let rules = "- don't X (enforced by: lesson x `true`, shadow since 1970-01-12)\n";
     std::fs::write(wt.join(".drover/rules.md"), rules).unwrap();
+    let filed = json!({"job": "lesson", "role": "lesson", "title": "lessons: sendmeter week of 1970-01-12"});
+    ev(&c, NOW, Some(12), "job-filed", filed);
     let r = Fake::default()
         .reply(
             "gh issue view 12",

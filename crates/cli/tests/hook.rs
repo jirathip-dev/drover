@@ -53,23 +53,9 @@ fn hook_as(role: &str, input: &Value) -> String {
     hook_in(Some(&format!("sendmeter:24:{role}")), role, input)
 }
 
-fn shapes(tool: &str, ti: &Value) -> [Value; 3] {
-    let htool = match tool {
-        "Bash" => "terminal",
-        "Edit" => "patch",
-        _ => "write_file",
-    };
-    let mut hti = ti.clone();
-    if let Some(f) = ti.get("file_path") {
-        hti = json!({"path": f});
-    }
+fn shapes(tool: &str, ti: &Value) -> [Value; 1] {
     let cwd = std::env::temp_dir();
-    [
-        json!({"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": cwd, "tool_input": ti}),
-        json!({"hook_event_name": "pre_tool_call", "tool_name": htool, "cwd": cwd, "tool_input": hti,
-            "profile": "fleet-rev", "session_id": "s", "extra": {}}),
-        json!({"tool_name": htool, "args": hti}),
-    ]
+    [json!({"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": cwd, "tool_input": ti})]
 }
 
 fn call(role: &str, tool: &str, ti: &Value) -> Option<String> {
@@ -83,10 +69,6 @@ fn call(role: &str, tool: &str, ti: &Value) -> Option<String> {
         .collect();
     let claude = &v[0]["hookSpecificOutput"];
     assert_eq!(claude["permissionDecision"], "deny", "claude: {outs:?}");
-    for h in &v[1..] {
-        assert_eq!(h["action"], "block", "hermes: {outs:?}");
-        assert_eq!(h["message"], claude["permissionDecisionReason"], "{outs:?}");
-    }
     Some(claude["permissionDecisionReason"].as_str().unwrap().to_string())
 }
 
@@ -200,37 +182,6 @@ fn push_to_staging_is_denied() {
 }
 
 #[test]
-fn hermes_terminal_workdir_resolves_bare_push() {
-    let d = tmpdir("hook-wd");
-    let git = |a: &[&str]| {
-        assert!(Command::new("git")
-            .arg("-C")
-            .arg(&d)
-            .args(a)
-            .output()
-            .unwrap()
-            .status
-            .success());
-    };
-    git(&["init", "-q", "-b", "staging"]);
-    git(&[
-        "-c",
-        "user.name=t",
-        "-c",
-        "user.email=t@t",
-        "commit",
-        "-q",
-        "--allow-empty",
-        "-m",
-        "x",
-    ]);
-    let input = json!({"hook_event_name": "pre_tool_call", "tool_name": "terminal", "cwd": "/",
-        "tool_input": {"command": "git push", "workdir": d}});
-    let v: Value = serde_json::from_str(&hook_as("impl", &input)).unwrap();
-    assert_eq!(v["action"], "block");
-}
-
-#[test]
 fn delete_refspec_on_protected_branch_is_denied() {
     assert!(bash("git push origin :staging").is_some());
     assert!(bash("git push origin --delete staging").is_some());
@@ -283,11 +234,8 @@ fn reviewers_are_read_only() {
         None
     );
     assert_eq!(call("rev", "Write", &json!({"file_path": "verdict.md"})), None);
-    let v4a = json!({"tool_name": "patch", "args": {"mode": "patch", "patch": "*** Update File: src/a.rs\n"}});
-    assert_eq!(
-        serde_json::from_str::<Value>(&hook_as("rev", &v4a)).unwrap()["action"],
-        "block"
-    );
+    let patch = json!({"command": "*** Begin Patch\n*** Update File: src/a.rs\n"});
+    assert!(call("rev", "apply_patch", &patch).unwrap().contains("read-only"));
 }
 
 #[test]
@@ -316,16 +264,11 @@ fn protected_config_edits_are_denied() {
     let deny = |tool: &str, ti: Value| {
         let outs: Vec<String> = shapes(tool, &ti).into_iter().map(&run).collect();
         assert!(outs[0].contains("\"deny\""), "{outs:?}");
-        assert!(outs[1..].iter().all(|o| o.contains("\"block\"")), "{outs:?}");
     };
     deny("Edit", json!({"file_path": cfg}));
     deny(
         "Bash",
-        json!({"command": format!("sed -i '' s/hermes/claude/ {}", cfg.display())}),
-    );
-    deny(
-        "Write",
-        json!({"file_path": "~/.hermes/profiles/fleet-rev/config.yaml"}),
+        json!({"command": format!("sed -i '' s/opus/sonnet/ {}", cfg.display())}),
     );
     for i in shapes("Bash", &json!({"command": format!("cat {}", cfg.display())})) {
         assert_eq!(run(i), "");
@@ -377,31 +320,6 @@ fn a_orchestrator_may_spawn_design_lanes() {
             "{cmd}"
         );
     }
-}
-
-#[test]
-fn only_a_orchestrator_runs_lesson() {
-    let run = |lane: &str, cmd: &str| {
-        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-        hook_in(Some(lane), "impl", &input)
-    };
-    assert_eq!(
-        run("tangelo:-:orchestrator", "drover lesson tangelo"),
-        "",
-        "an orchestrator may"
-    );
-    for lane in ["tangelo:12:impl", "tangelo:12:rev", "tangelo:-:orch"] {
-        assert!(
-            run(lane, "drover lesson tangelo").contains("REFUSED ORCHESTRATOR_ONLY"),
-            "{lane}"
-        );
-        assert_eq!(
-            run(lane, "drover lesson digest tangelo --days 7"),
-            "",
-            "{lane} reads the digest"
-        );
-    }
-    assert_eq!(run("tangelo:12:lesson", "drover lesson apply tangelo"), "");
 }
 
 #[test]
@@ -1188,8 +1106,7 @@ fn parity_r13_a_lane_hook_fails_closed() {
     };
     let unnamed = [
         json!({"hook_event_name": "PreToolUse", "tool_input": {"command": "docker ps"}}),
-        json!({"hook_event_name": "pre_tool_call", "tool_name": "", "tool_input": {"command": "docker ps"}}),
-        json!({"args": {"command": "docker ps"}}),
+        json!({"hook_event_name": "PreToolUse", "tool_name": "", "tool_input": {"command": "docker ps"}}),
     ];
     for (raw, what) in [("docker ps", "its input is not JSON"), ("", "its input is not JSON")]
         .map(|(r, w)| (r.to_string(), w))
@@ -1229,9 +1146,6 @@ fn parity_r13_a_lane_hook_fails_closed() {
     let stranger = [("DROVER_LANE", Some("nofleet:7:impl"))];
     let out = hook_cfg(&config(), &stranger, "impl", &pre_bash("git status")).0;
     assert!(closed(&out, "fleet `nofleet` is not in fleet.toml"), "{out}");
-    let hermes = json!({"hook_event_name": "pre_tool_call", "tool_name": "terminal", "tool_input": {"command": "ls"}});
-    let out = hook_cfg(&broken, &lane, "impl", &hermes).0;
-    assert!(out.contains("\"block\"") && out.contains("HOOK_FAILED_CLOSED"), "{out}");
 }
 
 #[test]
@@ -1556,9 +1470,10 @@ fn a_design_lane_writes_only_its_issues_design_paths() {
     };
     let patch = |lane: &str, f: &str| {
         let p = format!("*** Begin Patch\n*** Update File: {f}\n@@\n-a\n+b\n*** End Patch\n");
+        let ti = json!({"command": p});
         hook(
             lane,
-            json!({"tool_name": "patch", "args": {"mode": "patch", "patch": p}}),
+            json!({"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "cwd": "/w", "tool_input": ti}),
         )
     };
     let design = "sendmeter:30:design";
@@ -1580,11 +1495,6 @@ fn a_design_lane_writes_only_its_issues_design_paths() {
     ] {
         assert!(refused(edit(design, "Write", f)), "{f}");
     }
-    let hermes = |lane: &str, f: &str| {
-        let ti = json!({"path": f, "content": "x"});
-        hook(lane, json!({"tool_name": "write_file", "cwd": "/w", "args": ti}))
-    };
-    assert!(refused(hermes(design, "apple/Sources/CooeeAPI/Client.swift")));
     assert!(refused(patch(design, "apple/Sources/CooeeAPI/Client.swift")));
     assert_eq!(patch(design, "apple/design/x/A.swift"), "");
     assert!(refused(edit(

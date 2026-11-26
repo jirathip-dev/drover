@@ -132,7 +132,7 @@ fn open(state: &Path) -> Result<Connection> {
 
 fn upgrade(c: &mut Connection, state: &Path) -> Result<()> {
     let version = |c: &Connection| c.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0));
-    if version(c)? < 3 {
+    if version(c)? < 4 {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if version(&tx)? < 1 {
             offload_all(&tx, state)?;
@@ -140,9 +140,9 @@ fn upgrade(c: &mut Connection, state: &Path) -> Result<()> {
         if version(&tx)? < 2 {
             tx.execute_batch(&format!("DROP TABLE lanes; {SCHEMA}"))?;
         }
-        if version(&tx)? < 3 {
+        if version(&tx)? < 4 {
             rebuild_in(&tx, state)?;
-            tx.pragma_update(None, "user_version", 3)?;
+            tx.pragma_update(None, "user_version", 4)?;
         }
         tx.commit()?;
     }
@@ -167,6 +167,9 @@ fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Resul
     let mut ev = Event { seq: 0, ..ev.clone() };
     if let Some(id) = crate::orchestrator::acting() {
         ev.data.entry("orchestrator").or_insert(id.into());
+    }
+    if let Some(t) = crate::thread::stamp() {
+        ev.data.entry("thread").or_insert(t.into());
     }
     if seq.is_none() && matches!(ev.kind.as_str(), "verdict" | "lane-killed") {
         ev.data.entry("by").or_insert(crate::orchestrator::actor().into());
@@ -203,7 +206,7 @@ fn project(c: &Connection, ev: &Event) -> Result<()> {
             if let Some(s) = events::fold_into(m, std::slice::from_ref(ev)).get(&key) {
                 let q = "INSERT OR REPLACE INTO states (fleet, issue, done, json) VALUES (?1, ?2, ?3, ?4)";
                 c.prepare_cached(q)?
-                    .execute(params![ev.fleet, n, s.done(), serde_json::to_string(s)?])?;
+                    .execute(params![ev.fleet, n, done(s), serde_json::to_string(s)?])?;
             }
         }
     }
@@ -287,6 +290,10 @@ fn project_ask(c: &Connection, e: &Event) -> Result<()> {
     Ok(())
 }
 
+fn done(s: &events::IssueState) -> u8 {
+    u8::from(s.done()) + u8::from(s.settled())
+}
+
 fn numbered(seq: u64, json: &str) -> Result<Event> {
     Ok(Event {
         seq,
@@ -315,7 +322,7 @@ fn rebuild_in(c: &Connection, state: &Path) -> Result<()> {
     c.execute_batch("DELETE FROM states; DELETE FROM lanes; DELETE FROM asks;")?;
     let q = "INSERT INTO states (fleet, issue, done, json) VALUES (?1, ?2, ?3, ?4)";
     for s in events::fold_into(events::States::new(), &all).into_values() {
-        c.execute(q, params![s.fleet, s.issue, s.done(), serde_json::to_string(&s)?])?;
+        c.execute(q, params![s.fleet, s.issue, done(&s), serde_json::to_string(&s)?])?;
     }
     for e in &all {
         lane(c, e)?;
@@ -340,11 +347,12 @@ pub fn rebuild(state: &Path) -> Result<()> {
     })
 }
 
-/// The saved lane fold's events (each lane's newest lane event), kept after `compact` archives its issue.
-pub fn lanes(state: &Path) -> Result<Vec<Event>> {
+/// The saved lane fold's events (each lane's newest lane event), kept after `compact` archives its issue; `live`: a settled issue's left out.
+pub fn lanes(state: &Path, live: bool) -> Result<Vec<Event>> {
     with(state, false, vec![], |c| {
-        let mut q = c.prepare("SELECT seq, json FROM lanes")?;
-        let rows = q.query_map([], |r| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?)))?;
+        let q = "SELECT seq, json FROM lanes WHERE NOT ?1 OR json_extract(json, '$.issue') IS NULL OR (json_extract(json, '$.fleet'), json_extract(json, '$.issue')) NOT IN (SELECT fleet, issue FROM states WHERE done = 2 EXCEPT SELECT fleet, issue FROM events WHERE seq > (SELECT MAX(seq) FROM events) - 10000)";
+        let mut q = c.prepare(q)?;
+        let rows = q.query_map([live], |r| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?)))?;
         rows.map(|r| {
             let (seq, json) = r?;
             Ok(events::aliased(numbered(seq, &json)?))
@@ -425,7 +433,7 @@ const HOT_SECS: u64 = 14 * 86_400;
 pub fn compact(state: &Path, now: u64) -> Result<(usize, usize)> {
     let dir = state.with_file_name("archive");
     std::fs::create_dir_all(&dir)?;
-    let done = "ts < ?1 AND (fleet, issue) IN (SELECT fleet, issue FROM states WHERE done = 1)";
+    let done = "ts < ?1 AND (fleet, issue) IN (SELECT fleet, issue FROM states WHERE done > 0)";
     let n = with(state, true, (0, 0), |c| {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let q = "DELETE FROM events WHERE type IN ('drive-pass', 'driven', 'kick') AND ts < ?1";
@@ -645,10 +653,11 @@ pub fn processed(state: &Path, id: &str, now: u64) -> Result<bool> {
 pub fn view_put(state: &Path, h: &crate::link::view::HostSeen, lanes: Option<&[(String, String)]>) -> Result<()> {
     with(state, true, (), |c| {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let q = "INSERT OR REPLACE INTO host_view (host, link, since, why, boot, n, heard, build) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+        let q = "INSERT OR REPLACE INTO host_view (host, link, since, why, boot, n, heard, build, load) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
+        let load = serde_json::to_string(&(&h.sample, &h.drain))?;
         tx.execute(
             q,
-            params![h.host, h.link, h.since, h.why, h.boot, h.n, h.heard, h.build],
+            params![h.host, h.link, h.since, h.why, h.boot, h.n, h.heard, h.build, load],
         )?;
         if let Some(all) = lanes {
             tx.execute("DELETE FROM lane_view WHERE host = ?1", [&h.host])?;
@@ -667,8 +676,10 @@ pub type Rows = Vec<(String, String)>;
 /// Every `host_view` row, and every `lane_view` row as (host, json).
 pub fn view(state: &Path) -> Result<(Vec<crate::link::view::HostSeen>, Rows)> {
     with(state, false, (vec![], vec![]), |c| {
-        let mut q = c.prepare_cached("SELECT host, link, since, why, boot, n, heard, build FROM host_view")?;
+        let mut q = c.prepare_cached("SELECT host, link, since, why, boot, n, heard, build, load FROM host_view")?;
         let row = |r: &rusqlite::Row| {
+            let load = r.get::<_, Option<String>>(8)?.unwrap_or_default();
+            let (sample, drain) = serde_json::from_str(&load).unwrap_or_default();
             Ok(crate::link::view::HostSeen {
                 host: r.get(0)?,
                 link: r.get(1)?,
@@ -678,6 +689,8 @@ pub fn view(state: &Path) -> Result<(Vec<crate::link::view::HostSeen>, Rows)> {
                 n: r.get(5)?,
                 heard: r.get(6)?,
                 build: r.get(7)?,
+                sample,
+                drain,
             })
         };
         let hosts = q.query_map([], row)?.collect::<rusqlite::Result<Vec<_>>>()?;

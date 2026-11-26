@@ -22,7 +22,7 @@ fn setup(name: &str) -> Roots {
     }
     let roots = format!("roots = [\"{}\", \"{}\"]", dead.display(), good.display());
     let base = CONFIG
-        .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+        .replace("harness  =  \"claude\"", "harness = \"claude\"")
         .replace("[limits]\n", "[limits]\ndisk_trust_secs = 0\n");
     let c = ctx(&d, &format!("{base}\n[hosts.mini]\n{roots}\n"));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
@@ -80,7 +80,7 @@ fn a_root_whose_listing_never_returns_costs_one_probe_and_the_pass_goes_on() {
         took < drover::runner::probe_wait() + Duration::from_secs(20),
         "{took:?}"
     );
-    assert!(r.sh.called("run", "sendmeter-impl-12"), "drive still starts: {out}");
+    assert!(r.sh.has("sendmeter-impl-12"), "drive still starts: {out}");
     let events = read(&r.c.state).unwrap();
     let sp = events
         .iter()

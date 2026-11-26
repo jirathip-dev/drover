@@ -17,9 +17,6 @@ fn page(name: &str, seed: impl FnOnce(&drover::Ctx)) -> (&'static drover::Ctx, S
         &tmpdir(name),
         &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
-    std::fs::create_dir_all(&profile).unwrap();
-    std::fs::write(profile.join("settings.json"), "{}").unwrap();
     seed(&c);
     let (c, r): (&'static drover::Ctx, &'static Fake) = (Box::leak(Box::new(c)), Box::leak(Box::default()));
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

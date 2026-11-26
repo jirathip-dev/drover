@@ -411,7 +411,7 @@ fn a_pushed_head_on_a_held_hot_file_is_reviewed_and_its_fix_round_may_start() {
     let (out, steps) = drive(&c, &fake(&both));
     assert!(logged(&c, 12, "serial-held").is_empty(), "{out}");
     assert_eq!(steps, ["review"], "{out}");
-    assert!(sh.called("run", "sendmeter-rev-12-r1"), "{out}");
+    assert!(sh.has("sendmeter-rev-12-r1"), "{out}");
     let (_, w) = run(&c, &fake(&both), &["waiting", "sendmeter"]);
     assert!(!w.contains("serial:") && !w.contains("(0/1)"), "{w}");
     let (_, out) = run(&c, &fake(&both), &["spawn", "sendmeter", "12", "impl", "--supersede"]);
@@ -463,4 +463,39 @@ fn a_queued_issue_on_a_held_hot_file_names_its_holder_in_status_and_waiting() {
     let (_, w) = run(&c, &r, &["waiting", "sendmeter"]);
     let row = w.lines().find(|l| l.starts_with("sendmeter #13 ")).unwrap_or_default();
     assert!(row.contains(&want) && !row.contains("(0/1)"), "{w}");
+}
+
+fn merged_lane_left(name: &str) -> (drover::Ctx, FakeShed) {
+    let db = "[[fleet.sendmeter.serial]]\nname = \"db\"\npaths = [\"supabase/migrations/**\"]\nmax = 1\n";
+    let (c, sh) = sctx(name, &config("", db));
+    for n in ["1", "2"] {
+        let (exit, out) = run(
+            &c,
+            &Fake::default(),
+            &["queue", "sendmeter", "add", n, "--serial", "db"],
+        );
+        assert_eq!(exit, 0, "{out}");
+    }
+    lane(&c, 1);
+    let rev = json!({"role": "rev", "agent": "sendmeter-rev-1-r2", "pane": "sendmeter-rev-1-r2", "workspace": "",
+        "runtime": "shed", "host": "air"});
+    ev(&c, 1, "spawn", rev);
+    ev(&c, 1, "verdict", json!({"verdict": "PASS", "sha": sha("1a")}));
+    ev(&c, 1, "merged", json!({"pr": "101"}));
+    drover::db::compact(&c.state, 1_000_000 + 14 * 86_400).unwrap();
+    (c, sh)
+}
+
+#[test]
+fn a_merged_issue_whose_last_lane_was_never_cleaned_holds_no_slot() {
+    let (c, _sh) = merged_lane_left("sg-merged-left");
+    let (_, status) = run(&c, &Fake::default(), &["status", "sendmeter"]);
+    assert!(status.contains("serial: db 0/1"), "{status}");
+    let (exit, out) = run(&c, &fake(&[]), &["spawn", "sendmeter", "2", "impl"]);
+    assert!(!out.contains("SERIAL_BUSY"), "{out}");
+    assert_eq!(exit, 0, "{out}");
+    let (c, _sh) = merged_lane_left("sg-merged-left-drive");
+    let (out, _) = drive(&c, &fake(&[]));
+    assert!(!out.contains("SERIAL_BUSY"), "{out}");
+    assert!(out.contains("sendmeter #2 start: \"sendmeter-impl-2\""), "{out}");
 }

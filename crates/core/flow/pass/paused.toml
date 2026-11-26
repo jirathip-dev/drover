@@ -1,0 +1,12 @@
+flow = "pass"
+states = ["paused"]
+reads = []
+ignores = ["lane", "host", "pr", "verdict", "ask", "turn"]
+
+[[row]]
+id = "paused"
+when = {  }
+do = "wait"
+owner = "owner"
+timeout = "owner-held"
+say = "the fleet is paused"

@@ -8,11 +8,13 @@ use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 /// The shared fake shed server lane tests run on.
 pub mod fake_shed;
 #[allow(unused_imports, reason = "not every test crate drives the fake shed")]
-pub use fake_shed::{FakeShed, OnShed, OverSsh};
+pub use fake_shed::{FakeShed, Fault, OnShed, OverSsh};
 /// The large board fixture the t141 performance tests share.
 pub mod large;
 /// The recorded sendmeter fleet the screen tests share.
 pub mod recorded;
+/// A remote host that passes a remote ACP lane's guard.
+pub mod remote;
 #[allow(unused_imports, reason = "not every test crate reads the recorded fleet")]
 pub use recorded::recorded;
 
@@ -23,12 +25,12 @@ local = "/tmp/does-not-matter/sendmeter"
 integration = "staging"   # never main
 
 [fleet.sendmeter.role.impl]
-harness  =  "hermes"    # toggled in tests
+harness  =  "claude"    # toggled in tests
 profile = "fleet-impl"
 model = "opus"
 
 [fleet.sendmeter.role.rev]
-harness = "hermes"
+harness = "claude"
 profile = "fleet-rev"
 
 [limits]
@@ -144,7 +146,6 @@ pub fn boat(r: &dyn Runner, prog: &str, args: &[String], input: &str) -> Option<
         config: PathBuf::from("/nonexistent/drover/fleet.toml"),
         state: PathBuf::from("/nonexistent/drover/state/events.jsonl"),
         worktrees: PathBuf::from("/nonexistent/drover/worktrees"),
-        homes: std::collections::BTreeMap::new(),
         exe: "/opt/drover/bin/drover".into(),
         now: 1_000_000,
         home: PathBuf::from("/nonexistent/drover/home"),
@@ -262,6 +263,9 @@ impl Fake {
         if line.starts_with("gh api graphql") {
             return Ok(open_prs(&mut onces, &self.replies));
         }
+        if let Some(o) = (prog == "shed").then(|| fake_shed::acp_cli(args)).flatten() {
+            return Ok(o);
+        }
         Ok(Out {
             code: 1,
             stdout: String::new(),
@@ -364,6 +368,20 @@ pub fn set_env(k: &str, v: &str) {
     std::env::set_var(k, v);
 }
 
+/// Linux `vmstat 1 2`'s output whose last second had `idle` percent of the CPUs idle.
+pub fn vmstat(idle: u32) -> String {
+    let head = "procs -----------memory---------- ---swap-- -----io---- -system-- ------cpu-----\n r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st\n";
+    format!("{head} 1  0      0 900000  1000 50000    0    0     1     1   10   10  5  5 90  0  0\n 1  0      0 900000  1000 50000    0    0     0     0   10   10 50 {} {idle}  0  0\n", 50 - idle.min(50))
+}
+
+/// `iostat -n 0 -c 2 -w 1`'s output whose last second had `idle` percent of the CPUs idle.
+pub fn iostat(idle: u32) -> String {
+    format!(
+        "      cpu    load average\n us sy id   1m   5m   15m\n 40 20 40  1 1 1\n 50 {} {idle}  1 1 1\n",
+        50 - idle.min(50)
+    )
+}
+
 pub fn tmpdir(name: &str) -> PathBuf {
     static N: AtomicU32 = AtomicU32::new(0);
     without_lane_env();
@@ -394,15 +412,23 @@ pub fn ctx(dir: &Path, config: &str) -> Ctx {
     let cfgdir = dir.join("config");
     std::fs::create_dir_all(&cfgdir).unwrap();
     std::fs::write(cfgdir.join("fleet.toml"), config).unwrap();
-    Ctx {
+    let c = Ctx {
         config: cfgdir.join("fleet.toml"),
         state: dir.join("state/events.jsonl"),
         worktrees: dir.join("worktrees"),
-        homes: [("hermes", dir.join("hermes"))].into(),
         exe: "/opt/drover/bin/drover".into(),
         now: 1_000_000,
         home: dir.join("home"),
         hints: vec![],
+    };
+    synced(&c);
+    c
+}
+
+/// Every role's profile written (`profiles sync`), as an ACP lane's guard check needs before spawn; a config that does not load, or that sync refuses, writes none.
+pub fn synced(c: &Ctx) {
+    if let Ok(cfg) = drover::config::Config::load(&c.config) {
+        drover::spawn::profiles_sync(c, &cfg, "", &mut std::io::sink()).ok();
     }
 }
 
@@ -632,6 +658,26 @@ pub fn api(s: &drover::serve::Server, host: &str, extra: &str, now: u64, path: &
     r[r.find("\r\n\r\n").unwrap() + 4..].to_string()
 }
 
+/// `GET chat?archived=1` with each listed thread's view, as opening it fetches it (`chat?thread=<id>`), in `threads`.
+pub fn chat_all(s: &drover::serve::Server, host: &str, extra: &str, now: u64) -> serde_json::Value {
+    let get = |q: &str| -> serde_json::Value {
+        serde_json::from_str(&api(s, host, extra, now, &format!("chat?{q}"))).unwrap()
+    };
+    let mut tab = get("archived=1");
+    let repos = tab["repos"].as_array().cloned().unwrap_or_default();
+    let ids = repos.iter().flat_map(|r| {
+        let rows = r["rows"].as_array().into_iter().flatten();
+        rows.chain(r["archived"].as_array().into_iter().flatten())
+            .cloned()
+            .collect::<Vec<_>>()
+    });
+    let views: Vec<_> = ids
+        .map(|r| get(&format!("thread={}", r["id"].as_str().unwrap()))["threads"][0].clone())
+        .collect();
+    tab["threads"] = serde_json::Value::Array(views);
+    tab
+}
+
 /// Replace the whole event log with JSONL `text` (as a test edits a log): the database goes, the next read imports `text`. Leases, devices and snapshots go with it.
 pub fn rewrite_log(state: &Path, text: &str) {
     for f in ["state.db", "state.db-wal", "state.db-shm"] {
@@ -826,4 +872,21 @@ impl Runner for Disk<'_> {
     fn sleep(&self, secs: u64) {
         self.0.sleep(secs);
     }
+}
+
+/// Appends one perf line to stderr and, in CI, the job summary.
+pub fn report(line: &str) {
+    eprintln!("{line}");
+    if let Ok(p) = std::env::var("GITHUB_STEP_SUMMARY") {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().append(true).create(true).open(p).unwrap();
+        writeln!(f, "{line}").unwrap();
+    }
+}
+
+/// This process's user plus system CPU time so far, in ms.
+pub fn cpu_ms() -> f64 {
+    let u = drover_sys::rusage().unwrap();
+    let tv = |s: i64, us: i64| s as f64 * 1e3 + f64::from(u32::try_from(us).unwrap()) / 1e3;
+    tv(u[0], u[1]) + tv(u[2], u[3])
 }

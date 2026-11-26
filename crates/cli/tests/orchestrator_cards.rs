@@ -20,7 +20,7 @@ fn body(res: &str) -> &str {
 }
 
 fn chat(s: &Server, cookie: &str, now: u64) -> Value {
-    serde_json::from_str(&api(s, ADDR, cookie, now, "chat")).unwrap()
+    chat_all(s, ADDR, cookie, now)
 }
 
 fn thread(page: &Value) -> &Value {
@@ -59,9 +59,6 @@ fn setup(name: &str, role_extra: &str, extra: &str) -> drover::Ctx {
     let d = tmpdir(name);
     let cfg = format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n{role_extra}\n{extra}");
     let c = ctx(&d, &cfg);
-    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
-    std::fs::create_dir_all(&profile).unwrap();
-    std::fs::write(profile.join("settings.json"), "{}").unwrap();
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).1,
         "t1\n"
@@ -478,7 +475,7 @@ fn a_run_card_between_two_replies_renders_in_order_in_the_chat_tab() {
     let cli = sh.cli(&r);
     let on = sh.on(&cli);
     let s = Server::new(&c, &on, Some(ADDR.into()));
-    let j: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, T + 60, "chat")).unwrap();
+    let j: serde_json::Value = chat_all(&s, ADDR, &cookie, T + 60);
     let t = j["threads"]
         .as_array()
         .unwrap()

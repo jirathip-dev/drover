@@ -31,8 +31,8 @@ fn killed(c: &drover::Ctx, k: u64) {
     }
 }
 
-fn host(load: &str) -> Fake {
-    no_pr(load).reply("gh pr view", &pr().to_string())
+fn host(idle: u32) -> Fake {
+    no_pr(idle).reply("gh pr view", &pr().to_string())
 }
 
 fn pr() -> serde_json::Value {
@@ -40,10 +40,10 @@ fn pr() -> serde_json::Value {
         "statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "IN_PROGRESS"}]})
 }
 
-fn no_pr(load: &str) -> Fake {
+fn no_pr(idle: u32) -> Fake {
     Fake::default()
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
-        .reply("sysctl -n vm.loadavg", &format!("{{ {load} 1.20 1.00 }}\n"))
+        .reply("iostat", &iostat(idle))
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("gh issue view", r#"{"title":"t","body":"b"}"#)
@@ -79,7 +79,7 @@ fn fifteen_gone_lanes_wait_out_a_busy_host_then_come_back_paced_by_respawn_per_p
     let c = ctx(&tmpdir("pace-15"), CONFIG);
     let _sh = FakeShed::attached(&c);
     killed(&c, 15);
-    let busy = host("50.00");
+    let busy = host(5);
     for k in 0..3 {
         assert_eq!(
             pass(&c, &busy, T + k * 60),
@@ -88,7 +88,7 @@ fn fifteen_gone_lanes_wait_out_a_busy_host_then_come_back_paced_by_respawn_per_p
         );
     }
     no_force(&c);
-    let calm = host("1.50");
+    let calm = host(80);
     let mut back = vec![];
     for k in 3..20 {
         let got = pass(&c, &calm, T + k * 60);
@@ -110,7 +110,7 @@ fn respawn_per_pass_is_read_from_limits_and_a_fleet_overrides_it() {
     let c = ctx(&tmpdir("pace-limits"), &limits);
     let _sh = FakeShed::attached(&c);
     killed(&c, 6);
-    assert_eq!(pass(&c, &host("1.50"), T).len(), 4);
+    assert_eq!(pass(&c, &host(80), T).len(), 4);
     let fleet = limits.replace(
         "integration = \"staging\"",
         "integration = \"staging\"\nrespawn_per_pass = 3",
@@ -118,7 +118,7 @@ fn respawn_per_pass_is_read_from_limits_and_a_fleet_overrides_it() {
     let c = ctx(&tmpdir("pace-fleet"), &fleet);
     let _sh = FakeShed::attached(&c);
     killed(&c, 6);
-    assert_eq!(pass(&c, &host("1.50"), T).len(), 3);
+    assert_eq!(pass(&c, &host(80), T).len(), 3);
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn a_failed_start_waits_for_room_and_is_never_forced() {
     ev(&c, 1, T - 3600, "spawn", d);
     sh.lane("sendmeter-impl-1", "idle", &wt.to_string_lossy());
     sh.set("sendmeter-impl-1", |t| t["reported"] = serde_json::Value::Null);
-    assert_eq!(pass(&c, &no_pr("50.00"), T), Vec::<u64>::new());
+    assert_eq!(pass(&c, &no_pr(5), T), Vec::<u64>::new());
     let held = read(&c.state).unwrap();
     let d = held.iter().rfind(|e| e.kind == "driven").expect("a driven step");
     assert_eq!(
@@ -141,6 +141,6 @@ fn a_failed_start_waits_for_room_and_is_never_forced() {
         "{d:?}"
     );
     no_force(&c);
-    assert_eq!(pass(&c, &no_pr("1.50"), T + 60), [1]);
+    assert_eq!(pass(&c, &no_pr(80), T + 60), [1]);
     no_force(&c);
 }

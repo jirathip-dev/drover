@@ -20,30 +20,38 @@ stateDiagram-v2
     state "parked" as parked
     state "merged" as merged
     state "closed" as closed
-    queued --> design : queued with an architect or design mark, that lane first
-    queued --> impl : impl spawned, refused while SERIAL_BUSY, HOST_BUSY, DISK_BUDGET, LANE_LIVE or CAP
-    queued --> closed : issue closed on GitHub
-    design --> design_review : design pushed, the owner's ask
-    design_review --> queued : approve or revise
-    design_review --> needs_human : reject
-    impl --> review : turn done passes its gate at the pushed head, review spawned
-    impl --> needs_human : turn blocked, 3 done refusals at a head, or stalled past stall_minutes = 30
-    impl --> queued : lane killed, or repaired while blocked
-    review --> ready : PASS at head
-    review --> fix : FAIL at head
-    review --> needs_human : ROUND_LIMIT after review_rounds = 3
-    fix --> review : fix pushed and turn done passed, next review round
-    fix --> needs_human : turn blocked, 3 done refusals at a head, or stalled past stall_minutes = 30
-    ready --> review : verify stage at head for ui_paths, a verify or repro mark
-    ready --> fix : update round +uN when behind or conflicting, UPDATE_LIMIT after update_rounds = 3
-    ready --> merged : squash-merge into one commit, with PASS at head and CI green, no STAGING_WOULD_BREAK
-    ready --> blocked : merge refused, or PR closed outside drover
-    blocked --> fix : fix round spawned
-    blocked --> review : review spawned at a new head
-    needs_human --> queued : extend with no lane yet, start lane
-    needs_human --> fix : extend, one more round
-    needs_human --> parked : park
-    parked --> needs_human : unpark, the state before it
+    queued --> design : start
+    queued --> impl : start
+    design --> design_review : ended
+    design_review --> queued : decided
+    design_review --> design : decided
+    design_review --> needs_human : decided
+    impl --> merged : merged-outside
+    impl --> needs_human : pr-closed, lane-blocked
+    impl --> review : pushed, no-change
+    impl --> ready : no-change
+    review --> merged : merged-outside
+    review --> needs_human : pr-closed
+    review --> ready : record
+    review --> fix : record
+    fix --> merged : merged-outside
+    fix --> needs_human : pr-closed, lane-blocked
+    fix --> review : pushed, no-change
+    fix --> ready : no-change
+    ready --> merged : merged-outside, merge
+    ready --> needs_human : pr-closed
+    ready --> review : next-check
+    ready --> fix : merge, ci-red, conflict
+    blocked --> merged : merged-outside
+    blocked --> needs_human : pr-closed
+    blocked --> ready : back
+    blocked --> review : back
+    blocked --> fix : back
+    needs_human --> queued : decided
+    needs_human --> impl : decided
+    needs_human --> fix : decided
+    needs_human --> parked : decided
+    parked --> needs_human : parked
     merged --> [*]
     closed --> [*]
 ```
@@ -58,11 +66,10 @@ flowchart TD
     t1["drive"] --> t2
     t2["clean"] --> t3
     t3["trim"] --> t4
-    t4["lesson"] --> t5
-    t5["triage"] --> t6
-    t6["deps"] --> t7
-    t7["hotspots"] --> t8
-    t8["compact"]
+    t4["jobs"] --> t5
+    t5["soak"] --> t6
+    t6["hotspots"] --> t7
+    t7["compact"]
     d0["look, repair"] --> d1
     d1["closed issues"] --> d2
     d2["PR reads, gates, steps"] --> d3
@@ -84,11 +91,13 @@ flowchart TD
     d0 -.- k_pass_max_secs(["pass_max_secs = 60"])
     d0 -.- k_ssh_quick_secs(["ssh_quick_secs = 5"])
     d0 -.- k_ssh_call_secs(["ssh_call_secs = 20"])
+    d0 -.- k_shed_call_secs(["shed_call_secs = 30"])
     d0 -.- k_import_max_age_hours(["import_max_age_hours = 24"])
     d2 -.- k_webhook_poll_minutes(["webhook_poll_minutes = 10"])
     d2 -.- k_silent_minutes(["silent_minutes = 10"])
     d2 -.- k_ci_start_minutes(["ci_start_minutes = 10"])
     d2 -.- k_ci_stuck_minutes(["ci_stuck_minutes = 30"])
+    d2 -.- k_ci_flaky_retries(["ci_flaky_retries = 1"])
     d2 -.- k_gate_check_minutes(["gate_check_minutes = 30"])
     d2 -.- k_review_rounds(["review_rounds = 3"])
     d2 -.- k_update_rounds(["update_rounds = 3"])
@@ -123,6 +132,7 @@ flowchart TD
     other -.- k_proxy_retry_secs(["proxy_retry_secs = 300"])
     other -.- k_service_call_secs(["service_call_secs = 2"])
     other -.- k_disk_probe_secs(["disk_probe_secs = 2"])
+    other -.- k_disk_hung_secs(["disk_hung_secs = 6"])
     other -.- k_disk_sick_secs(["disk_sick_secs = 300"])
     other -.- k_disk_trust_secs(["disk_trust_secs = 60"])
     other -.- k_lane_read_secs(["lane_read_secs = 5"])
@@ -147,9 +157,13 @@ flowchart TD
     other -.- k_slo_pass_minutes(["slo_pass_minutes = 5"])
     other -.- k_stall_restart_hours(["stall_restart_hours = 2"])
     other -.- k_self_update_wait_minutes(["self_update_wait_minutes = 45"])
-    other -.- k_self_update_lag_minutes(["self_update_lag_minutes = 30"])
     other -.- k_self_update_stage_secs(["self_update_stage_secs = 300"])
-    other -.- k_self_update_swap_secs(["self_update_swap_secs = 120"])
+    other -.- k_act_minutes(["act_minutes = 10"])
+    other -.- k_escalate_minutes(["escalate_minutes = 30"])
+    other -.- k_start_minutes(["start_minutes = 10"])
+    other -.- k_check_quiet_minutes(["check_quiet_minutes = 120"])
+    other -.- k_host_wait_minutes(["host_wait_minutes = 30"])
+    other -.- k_card_ttl_minutes(["card_ttl_minutes = 15"])
 ```
 
 ## History baseline
@@ -175,41 +189,20 @@ Undo, at four sizes:
 
 ## Compact: a repo's fresh start
 
-Compact is a feature for any fleet: the repo, its integration branch, `main` and the archive
-(`<repo>-history`) all come from the fleet. `drover compact <fleet> --cut <date|sha>` replaces the fleet's integration line with one root commit (the
-cut's exact tree, message `<repo>: initial (history before <date> in <owner>/<repo>-history)`) and one commit per
-landed PR after it, each with the old commit's tree, message, author and date. Every other branch and notes ref is
-carried with its files unchanged: an open PR's commits are copied onto their true base; a branch that last met the
-line before the cut is carried detached; a branch fully merged is deleted (the archive keeps it). Nothing is
-rebased or replayed, and every new tip's tree is checked equal to its old one (`COMPACT_TREE`).
+Compact is the standalone `compact` binary (its own repo; install it on the PATH): one root commit before a cut, one commit per landed PR after it, an archive
+in `<repo>-history`, and undo. Its README is the reference. Drover keeps only the glue:
 
-- **Dry run.** `--dry-run` mirrors origin into `<state dir>/compact/<repo>/old.git`, writes `plan.json` and
-  `compact-map.tsv` (old sha, new sha, `same`/`held`/`root`) and prints the old → new commit counts, the root,
-  each PR commit, the open PRs to carry, the event records to remap and the readiness checks. It pushes nothing.
-  It is the only form a lane may run.
-- **Cards.** `--thread <id>` posts a run card for `drover compact <fleet> --push <new tip>` (every ref but
-  `main`) and, when `main` moves, a second card for `drover compact <fleet> --main --push <main's new tip>`. Each is
-  approved on its own (`--sha`); `--push` runs only inside its approved card (`COMPACT_UNAPPROVED`), so the line's
-  card never pushes `main`. The fleet must be paused, no check lane working, every lane
-  folder clean and pushed, no open PR from a fork or left detached, force pushes allowed (`COMPACT_NOT_READY`).
-- **Main.** `main` is rewritten like any branch, but its new tip's tree must equal its old one and it is never
-  deleted, else the cut aborts before any push (`COMPACT_TREE`). Its card runs after the line's (`COMPACT_NOT_READY`
-  before), pushes `main` alone with `--force-with-lease` on its old tip, and its blast says the push may fire the
-  repo's main-merge workflows (a prod deploy, migrations).
-- **Archive.** The approved run first pushes every old branch, tag, note and PR head (as `pull/<n>`) to the
-  private `<owner>/<repo>-history`, reads it back, and adds the plan and map on its `drover-compact` branch
-  (`COMPACT_ARCHIVE` if it is public or misses a ref).
-- **Push.** Then one atomic push moves every ref of origin but `main`, each with a lease on its old value (`COMPACT_MOVED`
-  if one moved since the plan). The log is never edited: one `compacted` record per fleet and per issue with ids in
-  both histories bridges them for `drover why` and hotspots; a line older than the cut is answered from the
-  local archive copy. Open PR bodies get their new head ids; their old PASS does not carry, so each gets one fresh
-  review. The fleet's clone and lane folders are reset (`--reset` repeats it); drive, spawn and merge refuse
-  `OLD_ROOT` for a clone or PR head that is not on the new root.
-- **Undo.** `drover compact <fleet> --undo --thread <id>` posts a card for `--undo --push <old tip>`, which puts
-  every ref but `main` back from the scratch copy (else the archive) while all are still where compact put them,
-  and logs `compact-undone`; and, when `main` moved, its own card for `--undo --main --push <main's old tip>`.
-  Resuming the fleet ends that window.
-- **Guard.** Compact remaps stored ids through one list, `compact::SAVED` (record kind, field); a sha-named field
-  it leaves alone is in `compact::KEPT` with why. CI's `every_saved_sha_field_is_in_compacts_list` fails a PR that
-  writes a new `*_sha` field in neither, and the sim fixture (merges, why notes, a PASS, an open PR, `main`; compact,
-  then undo) runs in the normal test step (crates/cli/tests/compact.rs).
+- **Run.** `drover compact <fleet> <act>` runs `compact --repo <repo> --line <integration> --clone <clone> --lane
+  [host:]<lane folder>… --fleet <each fleet on the repo> --saved <dir>/saved.tsv --dir <dir> <act>`, where `<dir>` is
+  `<state dir>/compact/<repo>` and the act is compact's (`--cut <date|sha> [--dry-run | --thread <id>]`, `--undo
+  [--dry-run | --thread <id>]`, `--reset`). A lane runs only `--dry-run`.
+- **Cards.** With `--thread <id>`, compact posts its own run cards (`drover card post`): `compact … --push <new tip>`
+  for every ref but `main` and, when `main` moves, `compact … --main --push <main's new tip>`. Each runs only inside
+  its approved card. Pause the fleet first.
+- **Records.** The log is never edited. Drover lists its saved commit ids (`reroot::SAVED`; a sha-named field it
+  leaves alone is in `reroot::KEPT` with why) in `saved.tsv`. After the push, compact writes `moved.json`, and after
+  an undo `undone`; the next `drover compact` or drive pass logs them once as `compacted` (one per fleet, one per
+  issue with ids in both histories) and `compact-undone`. Those bridge the two histories for `drover why` and
+  hotspots, and drive, spawn and merge refuse `OLD_ROOT` for a clone or PR head that is not on the new root.
+- **Guard.** CI's `every_saved_sha_field_is_in_compacts_list` fails a PR that writes a new `*_sha` field in neither
+  list (crates/cli/tests/compact.rs).

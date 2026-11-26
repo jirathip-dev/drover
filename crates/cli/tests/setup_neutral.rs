@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
-const WORDS: [&str; 5] = ["jirathip", "sendmeter", "claude-accounts", "tail8c3301", "hermes-brain"];
+const WORDS: [&str; 4] = ["jirathip", "sendmeter", "claude-accounts", "tail8c3301"];
 
-const EXCEPTIONS: [(&str, &str, &str); 10] = [
+const EXCEPTIONS: [(&str, &str, &str); 9] = [
     (
         "assets/swag/farm/sprites.svg",
         "(c) 2026 jirathip-dev, MIT",
@@ -24,24 +24,19 @@ const EXCEPTIONS: [(&str, &str, &str); 10] = [
         "#928: the shared theme repo the packs come from",
     ),
     (
-        "docs/serve.md",
+        "docs/serve/page.md",
         "jirathip-dev/corral",
         "MIT notice: the source the horses, icon and Herd mode are ported from",
     ),
     (
-        "docs/serve.md",
+        "docs/serve/page.md",
         "MIT © jirathip-dev",
         "MIT notice of the ported Corral code and icon",
     ),
     (
-        "docs/serve.md",
+        "docs/serve/export.md",
         "https://jirathip-dev.github.io/herdsman/",
         "the project's own public demo",
-    ),
-    (
-        "docs/dsh.md",
-        "https://github.com/jirathip-dev/herdsman/issues/",
-        "the project's own issue links",
     ),
     (
         "docs/setup.md",
@@ -139,7 +134,7 @@ fn role_texts_name_no_harness() {
             let words = prose.split(|c: char| !c.is_ascii_alphanumeric());
             if let Some(w) = words
                 .into_iter()
-                .find(|w| ["claude", "hermes", "codex", "anthropic", "openai"].contains(w))
+                .find(|w| ["claude", "codex", "anthropic", "openai"].contains(w))
             {
                 bad.push(format!(
                     "{}:{}: {w}: {line}",

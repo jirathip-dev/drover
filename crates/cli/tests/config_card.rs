@@ -43,7 +43,7 @@ fn msgs(c: &drover::Ctx, ts: u64, ids: std::ops::Range<u64>) {
 }
 
 fn chat(s: &Server, cookie: &str) -> Value {
-    serde_json::from_str(&api(s, ADDR, cookie, T + 500, "chat")).unwrap()
+    chat_all(s, ADDR, cookie, T + 500)
 }
 
 fn thread(chat: &Value) -> Value {
@@ -153,18 +153,20 @@ fn a_proposal_reaches_a_thread_open_on_the_phone_live() {
             .last()
     };
     let (t0, mut got) = (Instant::now(), String::new());
-    while !chat(&got).is_some_and(|j| j.to_string().contains("\"text\":\"m39\""))
+    while !chat(&got).is_some_and(|j| j.to_string().contains("\"line\":\"conductor: m39\""))
         && t0.elapsed() < Duration::from_secs(5)
     {
         got += &drain(&mut s, 100);
     }
     let j = chat(&got).unwrap_or_else(|| panic!("no chat data within 5 s: {got}"));
-    let t = j["threads"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|t| t["id"] == "t1")
+    assert_eq!(j["threads"], json!([]), "the push carries the rows, not each thread");
+    let mut o = TcpStream::connect(addr).unwrap();
+    o.write_all(format!("GET /api/v1/chat?thread=t1 HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n").as_bytes())
         .unwrap();
+    let mut res = String::new();
+    o.read_to_string(&mut res).unwrap();
+    let opened: Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
+    let t = &opened["threads"][0];
     let msgs = t["page"]["msgs"].as_array().unwrap();
     let card = (msgs[0]["kind"].as_str(), msgs[0]["from"].as_str(), &msgs[0]["open"]);
     assert_eq!(
@@ -212,14 +214,11 @@ fn applying_a_new_fleet_kicks_its_first_queued_issue() {
 }
 
 #[test]
-fn applying_a_new_role_syncs_its_profile_and_hook_approval() {
+fn applying_a_new_role_syncs_its_profile() {
     let c = setup("cfg-sync");
-    let yaml = c.homes["hermes"].join("fleet-verify/config.yaml");
-    std::fs::create_dir_all(yaml.parent().unwrap()).unwrap();
-    std::fs::write(&yaml, "model: x\n").unwrap();
     let old = std::fs::read_to_string(&c.config).unwrap();
     let file = c.config.with_file_name("proposed.toml");
-    let role = "\n[fleet.sendmeter.role.verify]\nharness = \"hermes\"\nprofile = \"fleet-verify\"\n";
+    let role = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
     std::fs::write(&file, format!("{old}{role}")).unwrap();
     let r = Fake::default();
     assert_eq!(
@@ -228,9 +227,6 @@ fn applying_a_new_role_syncs_its_profile_and_hook_approval() {
     );
     let (code, out) = run(&c, &r, &["config", "apply", "c1"]);
     assert_eq!(code, 0, "{out}");
-    let allow = std::fs::read_to_string(c.homes["hermes"].join("fleet-verify/shell-hooks-allowlist.json")).unwrap();
-    assert!(allow.contains("hook --role rev"), "{allow}");
-    assert!(std::fs::read_to_string(&yaml).unwrap().contains("hooks:"));
     let settings = drover::providers::profiles_root(&c).join("fleet-verify/settings.json");
     assert!(std::fs::read_to_string(settings).unwrap().contains("hook --role rev"));
 }

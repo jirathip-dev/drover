@@ -8,6 +8,18 @@ use crate::{gh, Ctx};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
+/// `drover waiting`'s arguments.
+#[derive(clap::Args)]
+pub struct Args {
+    pub fleet: Option<String>,
+    #[arg(help = "Machine-readable output")]
+    #[arg(long)]
+    pub json: bool,
+    #[arg(help = "Each issue's flow state, condition and table row under its line")]
+    #[arg(long)]
+    pub flow: bool,
+}
+
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Waiting {
@@ -87,8 +99,8 @@ pub fn fix_done<'a>(events: &'a [Event], f: &str, n: u64) -> Option<&'a Event> {
 /// A gone impl/fix lane's wait (`lane gone, no push: respawning impl`); drive respawns no more often than this.
 pub const NO_PUSH: &str = ", no push: ";
 /// A lesson lane ended without a push or `done`: drive prompts it once, then closes the issue.
-pub const LESSON_PROMPT: &str = "lesson lane ended without a push: prompting it once";
-pub const LESSON_CLOSE: &str = "lesson lane ended without a push: closing as no repeated class";
+pub const LESSON_PROMPT: &str = "job lane ended without a push: prompting it once";
+pub const LESSON_CLOSE: &str = "job lane ended without a push: closing its issue";
 const RESPAWN_SECS: u64 = 1800;
 const DRAFT: &str = "PR is a draft";
 /// A build lane's typed turn end, as drive acts on it (`turn`): nudged once, prompted to go on, or blocked.
@@ -188,6 +200,14 @@ pub fn turn<'a>(events: &'a [Event], s: &IssueState) -> Option<&'a Event> {
         .rev()
         .filter(|e| e.is("turn-end", &s.fleet, s.issue))
         .find(role)
+}
+
+fn done_working(ctx: &Ctx, cfg: &Config, events: &[Event], session: Option<&Session>, t: &Event) -> bool {
+    let Some(a) = session.filter(|a| a.status() == Some(crate::session::Status::Done)) else {
+        return false;
+    };
+    let since = crate::session::stamp::since(events, &a.name).unwrap_or(t.ts).max(t.ts);
+    t.str("state") == Some("working") && ctx.now >= since + cfg.limits.stall_minutes * 60
 }
 
 fn turned(events: &[Event], t: &Event, lane: &str, now: u64, stall: u64) -> (Who, String) {
@@ -683,7 +703,7 @@ pub fn scan_where(
     let hung = crate::roots::hung_now(events);
     let mine = |st: &crate::events::States| {
         st.values()
-            .filter(|s| cfg.fleet.contains_key(&s.fleet) && keep(s))
+            .filter(|s| cfg.fleet.contains_key(&s.fleet) && !s.settled() && keep(s))
             .cloned()
             .collect()
     };
@@ -726,7 +746,7 @@ pub fn scan_where(
             out.push((s, w));
             continue;
         }
-        if busy(&lane) {
+        if busy(&lane) && !sp.is_some_and(|sp| crate::lanes::closed(mine, sp)) {
             let who = if s.check_lane() == Some(&lane) {
                 "reviewer"
             } else {
@@ -845,7 +865,9 @@ pub fn scan_where(
                 _ => None,
             });
         let waiting_turn = turn(mine, &s);
-        if idle && crate::lesson::no_pr(s.build.as_deref()) && settled() {
+        let quiet = |t: &Event| done_working(ctx, cfg, mine, session, t);
+        let ended = ended.or(waiting_turn.filter(|t| idle && quiet(t)).map(|_| "done"));
+        if idle && crate::jobs::empty(cfg, mine, &s.fleet, s.issue).is_some() && settled() {
             let asked = mine
                 .iter()
                 .rfind(|e| e.kind == "lesson-prompted" && e.str("agent") == Some(built.as_str()));
@@ -853,15 +875,12 @@ pub fn scan_where(
             w.what = match asked {
                 None if !gone && !unconfirmed => LESSON_PROMPT.into(),
                 Some(e) if !gone && ctx.now < e.ts + RESPAWN_SECS => {
-                    format!(
-                        "lesson lane prompted {} ago, closing it after 30 min",
-                        age(ctx.now - e.ts)
-                    )
+                    format!("job lane prompted {} ago, closing it after 30 min", age(ctx.now - e.ts))
                 }
                 _ => LESSON_CLOSE.into(),
             };
         } else if let Some(t) =
-            waiting_turn.filter(|t| idle && (!gone && !unconfirmed || t.str("state") == Some("blocked")))
+            waiting_turn.filter(|t| idle && !quiet(t) && (!gone && !unconfirmed || t.str("state") == Some("blocked")))
         {
             (w.who, w.what) = turned(mine, t, &built, ctx.now, cfg.limits.stall_minutes * 60);
             (w.lane, w.since) = (built, t.ts);
@@ -1066,14 +1085,7 @@ pub fn recovered(events: &[Event], lane: &str, now: u64) -> String {
     })
 }
 
-const HOST_WAIT: [&str; 6] = [
-    "HOST_BUSY",
-    "HOST_UPDATING",
-    "DISK_LOW",
-    "DISK_BUDGET",
-    "MEM_LOW",
-    "LOGIN_NEEDED",
-];
+const HOST_WAIT: [&str; 5] = ["HOST_BUSY", "DISK_LOW", "DISK_BUDGET", "MEM_LOW", "LOGIN_NEEDED"];
 pub const ORPHAN_SECS: u64 = 1800;
 
 /// Since when nothing has driven guarded issue `s`, once that is 30 min: no working lane, no drive action on it (a due step, or a refused one drive retries) and no named wait (an open ask, a hold, a paused fleet, CI after PASS).

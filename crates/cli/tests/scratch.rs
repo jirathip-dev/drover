@@ -732,6 +732,29 @@ fn a_tick_trims_a_remote_build_folder_over_budget_but_never_a_live_lanes() {
 }
 
 #[test]
+fn a_remote_lane_done_past_the_stall_is_no_live_lane_to_the_build_trim() {
+    let (c, home, s) = air_setup("build-remote-done");
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(
+        &c.config,
+        text.replace("build_budget_gb = 1000", "build_budget_gb = 0.0005"),
+    )
+    .unwrap();
+    let b = s.parent().unwrap();
+    air_spawn(&c, 13, "impl", "sendmeter-impl-13");
+    ev(
+        &c,
+        13,
+        "lane-state",
+        json!({"agent": "sendmeter-impl-13", "state": "done", "since": 10}),
+    );
+    let done = locked(b, "sendmeter-impl-13", 1024);
+    let (_, out) = tick(&c, &home, &[("sendmeter-impl-13", "done")], 200 * 1_048_576);
+    assert!(!done.exists(), "a done lane's build is trimmed: {out}");
+    assert!(!out.contains("a live lane"), "{out}");
+}
+
+#[test]
 fn a_lane_ending_on_a_remote_host_loses_its_build_folder_in_that_pass() {
     let (c, home, s) = air_setup("build-remote-ended");
     let b = s.parent().unwrap();

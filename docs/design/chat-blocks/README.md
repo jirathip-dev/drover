@@ -31,7 +31,7 @@ cover every block type: the Plan text with its heading and lists, the failing `c
   you `--l` blue · assistant `--p` purple (new, Q1) · tool run `--a` amber · status `--mute` at 40 %, on a
   surface recessed toward `--bg`.
 - **Header:** the whole width, 28 px visible with an 8 px ring above and below for a 44 px tap (#58). It shows
-  the role (`you`, the lane's harness name such as `claude`, `dsh` or `hermes`) and a chevron. Collapsed, it adds
+  the role (`you`, the lane's harness name such as `claude`) and a chevron. Collapsed, it adds
   a one-line ellipsised preview of the first line.
   A tool run's header is its call: `$ cmd` for a shell call, or the tool name in the accent plus its argument
   (`Update src/overlap.rs`). Open, the command wraps. A failed call shows a red `exit N` on the right (Q4), and a
@@ -77,7 +77,7 @@ The basic (30–37, 90–97) and 256-colour SGRs go through the same rule.
 
 **Claude pre-renders markdown.** Its screen has no `**` or backticks: bold arrives as SGR 1 and inline code as a
 `177;185;249` run. So for Claude the markdown is the ANSI mapping. The `**`/`` ` ``/`#` parser is for harnesses
-that print raw markdown (dsh, Hermes), and both paths render the same spans.
+that print raw markdown, and both paths render the same spans.
 
 ## Phase 2 notes from the measurements
 

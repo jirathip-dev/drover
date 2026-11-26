@@ -22,7 +22,7 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str, now: u64) 
 fn fixture(name: &str) -> (drover::Ctx, OnShed) {
     let c = ctx(&tmpdir(name), &two());
     let spawn = |fleet: &str, issue: u64, ts: u64, role: &str, agent: &str| {
-        let d = json!({"role": role, "agent": agent, "harness": if role == "rev" { "hermes" } else { "claude" }});
+        let d = json!({"role": role, "agent": agent, "harness": if role == "rev" { "codex" } else { "claude" }});
         append(&c.state, &Event::new(ts, fleet, Some(issue), "spawn", d)).unwrap();
     };
     spawn("sendmeter", 12, 900_100, "impl", "sendmeter-impl-12");

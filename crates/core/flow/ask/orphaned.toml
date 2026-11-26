@@ -1,0 +1,12 @@
+flow = "ask"
+states = ["orphaned"]
+reads = []
+ignores = ["lane", "host", "pr", "verdict", "ask", "turn"]
+
+[[row]]
+id = "close"
+when = {  }
+do = "close-superseded"
+owner = "drive"
+timeout = "act_minutes"
+say = "its episode ended: close it superseded"

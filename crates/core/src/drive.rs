@@ -13,6 +13,8 @@ use std::path::Path;
 
 pub(crate) mod job;
 mod kicks;
+mod pass;
+pub use pass::Pass;
 mod pickup;
 mod remote;
 mod undriven;
@@ -25,6 +27,7 @@ pub const STEPS: [(&str, &[&str]); 4] = [
             "pass_max_secs",
             "ssh_quick_secs",
             "ssh_call_secs",
+            "shed_call_secs",
             "import_max_age_hours",
         ],
     ),
@@ -36,6 +39,7 @@ pub const STEPS: [(&str, &[&str]); 4] = [
             "silent_minutes",
             "ci_start_minutes",
             "ci_stuck_minutes",
+            "ci_flaky_retries",
             "gate_check_minutes",
             "review_rounds",
             "update_rounds",
@@ -256,6 +260,9 @@ pub fn kick_once(ctx: &Ctx, r: &dyn Runner, (fleet, issue): (&str, u64), why: &s
     if IN_ACT.get() || crate::outbox::lane().is_some() {
         return None;
     }
+    if why != "drive" && kicks::coalesced(ctx, r, (fleet, issue), why) {
+        return None;
+    }
     if let Some(pid) = crate::service::kick(ctx, fleet, issue, why, id) {
         return Some(pid);
     }
@@ -430,34 +437,18 @@ pub fn own_marker(ctx: &Ctx, fleet: &str, n: u64) -> Option<crate::db::Lease> {
     held(ctx, &format!("spawn-{fleet}-{n}.pending")).filter(|_| SLOT.get())
 }
 
-type Admitter = (std::path::PathBuf, u32, String);
-static ADMITTING: std::sync::Mutex<std::collections::BTreeSet<Admitter>> =
-    std::sync::Mutex::new(std::collections::BTreeSet::new());
-static ADMITTED: std::sync::Condvar = std::sync::Condvar::new();
-
-struct Admitting(Admitter);
-impl Drop for Admitting {
-    fn drop(&mut self) {
-        ADMITTING
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&self.0);
-        ADMITTED.notify_all();
-    }
-}
-
-fn admit(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str) -> Result<(Lock, Admitting)> {
-    let me = (ctx.state.clone(), crate::sim::pid(), host.to_string());
-    let held = ADMITTING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut held = (ADMITTED.wait_while(held, |h| h.contains(&me))).unwrap_or_else(std::sync::PoisonError::into_inner);
-    held.insert(me.clone());
-    drop(held);
-    let me = Admitting(me);
+fn admit(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str) -> Result<Lock> {
     let key = format!("admit-{host}.lock");
     for left in (0..=cfg.limits.admit_wait_secs).rev() {
         let now = crate::now();
+        let was = crate::db::leases(&ctx.state, &key).into_iter().find(|l| l.key == key);
+        let was = was.filter(|w| w.expires_at <= now || gone(r, w, now));
         if let Some(l) = crate::db::take(&ctx.state, &key, now, 60, "", &|l| gone(r, l, now)) {
-            return Ok((Lock(ctx.state.clone(), l), me));
+            if let Some(w) = was {
+                let d = json!({"host": host, "pid": w.pid, "age": now.saturating_sub(w.at)});
+                append(&ctx.state, &Event::new(now, "drover", None, "admission-dropped", d))?;
+            }
+            return Ok(Lock(ctx.state.clone(), l));
         }
         if left > 0 {
             r.sleep(1);
@@ -653,6 +644,9 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     std::fs::create_dir_all(state_dir(ctx))?;
     let stamp = ctx.state.with_file_name("drive-fast.at");
     std::fs::write(&stamp, ctx.now.to_string()).ok();
+    for old in ["drive.at", "drive.lock.step"] {
+        std::fs::remove_file(ctx.state.with_file_name(old)).ok();
+    }
     if let Some((step, secs)) = crate::timer::stuck_step(ctx, cfg) {
         writeln!(
             out,
@@ -665,12 +659,6 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         writeln!(out, "host history: {e:#}")?;
     }
     if let Some(b) = r.shed() {
-        match crate::shed::add_machines(cfg, r) {
-            Ok(added) => added
-                .iter()
-                .try_for_each(|m| writeln!(out, "shed: machine {m} added"))?,
-            Err(e) => writeln!(out, "shed machines: {e:#}")?,
-        }
         let res = crate::session::stamp::intake(ctx, cfg, &b.wire);
         if let (false, Err(e)) = (crate::shed::version_alert(ctx, cfg, &res)?, &res) {
             writeln!(out, "shed events: {e:#}")?;
@@ -694,7 +682,7 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         writeln!(out, "offline hosts: {e:#}")?;
     }
     crate::link::look(ctx, cfg, r, out, true).map_or_else(|e| drop(writeln!(out, "look: {e:#}")), drop);
-    let on = |n: &&str| crate::compact::drives(ctx, cfg, r, n, out);
+    let on = |n: &&str| crate::reroot::drives(ctx, cfg, r, n, out);
     let fleets: Vec<&str> = cfg.fleet.keys().map(String::as_str).filter(on).collect();
     if !fleets.is_empty() {
         if let Some(_one) = take(ctx, r, "orphans.lock", cfg.limits.pass_max_secs, "") {
@@ -709,15 +697,17 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         anyhow::bail!(crate::config::NO_RUNTIME);
     }
     for f in &fleets {
-        start_pass(ctx, r, out, f)?;
+        start_pass(ctx, cfg, r, out, f)?;
     }
     let secs = (t0.elapsed().as_secs_f64() * 10.0).round() / 10.0;
     std::fs::write(&stamp, format!("{} {secs}", ctx.now)).ok();
     Ok(())
 }
 
-fn start_pass(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
-    if held(ctx, &format!("drive-{fleet}.lock")).is_some() || crate::service::wake(ctx, fleet) {
+fn start_pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
+    let late = 2 * cfg.limits.pass_max_secs + cfg.limits.fast_secs;
+    let fresh = last_pass(ctx, fleet).is_some_and(|t| ctx.now.saturating_sub(t) <= late);
+    if held(ctx, &format!("drive-{fleet}.lock")).is_some() || crate::service::wake(ctx, fleet) && fresh {
         return Ok(());
     }
     let args = crate::runner::argv(&["drive", fleet]);
@@ -733,7 +723,7 @@ pub fn chores(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
         writeln!(out, "budget: {e:#}")?;
     }
     crate::check::hogs(ctx, cfg, r, out).unwrap_or_else(|e| crate::stderr!("drover: lane-hog: {e:#}"));
-    for name in cfg.fleet.keys().filter(|n| crate::compact::drives(ctx, cfg, r, n, out)) {
+    for name in cfg.fleet.keys().filter(|n| crate::reroot::drives(ctx, cfg, r, n, out)) {
         crate::gh::backlog(ctx, r, cfg.fleet(name)?, name)
             .unwrap_or_else(|e| crate::stderr!("drover: {name} backlog: {e:#}"));
     }
@@ -782,7 +772,7 @@ pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
             None => return Ok(writeln!(out, "drive: another pass holds {lock}; nothing done")?),
         },
     };
-    if !crate::compact::drives(ctx, cfg, r, fleet, out) {
+    if !crate::reroot::drives(ctx, cfg, r, fleet, out) {
         return Ok(());
     }
     let catchup = if KICK.get().is_some() {
@@ -873,7 +863,7 @@ fn one(
         res = res.or(failed(undriven::cards(ctx, cfg, out, name), out, name, "spawns"));
     }
     laps.lap("spawns");
-    let acts = ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default();
+    let acts = pass::shadow(ctx, cfg, out, name)?;
     if KICK.get().is_none() {
         std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string()).ok();
     }
@@ -944,8 +934,10 @@ fn repair(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         let Some((at, &(ix, nh))) = mine.iter().enumerate().rfind(|(_, (_, e))| e.kind == "needs-human") else {
             continue;
         };
-        if crate::lesson::no_pr(s.build.as_deref()) && nh.str("code") == Some("LANE_ENDS") {
-            crate::lesson::idle_done(ctx, cfg, r, out, (&s.fleet, s.issue), s.build.as_deref())?;
+        if let Some(line) =
+            crate::jobs::empty(cfg, &events, &s.fleet, s.issue).filter(|_| nh.str("code") == Some("LANE_ENDS"))
+        {
+            crate::jobs::close(ctx, cfg, r, out, (&s.fleet, s.issue), line)?;
             continue;
         }
         let from = (mine.iter().take(at)).rposition(|(_, e)| reset.contains(&e.kind.as_str()));
@@ -1143,6 +1135,37 @@ fn turn_prompt(what: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
+fn design_handoffs<'a>(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    agents: &[Session],
+    states: impl Iterator<Item = &'a IssueState>,
+) -> Result<BTreeMap<u64, String>> {
+    let mut unread = BTreeMap::new();
+    for s in states.filter(|s| s.state == "design") {
+        if let Some(why) = crate::design::handoff(ctx, cfg, r, out, agents, s)? {
+            writeln!(
+                out,
+                "{} #{} design-review: worktree unread, held: {why}",
+                s.fleet, s.issue
+            )?;
+            unread.insert(s.issue, why);
+        }
+    }
+    Ok(unread)
+}
+
+fn hold_unread(waits: &mut [(IssueState, Waiting)], unread: &BTreeMap<u64, String>) {
+    for (_, w) in waits.iter_mut().filter(|(s, _)| s.state == "design") {
+        if let Some(why) = unread.get(&w.issue) {
+            (w.who, w.next_cmd, w.promise) = ("none", None, None);
+            w.what = format!("design round unread, no respawn this pass: {why}");
+        }
+    }
+}
+
 fn pass(
     ctx: &Ctx,
     cfg: &Config,
@@ -1192,10 +1215,10 @@ fn pass(
             crate::queue::hashes(&on),
             f.integration
         );
-        let (dsh, n) = (sp.and_then(|e| e.str("harness")) == Some("dsh"), s.issue.to_string());
+        let n = s.issue.to_string();
         let c = ["spawn", fleet, &n, role, "--supersede"];
         let woke = match pane {
-            Some(p) => crate::term::tell(&crate::hosts::On::of(r, sp), dsh, lane, p, &text).is_ok(),
+            Some(p) => crate::term::tell(&crate::hosts::On::of(r, sp), lane, p, &text).is_ok(),
             None => act(ctx, cfg, r, out, &ev, (fleet, None, "respawn"), &c)?.is_none(),
         };
         let d = json!({"agent": lane, "on": on, "respawn": !live});
@@ -1204,25 +1227,23 @@ fn pass(
             emit(&ctx.state, cfg, e)?;
         }
     }
-    for s in st.values().filter(|s| s.fleet == fleet && s.state == "design") {
-        crate::design::handoff(ctx, cfg, r, out, &agents, s)?;
-    }
+    let unread = design_handoffs(ctx, cfg, r, out, &agents, st.values().filter(|s| s.fleet == fleet))?;
     crate::stall::refused(ctx, cfg, r, out, &working(&ctx.state)?, fleet)?;
     silent(ctx, cfg, r, out, &agents, fleet)?;
     if let Err(e) = crate::hotspots::sync(ctx, cfg, r, fleet) {
         writeln!(out, "{fleet} hotspots: {e:#}")?;
     }
     let events = working(&ctx.state)?;
-    let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true, Some(fleet));
-    waits.retain(one);
+    pass::stash(ctx, cfg, fleet, &mut waits);
     let promised = crate::promise::pass(ctx, cfg, fleet, &events, &waits);
     failed(promised, out, fleet, "promises");
     failed(external(ctx, cfg, out, fleet), out, fleet, "outside changes");
     if handoff(ctx, cfg, r, out, fleet, &events, &waits)? {
         waits = waiting::scan(ctx, cfg, seen, &working(&ctx.state)?, &agents, false, Some(fleet));
-        waits.retain(one);
+        waits.retain(|(s, _)| KICK.get().is_none_or(|k| k == s.issue));
     }
+    hold_unread(&mut waits, &unread);
     let conflicts = crate::overlap::preview(ctx, cfg, r, fleet, &events).unwrap_or_default();
     let rev = |w: &Waiting| {
         w.next_cmd
@@ -1274,13 +1295,13 @@ fn pass(
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
         } else if job::planned(ctx, cfg, r, out, (s, w))? {
         } else if w.who == "drive" && w.what == waiting::LESSON_PROMPT {
-            let p = crate::lesson::prompt(fleet, s.issue, s.build.as_deref());
+            let p = crate::jobs::prompt(cfg, &events, (fleet, s.issue));
             let Some(sent) = tell(r, &events, &w.lane, &p) else {
                 continue;
             };
             writeln!(
                 out,
-                "{fleet} #{n} lesson lane prompted: {}",
+                "{fleet} #{n} job lane prompted: {}",
                 if sent { "sent" } else { "not sent" }
             )?;
             let d = json!({"agent": w.lane, "sent": sent});
@@ -1311,9 +1332,13 @@ fn pass(
                 cfg,
                 Event::new(ctx.now, fleet, Some(s.issue), "needs-human", d),
             )?;
-        } else if w.who == "drive" && w.what == waiting::LESSON_CLOSE {
-            crate::lesson::idle_done(ctx, cfg, r, out, (fleet, s.issue), s.build.as_deref())?;
-        } else if pickup::stuck(ctx, cfg, out, f, (&events, &agents), (s, w))? {
+        } else if let Some(line) = crate::jobs::empty(cfg, &events, fleet, s.issue)
+            .filter(|_| w.who == "drive" && w.what == waiting::LESSON_CLOSE)
+        {
+            crate::jobs::close(ctx, cfg, r, out, (fleet, s.issue), line)?;
+        } else if pickup::asleep(ctx, cfg, r, out, f, (&events, &agents), (s, w))?
+            || pickup::stuck(ctx, cfg, out, f, (&events, &agents), (s, w))?
+        {
         } else if w.who == "drive" {
             let gone = w.what.split_once(waiting::NO_PUSH);
             let ends =
@@ -1457,7 +1482,7 @@ fn pass(
                 updated = true;
                 catch_up(ctx, cfg, r, out, fleet)?;
             }
-        } else if let Some(a) = stall::stalled(ctx, cfg, r, &events, &sessions, w) {
+        } else if let Some(a) = stall::stalled(ctx, cfg, &events, &sessions, w) {
             let start = matches!(
                 &a,
                 stall::Act::Respawn(_, "failed start") | stall::Act::Escalate("START_FAILED", _)
@@ -1518,8 +1543,14 @@ fn ci_red(
     let (fleet, n, f) = (s.fleet.as_str(), s.issue.to_string(), cfg.fleet(&s.fleet)?);
     let head = pr.at("headRefOid").as_str().unwrap_or_default();
     let file = state_dir(ctx).join(format!("ci-{fleet}-{n}.md"));
-    let gone = gone.map(|m| format!("FAIL\n\n{m} at {head}: no checks; fix the workflow.\n"));
-    std::fs::write(&file, gone.unwrap_or_else(|| ci_findings(r, f, pr, head)))?;
+    let body = match gone {
+        Some(m) => format!("FAIL\n\n{m} at {head}: no checks; fix the workflow.\n"),
+        None => match gh::final_red(ctx, cfg, r, out, (fleet, s.issue), events, pr)? {
+            Some(twice) => gh::findings(r, f, pr, head, &twice),
+            None => return Ok(()),
+        },
+    };
+    std::fs::write(&file, body)?;
     let file = file.to_string_lossy();
     let args = ["verdict", fleet, &n, "FAIL", "--sha", head, "--file", &file];
     if act(ctx, cfg, r, out, events, (fleet, Some(s.issue), "ci-red"), &args)?.is_some() {
@@ -1568,8 +1599,7 @@ fn no_proof(
             "Drop those findings"
         };
         let text = format!("drover verdict refused your verdict.md: REFUSED {code}: {why}. {fix}.");
-        let tell =
-            |p| crate::term::reply(&on, false, lane, p, &text).is_ok() && crate::term::landed(&on, lane, p, &text);
+        let tell = |p| crate::term::reply(&on, lane, p, &text).is_ok() && crate::term::landed(&on, lane, p, &text);
         let prompted = open.filter(|_| !told).is_some_and(tell);
         let d = json!({"sha": args.get(5), "hash": hash, "agent": lane, "prompted": prompted});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "proof-refused", d))?;
@@ -1659,7 +1689,7 @@ fn repro_refused(
         .filter(|_| !told && agents.iter().any(|a| a.name == lane));
     let block = if code == "NO_REPRO" { "Repro" } else { "Perf" };
     let text = format!("drover verdict refused your verdict.md: REFUSED {code}: {why}. Fix the {block} block.");
-    let tell = |p| crate::term::reply(&on, false, lane, p, &text).is_ok() && crate::term::landed(&on, lane, p, &text);
+    let tell = |p| crate::term::reply(&on, lane, p, &text).is_ok() && crate::term::landed(&on, lane, p, &text);
     let prompted = pane.is_some_and(tell);
     let d = json!({"sha": args.get(5), "hash": hash, "agent": lane, "why": why, "prompted": prompted, "code": code});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "repro-refused", d))?;
@@ -1672,11 +1702,10 @@ fn repro_refused(
 
 pub(crate) fn tell(r: &dyn Runner, events: &[Event], lane: &str, text: &str) -> Option<bool> {
     let sp = crate::events::last_spawn(events, lane);
-    let dsh = sp.and_then(|e| e.str("harness")) == Some("dsh");
     let pane = sp.and_then(|e| e.str("pane")).unwrap_or_default();
     let on = crate::hosts::On::of(r, sp);
     crate::term::awake(&on, lane).ok()?;
-    Some(crate::term::reply(&on, dsh, lane, pane, text).is_ok())
+    Some(crate::term::reply(&on, lane, pane, text).is_ok())
 }
 
 const REV_FIXES: [&str; 2] = ["NO_REPRO", "NO_BASELINE"];
@@ -1950,12 +1979,7 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         let design = n.parse().ok().and_then(|n| queue::wants_design(&events, fleet, n));
         let again = n.parse().is_ok_and(|n| crate::pending::requeued(&events, fleet, n));
         let f = cfg.fleet(fleet)?;
-        let own = n.parse().ok().and_then(|n| {
-            let sp = crate::events::of_issue(&events, fleet, n)
-                .into_iter()
-                .rfind(|e| e.kind == "spawn")?;
-            sp.str("role").filter(|r| matches!(*r, "lesson" | "triage" | "deps"))
-        });
+        let own = n.parse().ok().and_then(|n| crate::jobs::role(&events, fleet, n));
         let c = [
             "spawn",
             fleet,
@@ -2029,36 +2053,6 @@ fn catch_up(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
         &ctx.state,
         cfg,
         Event::new(ctx.now, fleet, None, kinds[0], json!({"reason": reason})),
-    )
-}
-
-fn ci_findings(r: &dyn Runner, f: &crate::config::Fleet, pr: &serde_json::Value, head: &str) -> String {
-    let checks = gh::required(&pr["statusCheckRollup"], &f.required_checks);
-    let failed = checks
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|c| gh::check_state(c) == "failed");
-    let url = failed.and_then(|c| c["detailsUrl"].as_str()).unwrap_or_default();
-    let run = url
-        .split("/runs/")
-        .nth(1)
-        .and_then(|t| t.split('/').next())
-        .unwrap_or_default();
-    let log = (!run.is_empty()).then(|| ok(r, "gh", &["run", "view", run, "-R", &f.repo, "--log-failed"]).ok());
-    let log = log.flatten().unwrap_or_default();
-    let tail: Vec<&str> = log
-        .lines()
-        .rev()
-        .take(40)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    let what = gh::not_green(&checks).unwrap_or_else(|| "a check failed".into());
-    format!(
-        "FAIL\n\nCI is red at {head}: {what}.\n\n```\n{}\n```\n",
-        crate::lanes::mask(&tail.join("\n"))
     )
 }
 

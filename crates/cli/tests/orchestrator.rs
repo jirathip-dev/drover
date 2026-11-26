@@ -5,24 +5,21 @@ use serde_json::json;
 
 const NOW: u64 = 1_000_000;
 
-fn config(harness: &str, dir: &std::path::Path) -> String {
+fn config(dir: &std::path::Path) -> String {
     let (ins, mem) = (dir.join("orchestrator.md"), dir.join("memory"));
     std::fs::write(&ins, "Grill before filing.").unwrap();
     std::fs::create_dir_all(&mem).unwrap();
     std::fs::write(mem.join("owner.md"), "The owner reads on a phone.").unwrap();
     format!(
-        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"{harness}\"\n\n[orchestrator]\ninstructions = \"{}\"\nmemory = \"{}\"\n",
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n\n[orchestrator]\ninstructions = \"{}\"\nmemory = \"{}\"\n",
         ins.display(),
         mem.display()
     )
 }
 
-fn setup(name: &str, harness: &str) -> drover::Ctx {
+fn setup(name: &str) -> drover::Ctx {
     let d = tmpdir(name);
-    let c = ctx(&d, &config(harness, &d));
-    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
-    std::fs::create_dir_all(&profile).unwrap();
-    std::fs::write(profile.join("settings.json"), "{}").unwrap();
+    let c = ctx(&d, &config(&d));
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill #12"]).1,
         "t1\n"
@@ -32,7 +29,7 @@ fn setup(name: &str, harness: &str) -> drover::Ctx {
 
 fn acp_setup(name: &str, b: &FakeShed) -> drover::Ctx {
     let d = tmpdir(name);
-    let cfg = config("claude", &d).replace(
+    let cfg = config(&d).replace(
         "[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"",
         "[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\naccount = \"C\"",
     );
@@ -76,23 +73,6 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
         .into_iter()
         .filter(|e| e.kind == kind)
         .collect()
-}
-
-fn shed_setup(name: &str, harness: &str) -> (drover::Ctx, FakeShed) {
-    let c = setup(name, harness);
-    let b = FakeShed::attached(&c);
-    (c, b)
-}
-
-fn start_lines(b: &FakeShed) -> Vec<String> {
-    let sent = b.sent("orchestrator-t1");
-    sent.into_iter().filter(|t| t.starts_with("exec ")).collect()
-}
-
-fn sleep_idle(c: &drover::Ctx, b: &FakeShed, now: u64) {
-    b.set("orchestrator-t1", |t| t["reported"] = json!({"state": "idle"}));
-    assert_eq!(run(&at(c, now), &Fake::default(), &["check"]).0, 0);
-    assert!(!b.has("orchestrator-t1"), "{:?}", b.methods());
 }
 
 #[test]
@@ -184,6 +164,8 @@ fn a_thread_starts_sleeps_when_idle_and_restarts_with_its_history() {
     let calls = shed_calls(&f);
     assert!(calls[0].starts_with(&head), "{calls:?}");
     assert!(calls[1].ends_with("[t1] owner: tests first"), "{calls:?}");
+    let history = format!("The thread so far is in {}, the last message new.", thread.display());
+    assert!(calls[1].contains(&history), "{calls:?}");
     assert_eq!(*kinds(&c, "orchestrator-start")[1].val("resumed"), json!(false));
     assert_eq!(
         std::fs::read_to_string(&thread).unwrap(),
@@ -200,119 +182,9 @@ fn a_thread_starts_sleeps_when_idle_and_restarts_with_its_history() {
 }
 
 #[test]
-fn a_shed_orchestrator_resumes_its_session() {
-    let (c, b) = shed_setup("orchestrator-resume", "claude");
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "say", "t1", "what should #12 cover?"]).0,
-        0
-    );
-    let dir = c.state.with_file_name("orchestrator").join("t1");
-    let made = b.last("run");
-    assert_eq!(
-        (made["name"].as_str(), made["cwd"].as_str()),
-        (Some("orchestrator-t1"), Some(dir.to_str().unwrap()))
-    );
-    let st = &kinds(&c, "orchestrator-start")[0];
-    let session = st.str("session").unwrap().to_string();
-    assert_eq!((session.len(), st.val("resumed").clone()), (36, json!(false)));
-    assert_eq!(
-        (st.str("pane"), st.str("runtime")),
-        (Some("orchestrator-t1"), Some("shed"))
-    );
-    let sent = b.sent("orchestrator-t1");
-    assert!(
-        sent[0].starts_with("export DROVER_LANE='sendmeter:-:orchestrator'"),
-        "{sent:?}"
-    );
-    let first = &start_lines(&b)[0];
-    assert!(first.starts_with("exec 'claude' "), "{first}");
-    assert!(first.contains(&format!("'--session-id' '{session}'")), "{first}");
-    assert!(
-        first.contains("--append-system-prompt-file") && !first.contains("--resume"),
-        "{first}"
-    );
-    let kick = format!(
-        "'Read {} and act on it. The thread so far is in {}, the last message new.'",
-        dir.join(".brief.md").display(),
-        dir.join(".thread.md").display()
-    );
-    assert!(first.contains(&kick), "{first}");
-    b.set("orchestrator-t1", |t| t["reported"] = json!({"state": "idle"}));
-    assert_eq!(
-        run(&at(&c, NOW + 60), &Fake::default(), &["thread", "say", "t1", "scope"]).0,
-        0
-    );
-    assert_eq!(b.sent("orchestrator-t1").last().unwrap(), "[t1] owner: scope");
-    assert_eq!(b.last("keys"), json!({"name": "orchestrator-t1", "keys": ["Enter"]}));
-    assert_eq!(b.all("run").len(), 1, "no second start");
-    sleep_idle(&c, &b, NOW + 60 + 31 * 60);
-    assert_eq!(
-        run(
-            &at(&c, NOW + 3600),
-            &Fake::default(),
-            &["thread", "say", "t1", "tests first"]
-        )
-        .0,
-        0
-    );
-    let resumed = start_lines(&b).pop().unwrap();
-    assert!(resumed.contains(&format!("'--resume' '{session}'")), "{resumed}");
-    assert!(!resumed.contains("--session-id"), "{resumed}");
-    assert!(resumed.contains("'[t1] owner: tests first'"), "{resumed}");
-    assert_eq!(*kinds(&c, "orchestrator-start")[1].val("resumed"), json!(true));
-}
-
-#[test]
-fn a_harness_without_resume_gets_the_history_in_its_kick() {
-    let (c, b) = shed_setup("orchestrator-generic", "hermes");
-    assert_eq!(run(&c, &Fake::default(), &["thread", "say", "t1", "first"]).0, 0);
-    run(&c, &Fake::default(), &["thread", "reply", "t1", "noted"]);
-    sleep_idle(&c, &b, NOW + 31 * 60);
-    assert_eq!(
-        run(
-            &at(&c, NOW + 3600),
-            &Fake::default(),
-            &["thread", "say", "t1", "second"]
-        )
-        .0,
-        0
-    );
-    assert!(start_lines(&b).pop().unwrap().starts_with("exec 'hermes' "));
-    let sent = b.sent("orchestrator-t1");
-    let kick = sent.iter().rfind(|t| t.starts_with("Read ")).unwrap();
-    let thread = c.state.with_file_name("orchestrator").join("t1/.thread.md");
-    assert!(
-        kick.contains(&format!("The thread so far is in {}", thread.display())),
-        "{kick}"
-    );
-    assert_eq!(
-        std::fs::read_to_string(thread).unwrap(),
-        "owner: first\nOrchestrator: noted\nowner: second\n"
-    );
-}
-
-#[test]
 fn no_harness_starts_an_agent_with_a_control_character_in_its_argv() {
-    let bad = |b: &FakeShed| {
-        let start = start_lines(b).pop();
-        assert!(start.is_some(), "{:?}", b.sent("orchestrator-t1"));
-        start.filter(|c| c.strip_suffix('\r').unwrap_or(c).contains(char::is_control))
-    };
-    for h in ["claude", "hermes"] {
-        let (c, b) = shed_setup(&format!("orchestrator-argv-{h}"), h);
-        let (code, out) = run(&c, &Fake::default(), &["thread", "say", "t1", "line one\nline\ttwo"]);
-        assert_eq!(code, 0, "{h}: {out}");
-        assert_eq!(bad(&b), None, "{h}: first start");
-        sleep_idle(&c, &b, NOW + 31 * 60);
-        let (code, out) = run(
-            &at(&c, NOW + 3600),
-            &Fake::default(),
-            &["thread", "say", "t1", "and\nagain"],
-        );
-        assert_eq!(code, 0, "{h}: {out}");
-        assert_eq!(bad(&b), None, "{h}: resume");
-    }
-    let (c, _b) = shed_setup("orchestrator-argv-lanes", "claude");
+    let c = setup("orchestrator-argv-lanes");
+    let _b = FakeShed::attached(&c);
     for h in drover::providers::lane_names() {
         for role in ["impl", "rev"] {
             let set = ["set", "sendmeter", role, "--harness", h];
@@ -461,4 +333,64 @@ fn a_rate_limited_orchestrator_tells_the_owner_and_gets_one_continue_at_its_rese
         .into_iter()
         .filter(|e| e.str("text") == Some("scope?"));
     assert_eq!(owner.count(), 1);
+}
+
+fn asleep(c: &drover::Ctx) {
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let d = json!({"thread": "t1", "agent": "orchestrator-t1", "why": "gone"});
+    let e = Event::new(NOW + 60, "sendmeter", None, "orchestrator-sleep", d);
+    drover::events::emit(&c.state, &cfg, e).unwrap();
+}
+
+#[test]
+fn a_conductor_missing_from_the_list_is_gone_only_once_shed_has_no_session() {
+    let b = FakeShed::new();
+    let c = acp_setup("orchestrator-unlisted", &b);
+    assert_eq!(run(&c, &b.cli(&acp(&["env"])), &["thread", "say", "t1", "hello"]).0, 0);
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let f = acp(&["echo"]);
+    let cli = b.cli(&f);
+    let (r, later) = (b.on(&cli), at(&c, NOW + 60));
+    for state in ["running", "hibernated"] {
+        b.set("orchestrator-t1", |t| t["reported"] = json!({"state": state}));
+        let events = read(&c.state).unwrap().to_vec();
+        drover::orchestrator::sleep_idle(&later, &cfg, &r, &events, &[]).unwrap();
+        assert!(kinds(&c, "orchestrator-sleep").is_empty(), "{state}");
+    }
+    b.remove("orchestrator-t1");
+    let events = read(&c.state).unwrap().to_vec();
+    drover::orchestrator::sleep_idle(&later, &cfg, &r, &events, &[]).unwrap();
+    assert_eq!(kinds(&c, "orchestrator-sleep")[0].str("why"), Some("gone"));
+}
+
+#[test]
+fn a_message_to_an_asleep_thread_whose_session_is_hibernated_resumes_it_with_no_new_run() {
+    let b = FakeShed::new();
+    let c = acp_setup("orchestrator-hibernated", &b);
+    assert_eq!(run(&c, &b.cli(&acp(&["env"])), &["thread", "say", "t1", "hello"]).0, 0);
+    b.set("orchestrator-t1", |t| t["reported"] = json!({"state": "hibernated"}));
+    asleep(&c);
+    let f = acp(&["echo"]);
+    let (code, out) = run(&at(&c, NOW + 120), &b.cli(&f), &["thread", "say", "t1", "still there?"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(shed_calls(&f), ["shed send orchestrator-t1 [t1] owner: still there?"]);
+    let starts = kinds(&c, "orchestrator-start");
+    assert_eq!(starts.len(), 2);
+    assert_eq!(*starts[1].val("resumed"), json!(true));
+}
+
+#[test]
+fn an_exited_same_name_session_is_replaced_and_the_replacement_is_logged() {
+    let b = FakeShed::new();
+    let c = acp_setup("orchestrator-exited", &b);
+    assert_eq!(run(&c, &b.cli(&acp(&["env"])), &["thread", "say", "t1", "hello"]).0, 0);
+    b.exit("orchestrator-t1");
+    let f = acp(&["echo"]);
+    let (code, out) = run(&at(&c, NOW + 120), &b.cli(&f), &["thread", "say", "t1", "again"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(b.called("rm", "orchestrator-t1"), "{:?}", b.methods());
+    let calls = shed_calls(&f);
+    assert!(calls[0].starts_with("shed run --acp claude-acp"), "{calls:?}");
+    let starts = kinds(&c, "orchestrator-start");
+    assert_eq!(starts[1].str("replaced"), Some("exited"));
 }

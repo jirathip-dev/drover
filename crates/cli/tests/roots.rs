@@ -23,6 +23,15 @@ impl Runner for Git<'_> {
     }
 }
 
+fn started(f: &Fake) -> Vec<String> {
+    let calls = f.calls.borrow();
+    calls
+        .iter()
+        .filter(|c| c.starts_with("shed run --acp"))
+        .cloned()
+        .collect()
+}
+
 fn git(dir: &Path, a: &[&str]) -> String {
     let o = std::process::Command::new("git")
         .arg("-C")
@@ -69,7 +78,7 @@ fn repo(label: &str) -> Repo {
     git(&local, &["branch", "-q", "issue-12", "origin/issue-12"]);
     let roots = format!("roots = [\"{}\", \"{}\"]", nvme.display(), internal.display());
     let cfg = CONFIG
-        .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+        .replace("harness  =  \"claude\"", "harness = \"claude\"")
         .replace("/tmp/does-not-matter/sendmeter", &local.to_string_lossy())
         + &format!("\n[hosts.mini]\n{roots}\n");
     let c = ctx(&d, &cfg);
@@ -152,7 +161,7 @@ fn eject_saves_and_restarts_a_live_lane_on_the_next_root_then_reports_safe() {
     );
     let new = r.internal.join("sendmeter/issue-12");
     assert!(r.sh.called("kill", AGENT), "the live lane stopped first");
-    assert_eq!(r.sh.last("run")["cwd"], json!(new), "and ran again there");
+    assert_eq!(r.sh.lock().terms[AGENT]["cwd"], json!(new), "and ran again there");
     let sp = spawns(&r.c);
     let last = sp.last().unwrap();
     assert_eq!((sp.len(), last.str("root")), (2, Some(&*r.internal.to_string_lossy())));
@@ -243,7 +252,7 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
         assert!(drover::events::path_in(&r.c.state, rel).is_file(), "{out}");
     }
     let target = format!("{}'", b.join(AGENT).display());
-    let sent = r.sh.sent(AGENT);
+    let sent = started(&f);
     assert!(
         sent.iter().any(|c| c.contains("TARGET_DIR=") && c.contains(&target)),
         "{target} {sent:?}"
@@ -304,7 +313,7 @@ fn a_swift_fleets_lane_gets_its_own_xcode_and_swiftpm_folders_cloned_warm() {
     let (code, out) = run(&r.c, &Git(&f), &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out}");
     let (xcode, spm) = (b.join(AGENT).join("xcode"), b.join(AGENT).join("swiftpm"));
-    let sent = r.sh.sent(AGENT).join("\n");
+    let sent = started(&f).join("\n");
     for (k, d) in [("DROVER_DERIVED_DATA", &xcode), ("DROVER_SWIFT_SCRATCH", &spm)] {
         assert!(sent.contains(&format!("{k}='{}'", d.display())), "{k}: {sent}");
     }

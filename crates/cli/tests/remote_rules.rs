@@ -10,7 +10,7 @@ const NOW: u64 = 1_000_000;
 const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- ";
 
 fn setup(name: &str) -> (drover::Ctx, FakeShed) {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     let c = ctx(
         &tmpdir(name),
         &format!("{base}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n"),
@@ -26,6 +26,7 @@ fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let sh = FakeShed::new();
     sh.attach(&c);
+    remote::proxied(&c);
     (c, sh)
 }
 
@@ -48,16 +49,7 @@ fn remote_fake() -> Fake {
         .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-fn shed_call_at(r: &Fake, method: &str) -> Option<usize> {
-    let calls = r.calls.borrow();
-    let at = calls.iter().enumerate().filter(|(_, c)| c.contains("'shed' 'connect'"));
-    let inputs = r.inputs.borrow();
-    let sent = inputs.iter().filter(|(c, _)| c.contains("'shed' 'connect'"));
-    let want = format!("\"method\":\"{method}\"");
-    at.zip(sent).find(|(_, (_, i))| i.contains(&want)).map(|((n, _), _)| n)
-}
-
-fn lane_env(r: &Fake, bazzite: &FakeShed, remote: &Path) -> BTreeMap<String, String> {
+fn lane_env(r: &Fake, remote: &Path) -> BTreeMap<String, String> {
     let written: BTreeMap<String, String> = r
         .inputs
         .borrow()
@@ -67,8 +59,7 @@ fn lane_env(r: &Fake, bazzite: &FakeShed, remote: &Path) -> BTreeMap<String, Str
             Some((path.to_string(), text.clone()))
         })
         .collect();
-    let sent = bazzite.sent("sendmeter-impl-12");
-    let export = sent.iter().find(|t| t.starts_with("export ")).unwrap();
+    let export = remote::start_line(r, "bazzite").unwrap();
     let mut env = BTreeMap::new();
     for (i, (k, v)) in export.split_whitespace().filter_map(|w| w.split_once('=')).enumerate() {
         let v = v.trim_end_matches('\r').trim_matches('\'');
@@ -125,14 +116,14 @@ fn hook_there(env: &BTreeMap<String, String>, remote: &Path, toml: Option<&str>,
 fn a_remote_lanes_hook_judges_a_fleet_its_host_never_heard_of() {
     let (c, _sh) = setup("remote-rules");
     let (r, bazzite) = (remote_fake(), FakeShed::new());
-    let o = OverSsh {
+    let o = remote::Acp::over(OverSsh {
         f: &r,
         hosts: vec![("bazzite", &bazzite)],
-    };
+    });
     let (code, out) = run(&c, &o, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let remote = tmpdir("remote-rules-bazzite");
-    let env = lane_env(&r, &bazzite, &remote);
+    let env = lane_env(&r, &remote);
     let stale = "[fleet.other]\nrepo = \"o/other\"\nlocal = \"/tmp/other\"\nintegration = \"staging\"\n";
     for toml in [Some(stale), None] {
         let allowed = hook_there(&env, &remote, toml, "git status");
@@ -183,10 +174,10 @@ fn the_rules_file_holds_no_secrets_and_the_lane_may_not_edit_it() {
     std::fs::write(&c.config, text + extra).unwrap();
     secret_file(&c, "API_KEY", "tok-VALUE-123", 0o600);
     let (r, bazzite) = (remote_fake(), FakeShed::new());
-    let o = OverSsh {
+    let o = remote::Acp::over(OverSsh {
         f: &r,
         hosts: vec![("bazzite", &bazzite)],
-    };
+    });
     let (code, out) = run(&c, &o, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let wt = "/home/me/.local/share/drover/work/sendmeter/issue-12";
@@ -226,10 +217,10 @@ fn the_rules_file_holds_no_secrets_and_the_lane_may_not_edit_it() {
 fn a_config_change_marks_a_live_remote_lane_rules_stale_until_respawned() {
     let (c, _sh) = setup("remote-rules-stale");
     let (f, bazzite) = (remote_fake(), FakeShed::new());
-    let r = OverSsh {
+    let r = remote::Acp::over(OverSsh {
         f: &f,
         hosts: vec![("bazzite", &bazzite)],
-    };
+    });
     assert_eq!(
         run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]).0,
         0
@@ -247,7 +238,8 @@ fn a_config_change_marks_a_live_remote_lane_rules_stale_until_respawned() {
     assert!(board.contains("rules stale"), "{board}");
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
-    assert_eq!(bazzite.all("run").len(), 2, "the lane restarted on bazzite's shed");
+    let start = format!("{SSH}'shed' 'run' '--acp'");
+    assert_eq!(f.count(&start), 2, "the lane restarted on bazzite's shed");
     let (_, board) = run(&c, &r, &["board", "sendmeter"]);
     assert!(!board.contains("rules stale"), "{board}");
 }
@@ -256,16 +248,16 @@ fn a_config_change_marks_a_live_remote_lane_rules_stale_until_respawned() {
 fn spawn_syncs_the_lanes_profile_on_a_host_with_no_fleet_toml() {
     let (c, _sh) = setup("remote-rules-profile");
     let (r, bazzite) = (remote_fake(), FakeShed::new());
-    let o = OverSsh {
+    let o = remote::Acp::over(OverSsh {
         f: &r,
         hosts: vec![("bazzite", &bazzite)],
-    };
+    });
     assert_eq!(
         run(&c, &o, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]).0,
         0
     );
     let sync = format!("{SSH}'/opt/drover/bin/drover' 'profiles' 'sync' '--profile' 'fleet-impl' '--role' 'impl'");
-    let (at, start) = (r.index(&sync), shed_call_at(&r, "run"));
+    let (at, start) = (r.index(&sync), r.index(&format!("{SSH}'shed' 'run' '--acp'")));
     assert!(at.is_some() && at < start, "{:?}", r.calls.borrow());
     let there = ctx(&tmpdir("remote-rules-profile-there"), "");
     std::fs::remove_file(&there.config).unwrap();
@@ -301,14 +293,14 @@ fn a_remote_cap_lane_may_write_the_cap_file_and_no_other_lane_may() {
             None => remote_fake(),
         };
         let bazzite = FakeShed::new();
-        let r = OverSsh {
+        let r = remote::Acp::over(OverSsh {
             f: &f,
             hosts: vec![("bazzite", &bazzite)],
-        };
+        });
         let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
         assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
         let remote = tmpdir(&format!("{name}-bazzite"));
-        let env = lane_env(&f, &bazzite, &remote);
+        let env = lane_env(&f, &remote);
         let out = hook_there(&env, &remote, None, "printf 'line_cap = 53500' > ci/cap.d/x.toml");
         assert!(!remote.join("state/cache").exists());
         assert_eq!(out.contains("REFUSED CAP_FILE"), !allowed, "{title:?}: {out}");
@@ -321,7 +313,7 @@ fn a_remote_cap_lane_may_write_the_cap_file_and_no_other_lane_may() {
 }
 
 struct Disk<'a> {
-    o: OverSsh<'a>,
+    o: remote::Acp<'a, OverSsh<'a>>,
     root: std::path::PathBuf,
     rm_fails: std::sync::atomic::AtomicUsize,
 }
@@ -334,7 +326,7 @@ impl Disk<'_> {
         use std::sync::atomic::Ordering::SeqCst;
         let last = args.last()?;
         if let Some(p) = last.strip_prefix("'rm' '-f' '").and_then(|p| p.strip_suffix('\'')) {
-            self.o.f.calls.borrow_mut().push(format!("ssh {}", args.join(" ")));
+            self.o.r.f.calls.borrow_mut().push(format!("ssh {}", args.join(" ")));
             if self.rm_fails.load(SeqCst) > 0 {
                 self.rm_fails.fetch_sub(1, SeqCst);
                 return Some(Ok(drover::runner::Out {
@@ -379,10 +371,10 @@ fn secret_spawn(name: &str, rm_fails: usize) -> (drover::Ctx, Fake, FakeShed, st
     let (r, bazzite, root) = (remote_fake(), FakeShed::new(), tmpdir(&format!("{name}-disk")));
     {
         let d = Disk {
-            o: OverSsh {
+            o: remote::Acp::over(OverSsh {
                 f: &r,
                 hosts: vec![("bazzite", &bazzite)],
-            },
+            }),
             root: root.clone(),
             rm_fails: rm_fails.into(),
         };
@@ -425,10 +417,10 @@ fn a_remote_spawn_whose_remove_fails_leaves_no_file_once_the_retry_runs() {
         .iter()
         .all(|e| !serde_json::to_string(e).unwrap().contains("tok-VALUE-123")));
     let d = Disk {
-        o: OverSsh {
+        o: remote::Acp::over(OverSsh {
             f: &r,
             hosts: vec![("bazzite", &bazzite)],
-        },
+        }),
         root: root.clone(),
         rm_fails: 0.into(),
     };
@@ -443,11 +435,10 @@ fn a_remote_spawn_whose_remove_fails_leaves_no_file_once_the_retry_runs() {
 
 #[test]
 fn the_lanes_shell_removes_its_secrets_file_once_it_has_sourced_it() {
-    let (_c, _r, bazzite, root) = secret_spawn("remote-secrets-shell", usize::MAX);
+    let (_c, r, _bazzite, root) = secret_spawn("remote-secrets-shell", usize::MAX);
     let f = root.join(ENV_FILE.trim_start_matches('/'));
     assert!(f.exists(), "spawn could not remove it");
-    let sent = bazzite.sent("sendmeter-impl-12");
-    let export = sent.iter().find(|t| t.starts_with("export ")).unwrap();
+    let export = remote::start_line(&r, "bazzite").unwrap();
     let line = export.trim_end().replace(ENV_FILE, &f.display().to_string());
     let o = Command::new("sh")
         .args(["-c", &format!("{line} && printf %s \"$API\"")])
@@ -471,10 +462,10 @@ fn clean_lists_leftover_secrets_files_and_removes_them_with_yes() {
     let gone = "/home/me/.local/share/drover/work/sendmeter/issue-4.env";
     let r = remote_fake().reply(&format!("{SSH}'sh' '-c' 'cd && cd"), &format!("env\t{gone}\n"));
     let bazzite = FakeShed::new();
-    let o = OverSsh {
+    let o = remote::Acp::over(OverSsh {
         f: &r,
         hosts: vec![("bazzite", &bazzite)],
-    };
+    });
     let (code, dry) = run(&c, &o, &["clean"]);
     assert_eq!(code, 0, "{dry}");
     for p in [

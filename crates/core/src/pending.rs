@@ -164,7 +164,7 @@ pub fn refused(ctx: &Ctx, (fleet, n): (&str, u64), code: &str, why: &str) -> Res
     let soft = SOFT.contains(&code);
     let signals = why.split(" (top:").next().unwrap_or_default();
     let load = code == "HOST_BUSY"
-        && signals.contains("load/cpu")
+        && signals.contains("cpu idle")
         && !signals.contains("pressure")
         && !signals.contains("swap");
     let reason = match () {

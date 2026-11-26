@@ -9,10 +9,10 @@ const T: u64 = 1_000_000;
 const SCREEN: &str = "⏺ Bash(cargo test)\n  ⎿ PANE-SECRET-TEXT ok\n";
 
 fn fixture(name: &str) -> (drover::Ctx, OnShed) {
-    fixture_at(name, "2", "3.90")
+    fixture_at(name, "2", 61)
 }
 
-fn fixture_at(name: &str, pressure: &str, load: &str) -> (drover::Ctx, OnShed) {
+fn fixture_at(name: &str, pressure: &str, idle: u32) -> (drover::Ctx, OnShed) {
     let cfg = format!("[serve]\nallowed_hosts = [\"mac.example\"]\n\n{CONFIG}\n[fleet.tangelo]\nrepo = \"o/tangelo-apps\"\nlocal = \"/p/tangelo-apps\"\nintegration = \"staging\"\n");
     let c = ctx(&tmpdir(name), &cfg);
     let spawn = |fleet: &str, issue: u64, ts: u64, agent: &str| {
@@ -55,7 +55,7 @@ fn fixture_at(name: &str, pressure: &str, load: &str) -> (drover::Ctx, OnShed) {
                 "sysctl -n kern.memorystatus_vm_pressure_level",
                 &format!("{pressure}\n"),
             )
-            .reply("sysctl -n vm.loadavg", &format!("{{ {load} 1.20 1.00 }}\n"))
+            .reply("iostat", &iostat(idle))
             .reply("sysctl -n hw.ncpu", "10\n")
             .reply("vm_stat", "Swapouts: 100.\n"),
     );
@@ -144,13 +144,13 @@ fn the_herd_read_shape_on_a_fixture() {
     assert_eq!(
         (&h["limit"], &h["pressure"], &h["swapouts"], &h["gate"]),
         (
-            &json!(2.5),
+            &json!(85.0),
             &json!("warn"),
             &json!(null),
             &json!("memory pressure warn")
         )
     );
-    assert!((h["load"].as_f64().unwrap() - 0.39).abs() < 1e-9, "{h}");
+    assert!((h["load"].as_f64().unwrap() - 39.0).abs() < 1e-9, "{h}");
 }
 
 #[test]
@@ -333,12 +333,12 @@ fn scene_probe(theme: &str, level: &str, reduce: bool, check: &str) -> Vec<Strin
 }
 
 fn scene_at(query: &str, name: &str, pick: &str, level: &str, reduce: bool, check: &str) -> Vec<String> {
-    let (pressure, load) = match level {
-        "calm" => ("1", "1.00"),
-        "busy" => ("1", "15.00"),
-        _ => ("2", "3.90"),
+    let (pressure, idle) = match level {
+        "calm" => ("1", 80),
+        "busy" => ("1", 40),
+        _ => ("2", 61),
     };
-    let (c, r) = fixture_at(&format!("load-{name}-{level}"), pressure, load);
+    let (c, r) = fixture_at(&format!("load-{name}-{level}"), pressure, idle);
     append(
         &c.state,
         &Event::new(

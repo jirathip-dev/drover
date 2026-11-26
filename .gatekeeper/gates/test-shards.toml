@@ -1,5 +1,0 @@
-about = "every test target is in exactly one shard of scripts/test-shards.txt (#1162)"
-fix = "put the new test target in one shard; `scripts/test-shards.sh balance <nextest logs>` rewrites the list"
-budget_secs = 5
-paths = ["crates/*/tests/**", "scripts/test-shards.sh", "scripts/test-shards.txt"]
-run = "scripts/test-shards.sh check"

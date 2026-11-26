@@ -1,6 +1,6 @@
 # Orchestrator chat (#355, steps 1 to 3)
 
-Talk to a **orchestrator** through drover itself, with no Hermes needed. A **thread** belongs to one fleet's repo, or
+Talk to a **orchestrator** through drover itself. A **thread** belongs to one fleet's repo, or
 to `all` for cross-cutting work. Each thread is talked through by one orchestrator lane.
 
 ```sh
@@ -29,8 +29,7 @@ and restores the terminal. The lane hook refuses it (`OWNER_ONLY`).
 
 - **Role `orchestrator`, any harness:** `[fleet.<n>.role.orchestrator]` takes the usual role keys (`harness`, `model`,
   `effort`, `mcp`). An `all` thread uses the first fleet that defines one. Without
-  one (#401), a fleet's orchestrator is its `impl` role on profile `lane-orchestrator` (which `profiles sync` writes; a
-  Hermes impl needs `hermes profile create lane-orchestrator`); only a fleet with neither refuses `NO_ORCHESTRATOR`.
+  one (#401), a fleet's orchestrator is its `impl` role on profile `lane-orchestrator` (which `profiles sync` writes); only a fleet with neither refuses `NO_ORCHESTRATOR`.
   `drover spawn … orchestrator` refuses `BAD_VALUE`.
 - **[config] → Orchestrator** shows the role in effect (`default: impl` or `set`) with tappable harness, model (the
   models the fleet's roles use) and effort choices. A tap from a paired device writes `[fleet.<n>.role.orchestrator]` in
@@ -41,15 +40,14 @@ and restores the terminal. The lane hook refuses it (`OWNER_ONLY`).
 
   ```toml
   [chat]
-  harness = "claude"   # claude | hermes | dsh; another harness than the role's drops its model
+  harness = "claude"   # the only harness (#1726)
   model = "opus"
   effort = "high"
   ```
 
   A thread keeps the harness it starts on for good (`drover thread new … --harness <h>`, or the empty thread's
   harness chip; a thread from before #404 has the default). Its composer's model and effort chips offer the models
-  that roles (or `[chat]`) on its harness use and the harness's efforts (no model chip where a profile owns the
-  model: Hermes, dsh). A pick logs `thread-model`, shows `model sonnet · effort low from the next turn`, and the
+  that roles (or `[chat]`) on its harness use and the harness's efforts. A pick logs `thread-model`, shows `model sonnet · effort low from the next turn`, and the
   next message resumes the orchestrator's session on it. The header reads `repo · harness · model`.
 - **Model list (#860):** the model chip also offers fleet.toml's top-level `models = [...]`; add a model there (via
   `drover config propose`) and the chip offers it. A send on a pick no longer offered is refused `BAD_VALUE` with a
@@ -149,7 +147,7 @@ thread tap or push opens `#threads/<id>` (back returns to the list), and its con
 thread. Files and queued messages come with #1086 and #1087.
 
 - **Archive (#405):** the thread's orchestrator stops (its pane closes; the folder, uploads and log stay) and the
-  thread folds under "N archived"; `restore` brings it back and its next message resumes the same session. CLI:
+  thread moves to the "archived" row, its own list loaded only when opened (#1622); `restore` brings it back and its next message resumes the same session. CLI:
   `drover thread archive|restore <thread>` (logged `thread-archive` / `thread-restore`). Nothing is deleted.
 - **Writes** are `POST /thread` (`op` = `new`, `say` with an optional base64 file of at most 10 MB, `answer`,
   `read`, `retry`; #407 `queue`, `unqueue`, `steer`, `stop`) from a paired device, 10 a minute. #403: `new` and `say`

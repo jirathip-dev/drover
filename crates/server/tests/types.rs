@@ -38,6 +38,12 @@ macro_rules! each {
             ChatRepo,
             Chip,
             ThreadRow,
+            Rows,
+            RowView,
+            drover_server::thread::Row,
+            drover_server::thread::Target,
+            drover_server::thread::RowKind,
+            drover_server::thread::Push,
             Link,
             ThreadView,
             QueuedMsg,
@@ -110,6 +116,7 @@ macro_rules! each {
             Job,
             ConductorAttach,
             AttachEnv,
+            Said,
             propose::ConfigView,
             propose::ConfigField,
             propose::ConfigChange,
@@ -180,7 +187,6 @@ fn demo() -> (Ctx, Vec<Event>) {
         config: demo.join("fleet.toml"),
         state: demo.join("events.jsonl"),
         worktrees: d.join("wt"),
-        homes: [("hermes", d.join("hermes"))].into(),
         exe: "drover".into(),
         now: events.iter().map(|e| e.ts).max().unwrap_or(0) + 60,
         home: d.join("home"),
@@ -230,7 +236,7 @@ fn serde_json_fits_the_types() {
     ));
     checks.extend(fold(&events).values().map(|s| ("IssueState", json!(s))));
     let row = hosts::Row {
-        load_cpu: Some(0.4),
+        cpu_idle: Some(60.0),
         pressure: Some(1),
         procs: Some([1, 2, 3, 4, 5]),
         ..Default::default()

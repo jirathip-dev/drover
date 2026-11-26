@@ -88,7 +88,6 @@ fn service(c: &drover::Ctx, bin: &std::path::Path, api: &str) -> (Proc, u64) {
         .env("FLEET_CONFIG", &c.config)
         .env("FLEET_STATE", &c.state)
         .env("FLEET_WORKTREES", &c.worktrees)
-        .env("FLEET_HERMES_PROFILES", &c.homes["hermes"])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
@@ -122,6 +121,8 @@ fn a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes() {
     );
     let mut c = ctx(&d, &cfg);
     c.now = drover::now();
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
+    synced(&c);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "1"]).0, 0);
     let (bin, log) = (d.join("bin"), d.join("gh.log"));
     std::fs::create_dir_all(&bin).unwrap();
@@ -133,8 +134,11 @@ fn a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes() {
                 log.display()
             ),
         ),
-        ("hermes", "exit 0".into()),
-        ("shed", "exit 0".into()),
+        ("claude", "exit 0".into()),
+        (
+            "shed",
+            "case \"$*\" in 'help run') echo '--meta <JSON>';; 'agents --json') echo '[{\"id\": \"claude-acp\", \"cmd\": [\"claude-acp\"]}]';; esac".into(),
+        ),
     ];
     for (name, body) in tools {
         let p = bin.join(name);

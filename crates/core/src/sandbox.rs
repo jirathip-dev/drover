@@ -49,16 +49,6 @@ pub fn tmp(p: &Plan) -> PathBuf {
         .join("tmp")
 }
 
-/// `start` (a `pane run` line) as `srt` running it with the lane's rules, when the lane is sandboxed.
-pub fn wrap(p: &Plan, mut start: Vec<String>) -> Vec<String> {
-    if let (Some(_), Some(line)) = (p.sandbox, start.get_mut(3)) {
-        let tmp = format!("{}={}", providers::SANDBOX_TMP_ENV, tmp(p).display());
-        let args = [tmp, "srt".into(), "--settings".into(), file(p).display().to_string()];
-        *line = format!("{} {line}", crate::hosts::quote("env", &args));
-    }
-    start
-}
-
 /// The lane's srt settings: writes to its worktree, build and temp; reads of system, toolchains and its repo; no other home folder; network to `HOSTS` only.
 pub fn settings(ctx: &Ctx, f: &Fleet, p: &Plan, local: bool) -> Value {
     let h = home();

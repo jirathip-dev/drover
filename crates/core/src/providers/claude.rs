@@ -1,5 +1,4 @@
 use super::{hook_command, Dialect, Header, Provider, Proxy};
-use crate::term;
 use crate::runner::Runner;
 use crate::spawn::{role_prompt, Plan};
 use crate::Ctx;
@@ -62,6 +61,9 @@ pub fn root(ctx: &Ctx) -> PathBuf {
 }
 
 impl Provider for Claude {
+    fn sessions(&self) -> Option<&'static str> {
+        Some(".claude/projects")
+    }
     fn vendor(&self) -> Option<&'static str> {
         Some("anthropic")
     }
@@ -111,50 +113,8 @@ impl Provider for Claude {
         )
     }
 
-    fn start_cmd(&self, ctx: &Ctx, p: &Plan, pane: &str) -> Vec<String> {
-        let dir = root(ctx).join(&p.profile);
-        let mut a = vec![
-            "--dangerously-skip-permissions".to_string(),
-            "--settings".into(),
-            dir.join("settings.json").to_string_lossy().into(),
-            "--append-system-prompt-file".into(),
-            dir.join("role.md").to_string_lossy().into(),
-        ];
-        if let Some(m) = &p.model {
-            a.extend(["--model".into(), m.clone()]);
-        }
-        if let Some(e) = p.effort.as_deref().filter(|e| *e != "none") {
-            a.extend(["--effort".into(), e.into()]);
-        }
-        a.extend(["--name".into(), p.title.clone()]);
-        a.extend([
-            "--mcp-config".into(),
-            p.mcp_file.to_string_lossy().into(),
-            "--strict-mcp-config".into(),
-        ]);
-        if let Some((id, resume)) = &p.session {
-            a.extend([if *resume { "--resume" } else { "--session-id" }.into(), id.clone()]);
-        }
-        a.push(p.kick.clone());
-        term::start_argv("claude", pane, &a)
-    }
-
-    fn resumes(&self) -> bool {
-        true
-    }
-
     fn takes_model(&self) -> bool {
         true
-    }
-
-    fn kick_cmds(&self, p: &Plan, _pane: &str) -> Vec<Vec<String>> {
-        vec![term::wait_working_argv(&p.agent, "20000")]
-    }
-
-    fn kick(&self, r: &dyn Runner, p: &Plan, pane: &str) -> Result<bool> {
-        self.kick_cmds(p, pane)
-            .first()
-            .map_or(Ok(false), |c| Ok(term::exec(r, c)?.code == 0))
     }
 
     fn env(&self) -> &'static [&'static str] {

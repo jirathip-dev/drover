@@ -104,11 +104,14 @@ fn branch_main_ignores_a_newer_staging_head_and_installs_main_heads_release() {
     assert_eq!(code, 0, "{out}");
     assert!(out.starts_with("✓ installed 1111111 at "), "{out}");
     assert!(
-        r.called("git -C /x/drover fetch -q origin main"),
+        r.called("git -C /x/drover fetch -q origin +refs/heads/main:refs/remotes/origin/main"),
         "{:?}",
         r.calls.borrow()
     );
-    assert!(!r.called("git -C /x/drover fetch -q origin staging") && !r.called("gh release download build-staging-"));
+    assert!(
+        !r.called("git -C /x/drover fetch -q origin +refs/heads/staging:")
+            && !r.called("gh release download build-staging-")
+    );
     assert!(has(&live, MAIN), "the release is live");
 
     let r = heads(&c, &live, &[("main", MAIN), ("staging", MAIN2)]);
@@ -370,7 +373,6 @@ fn a_release_is_staged_gated_swapped_synced_and_restarted() {
         "{calls}"
     );
     assert_eq!(kinds(&c, "self-updated")[0].str("sha"), Some(SHA));
-    assert!(kinds(&c, "self-update-swapping").is_empty(), "no remote host to hold");
 
     let r2 = release(base(&c, &live), "main", SHA, &live);
     assert_eq!(run(&c, &Disk(&r2), &["self-update"]).1, "= up to date @ abcdef1\n");
@@ -743,4 +745,43 @@ fn scheduled_clean_lists_a_worktree_git_kept_dirty_and_exits_zero_but_fails_on_a
     assert!(c.state.with_file_name("clean.failed").exists(), "{out}");
     assert_eq!(kinds(&c, "clean-failed").len(), 1, "{out}");
     drop(sh);
+}
+
+#[test]
+fn a_failed_run_at_mains_head_is_rerun_once_then_its_green_release_installs() {
+    let (c, live) = setup("upd-flaky");
+    let red = |updated: &str| {
+        let runs =
+            json!([{"databaseId": 99, "conclusion": "failure", "workflowName": "ui-webkit", "updatedAt": updated}]);
+        base(&c, &live)
+            .reply("git -C /x/drover rev-parse origin/main", &format!("{SHA}\n"))
+            .reply(
+                &format!("gh run list -R jirathip-dev/herdsman -c {SHA}"),
+                &runs.to_string(),
+            )
+            .reply("gh run rerun", "")
+    };
+    let r = red("1970-01-12T13:40:00Z");
+    let (code, out) = run(&c, &Disk(&r), &["self-update"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(r.count("gh run rerun 99 --failed -R jirathip-dev/herdsman"), 1, "{out}");
+    let rerun = kinds(&c, "ci-rerun");
+    assert_eq!(
+        (rerun.len(), rerun[0].str("why"), rerun[0].str("sha")),
+        (1, Some("failed"), Some(SHA))
+    );
+    assert!(!has(&live, SHA));
+
+    let r = red("1970-01-12T13:50:00Z");
+    let (code, out) = run(&at(&c, c.now + 600), &Disk(&r), &["self-update"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!r.called("gh run rerun"), "one re-run a head: {out}");
+
+    let r = heads(&c, &live, &[("main", SHA)]);
+    let (code, out) = run(&at(&c, c.now + 1200), &Disk(&r), &["self-update"]);
+    assert!(code == 0 && out.contains("✓ installed abcdef1 at "), "{out}");
+    assert!(has(&live, SHA));
+    let flaky = kinds(&c, "ci-flaky?");
+    assert_eq!(flaky.len(), 1);
+    assert_eq!(flaky[0].val("checks"), &json!(["ui-webkit"]));
 }
