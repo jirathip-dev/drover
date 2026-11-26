@@ -1303,19 +1303,7 @@ impl Config {
                 bail!("chat.effort: harness {h} does not support effort \"{e}\"");
             }
         }
-        let named = c.fleet.iter().flat_map(|(n, f)| {
-            let roles = f
-                .role
-                .iter()
-                .map(move |(r, x)| (format!("fleet.{n}.role.{r}"), &x.account));
-            std::iter::once((format!("fleet.{n}"), &f.account)).chain(roles)
-        });
-        if let Some((at, a)) = named
-            .filter_map(|(at, a)| Some((at, a.as_deref()?)))
-            .find(|(_, a)| !account_ok(a))
-        {
-            bail!("{at}.account: \"{a}\" is no shed account name (a-z, 0-9, -, _)");
-        }
+        accounts_ok(&c)?;
         let mut c = c;
         c.retired = retired(&raw);
         c.old_names = raw.contains_key("conductor");
@@ -1652,10 +1640,26 @@ impl Fleet {
     }
 }
 
-fn account_ok(a: &str) -> bool {
-    !a.is_empty()
-        && a.chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "-_".contains(c))
+fn accounts_ok(c: &Config) -> Result<()> {
+    let ok = |a: &str| {
+        !a.is_empty()
+            && a.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "-_".contains(c))
+    };
+    let named = c.fleet.iter().flat_map(|(n, f)| {
+        let roles = f
+            .role
+            .iter()
+            .map(move |(r, x)| (format!("fleet.{n}.role.{r}"), &x.account));
+        std::iter::once((format!("fleet.{n}"), &f.account)).chain(roles)
+    });
+    if let Some((at, a)) = named
+        .filter_map(|(at, a)| Some((at, a.as_deref()?)))
+        .find(|(_, a)| !ok(a))
+    {
+        bail!("{at}.account: \"{a}\" is no shed account name (a-z, 0-9, -, _)");
+    }
+    Ok(())
 }
 
 /// The shed account an ACP run asks for: `auto` (shed picks a signed-in named one, moving at a limit) or one by name.

@@ -93,7 +93,10 @@ fn an_account_lanes_banner_holds_nothing_and_account_ls_holds_new_lanes() {
     sh.lock().accounts = vec![serde_json::json!({"provider": "claude", "name": "work", "state": "limited"})];
     let (code, out) = spawn_run(&c, 14);
     assert_eq!(code, 3, "{out}");
-    assert!(out.contains("LOGIN_NEEDED: claude account work hit its usage limit"), "{out}");
+    assert!(
+        out.contains("LOGIN_NEEDED: claude account work hit its usage limit"),
+        "{out}"
+    );
     check_shows(&c, &sh, ("rate-limited", ""));
     assert_eq!(kinds(&c, "usage-limit").len(), 1, "one alert, from account.ls");
     sh.lock().accounts = vec![serde_json::json!({"provider": "claude", "name": "work", "state": "ready"})];

@@ -122,7 +122,6 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, vi
     Ok(pane.into())
 }
 
-/// A [sign in] for shed account `provider/account` on the main host: `account.login`'s terminal is the sheet's pane; logs `setup`.
 fn login(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (provider, account): (&str, &str), via: &str) -> Result<String> {
     let w = r.shed().or_else(|| cfg.shed()).context("no shed runtime")?.wire;
     let p = crate::shed::proto::AccountLogin {

@@ -95,7 +95,6 @@ pub fn admit(cfg: &Config, r: &dyn Runner, agent: &str, a: &Account) -> Result<(
     }
 }
 
-/// Every agent and account a role or an orchestrator of a shed fleet starts on over ACP.
 fn used(cfg: &Config) -> BTreeSet<(String, Account)> {
     let acp = cfg.fleet.iter().filter(|(n, _)| cfg.shed_for(n).is_some());
     let roles = acp.flat_map(|(n, f)| {
