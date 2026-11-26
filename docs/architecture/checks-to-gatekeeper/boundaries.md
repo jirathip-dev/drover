@@ -1,4 +1,7 @@
-# The 5 checks in gatekeeper: module boundaries and statecharts (#1643)
+# The 4 checks in gatekeeper: module boundaries and statecharts (#1643)
+
+Revised 2026-11-26: the cap check is out of both repos (#1812; `adr.md`, decision 13). Its way out is the second
+statechart.
 
 ## Where the code goes
 
@@ -6,25 +9,24 @@
 gatekeeper
   crates/gatekeeper-model/src/names.rs       PrivateNames, the rules report's types
   crates/gatekeeper-engine/src/check/
-    cap.rs  rules.rs  hygiene.rs  pr_body.rs   one file a check (collected; mod.rs is generated)
+    rules.rs  hygiene.rs  pr_body.rs           one file a check (collected; mod.rs is generated)
     arch.rs                                    the entry: reads arch.toml, calls the parts, joins the findings
   crates/gatekeeper-engine/src/arch/           arch's parts, each under 400 lines (collected)
     config.rs  layers.rs  bans.rs  sizes.rs  frozen.rs  generated.rs  comments.rs  docs.rs  baseline.rs
   crates/gatekeeper/src/cmd/check.rs           reads the two env vars once, fills RunCtx
   crates/gatekeeper/src/cmd/fixture.rs         new verb: writes one fixture case's files to a folder (G3)
-  packs/core/gates/{cap,rules,arch,hygiene,pr-body}.toml    step: check = "<name>"
+  packs/core/gates/{rules,arch,hygiene,pr-body}.toml        step: check = "<name>"
   packs/core/fixtures/<gate>/<case>/           today's cases, plus drover's tests as new cases
   packs/core/fixtures/hygiene/shared-names/    the shared names set, its home from G3 on
   packs/core/tools/drover.toml                 deleted (G5)
+  check/cap.rs, gates/cap.toml, fixtures/cap/  built in G2, deleted by gatekeeper#127
 
 drover
   crates/core/src/gatekeeper.rs                new: the wrapper's command line, the rules report (D3, D4)
   crates/core/src/done.rs                      the done gate: head pushed, then gatekeeper::check
-  crates/core/src/gate.rs                      the merge check: gatekeeper::check with gate core/cap
   crates/core/src/lesson.rs                    record, review, apply: read gatekeeper::rules
   crates/core/src/hygiene.rs                   the pre-send guard with its name matcher, scan, push (no gate verb)
-  crates/cli/tests/golden/private-names/       the shared names set: written by D1, generated from the pin by D2
-  crates/core/src/overlap.rs                   the cap view (no check verb)
+  crates/cli/tests/golden/private-names/       the shared names set: generated from the pin (D2)
   crates/core/src/hotspots.rs                  reads three list keys of arch.toml itself
   crates/core/src/arch.rs                      deleted (D5)
   crates/cli/tests/docs_cli.rs                 new: every `drover …` span in the docs is a real command (D2)
@@ -39,9 +41,9 @@ drover
 | gatekeeper cli | the engine; the environment, read once into typed values | printing a name from the list |
 | gatekeeper `packs/core/gates/*.toml` | `check` steps, the pinned actionlint | a `tool` step or a `{tool:…}` naming drover |
 | drover `gatekeeper.rs` | `On` (write a file, run a command with stdin and a time limit, read a file) | deciding what a check means: it returns the exit code and the tail |
-| drover `done.rs`, `gate.rs`, `lesson.rs`, `setup.rs` | `gatekeeper.rs` | the wrapper's path; a file under gatekeeper's output folder |
+| drover `done.rs`, `lesson.rs`, `setup.rs` | `gatekeeper.rs` | the wrapper's path; a file under gatekeeper's output folder |
 | drover `hygiene.rs` | the fleet config, the event log, `gh`, git | the gate: it holds no `check` verb |
-| a lane, on any host | `./.gatekeeper/run check` | the five drover verbs (deleted in D5) |
+| a lane, on any host | `./.gatekeeper/run check` | the four drover verbs (deleted in D5), `cap-check` (deleted in #1812) |
 
 Rules that follow, each with its enforcer:
 
@@ -54,8 +56,8 @@ Rules that follow, each with its enforcer:
   case prints something else.
 - **A private name matches the same in both repos.** Enforcer: the shared names set. Gatekeeper's selftest fails
   unless `core/hygiene` prints the set's `expect` lines (G3). Drover's test fails unless the guard gives the same
-  lines (D1). Drover's copy is a generated file from D2 on, so `core/arch` fails a copy that is not the pinned
-  release's.
+  lines, and drover's copy is a generated file, so `core/arch` fails a copy that is not the pinned release's
+  (both D2).
 - **One module in drover names gatekeeper.** Enforcer: the ban in drover's `arch.toml` (`adr.md`, last section).
 - **A lane verb needs no fleet config for the done gate.** Enforcer: D3's test, which runs the gate against a lane
   host with no config; #1646's wider test covers the other verbs.
@@ -65,16 +67,32 @@ Rules that follow, each with its enforcer:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Tool: the gate file has a drover tool step (gatekeeper 1.2.0 and 1.3.0)
+    [*] --> Tool: the gate file has a drover tool step (gatekeeper 1.0.0 to 1.3.0)
     Tool --> BuiltIn: G2, G3 or G4 swaps the step, expect files untouched, parity shown
-    BuiltIn --> Released: G5, the tool file deleted, gatekeeper 1.4.0
-    Released --> Pinned: a repo's bump PR (one per repo)
+    BuiltIn --> Released: G5, the tool file deleted, gatekeeper 1.5.0
+    Released --> Pinned: a repo's one PR (pin 1.5.0 or later)
     Pinned --> VerbGone: every repo pinned, then D5 deletes drover's verb
     VerbGone --> [*]
 ```
 
 Between `Tool` and `Pinned` a repo runs whichever of the two its pin names, and both read the same files and the
-same env var. No state runs neither.
+same env var. No state runs neither. On 2026-11-26 the four checks are at `Released`, and no repo is at `Pinned`.
+
+## A repo's line cap, leaving
+
+```mermaid
+stateDiagram-v2
+    [*] --> Capped: cap files in the repo, core/cap in its pinned release
+    Capped --> Capped: drover drops the cap (issue 1812), the repo's CI still counts
+    Capped --> Off: the repo's one PR, pin 1.5.0 or later, cap files deleted, core/cap off with a reason
+    Capped --> Gone: the same PR, once the newest release has no core/cap (gatekeeper issue 127)
+    Off --> Gone: a later bump pins a release with no core/cap and deletes the off line
+    Gone --> [*]
+```
+
+One state is left out on purpose: cap files deleted while a pinned `core/cap` still runs. That gate fails at
+every release from 1.0.0 to 1.5.0, which is why the files and the pin change in one PR. A repo's PR waits for
+#1812, because until then drover's hook refuses a lane's edit of the cap files.
 
 ## `turn done`'s gate
 
@@ -108,7 +126,8 @@ This is the gate after D5: one refusal code is left, `DONE_CHECK`. From D3 until
 | CI, a fork's pull request | no secret there | skipped; it runs on the merge push (as today) |
 | CI, the repo's own run, public | the `private-names` secret | checked; no secret: `list-missing`, a failure (as today) |
 | CI, public, with `[off]` for this gate | | the plan refuses the config (new, G3) |
-| A lane's host, public repo | `DROVER_PRIVATE_NAMES`, from the done gate or the pane (#1642) | checked; unset: `list-missing` |
+| A lane's host, public repo, the done gate | `DROVER_PRIVATE_NAMES`, from drover on stdin | checked |
+| A lane's host, public repo, the lane's own run in its pane | none: drover sets no list there (#1642 was closed) | `list-missing` (`adr.md`, open question 2) |
 | A lane's host, private repo | none | off by the repo's `[off]` line, with its reason printed |
 
 ## A lesson check's life

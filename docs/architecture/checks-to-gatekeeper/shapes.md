@@ -1,4 +1,6 @@
-# The 5 checks in gatekeeper: data shapes (#1643)
+# The 4 checks in gatekeeper: data shapes (#1643)
+
+Revised 2026-11-26: the cap check, its gate file and `ci/cap.toml` are out (#1812; `adr.md`, decision 13).
 
 ## What a check is given (gatekeeper)
 
@@ -34,7 +36,7 @@ pub struct CheckCx<'a> {
     pub integration: &'a str,            // pr-body: the walk under merges of this branch
 }
 
-// crates/gatekeeper-engine/src/check/<name>.rs, one file a check: cap, rules, arch, hygiene, pr_body
+// crates/gatekeeper-engine/src/check/<name>.rs, one file a check: rules, arch, hygiene, pr_body
 pub fn run(cx: &CheckCx) -> Result<Vec<String>>;
 ```
 
@@ -54,26 +56,15 @@ Unchanged. The fixture `expect` files hold these lines today and are not edited 
 
 | Check | A finding line |
 |---|---|
-| `cap` | `src lines (formatted): 3 / cap 2`; `<sha> edits the line cap without a Cap: … trailer` |
 | `rules` | `FAIL <name>: <cmd>` with its output; `line 7 names no enforcer: …`; `31 lines, over 30: …` |
 | `arch` | `<file>:<line>: <why>` for a layer, ban, size, frozen, generated, shared, comment or doc finding |
 | `hygiene` | `private-name #2 at <file>:<line>`, `… at commit <sha> message`, `… at PR body:<line>`; `list-missing: …` |
 | `pr-body` | `PR_BODY: the PR body has no ## For humans section: …`, and the two other reasons |
 
-A passing line that is not a finding (the counted lines, a shadow check that would fail, the number of names) goes
+A passing line that is not a finding (a shadow check that would fail, the number of names) goes
 to the gate's note and log, never to the findings.
 
 ## The gate files after
-
-```toml
-# packs/core/gates/cap.toml
-about = "the counted lines under the cap in ci/cap.toml; a commit that edits the cap carries its Cap: trailer"
-fix = "delete code; a raise of the cap is its own issue"
-budget_secs = 5
-
-[[step]]
-check = "cap"
-```
 
 ```toml
 # packs/core/gates/hygiene.toml
@@ -133,7 +124,6 @@ rule line (no `since` mark) is not in the list: the lesson lane never runs or ch
 
 | File | Its format is owned by | Who else reads it |
 |---|---|---|
-| `ci/cap.toml`, `ci/cap.d/*.toml` | gatekeeper's `cap` check | drover: `line_cap` and `warn_within`, by git, for `drover cap` and `cap-near` |
 | `.drover/rules.md` | gatekeeper's `rules` check | drover: whole, into every brief; the lesson lane rewrites lines by number |
 | `.drover/arch.toml` | gatekeeper's `arch` check | drover: `frozen`, `generated`, `shared`, for hotspots |
 | `.drover/arch-baseline.txt` | gatekeeper's `arch` check | nobody |
@@ -145,36 +135,29 @@ The arch schema is today's, less one key (`[docs] cli`).
 
 ```rust
 // crates/core/src/gatekeeper.rs: the only file that names the wrapper or a file gatekeeper writes
-pub struct Run<'a> {
-    pub gate: Option<&'a str>,   // None: every gate; Some("core/cap"): one
-    pub pr: Option<Pr<'a>>,      // the done gate has one; the merge check does not
-    pub names: &'a [String],     // sent on stdin; empty for a private fleet
-    pub limit: Duration,         // [limits] gate_check_minutes
-}
+/// The wrapper's check as a lane runs it, and the done check's name.
+pub const CHECK: &str = "./.gatekeeper/run check";
 
 pub struct Pr<'a> {
     pub head: &'a str,
     pub body: &'a str,
 }
 
-pub enum Ended {
-    Passed,
-    Failed { code: i32, tail: String },   // the last 10 lines, masked
-    TimedOut,
-    CannotStart(String),
-}
-
-/// Whether the repo in `wt` holds the wrapper.
-pub fn present(on: &On, wt: &Path) -> bool;
-/// Write the PR body beside gatekeeper's output, then run the wrapper once in `wt` on `on`'s host.
-pub fn check(on: &On, wt: &Path, run: &Run) -> Result<Ended>;
+/// The wrapper's path in the repo at `dir`.
+pub fn wrapper(dir: &Path) -> PathBuf;
+/// Write `pr`'s body into `wt` on `on`'s host and run the wrapper once there, `names` on stdin.
+pub fn check(on: &On, wt: &Path, pr: &Pr, names: &[String], limit: Duration) -> Result<Out>;
 /// Run `core/rules` in `wt` and read its report; `None` when the pinned release writes none.
 pub fn rules(on: &On, wt: &Path) -> Result<Option<RulesReport>>;
 /// Rewrite a gate's baseline (setup's step for `core/arch`).
-pub fn baseline(on: &On, wt: &Path, gate: &str) -> Result<Ended>;
+pub fn baseline(on: &On, wt: &Path, gate: &str) -> Result<Out>;
 ```
 
-## The shared names set (G3, D1)
+`CHECK`, `Pr`, `wrapper` and `check` are on staging as D3 merged them. `rules` arrives with D4 and `baseline`
+with D5. D3 also added `cap(dir)`, the merge check's cap command; #1812 deletes it. `Out` is the runner's exit
+code and output; `done.rs` turns it into the refusal text.
+
+## The shared names set (G3, D2)
 
 Private names are matched by gatekeeper's `PrivateNames::hit` and by the guard's own function in drover. Both
 must give this set's `expect` lines. It is one fixture case of `core/hygiene`, three files, the same bytes in both
@@ -213,10 +196,10 @@ Where it lives, and who checks it:
 | | Path | Checked by |
 |---|---|---|
 | gatekeeper (the home, from G3) | `packs/core/fixtures/hygiene/shared-names/` | selftest: the gate fails on the case and prints `expect` |
-| drover | `crates/cli/tests/golden/private-names/` | one test in `tests/hygiene.rs`: the guard over each line gives `expect` |
+| drover (from D2) | the `private-names` folder under the CLI crate's test goldens (the command below names it) | one test in `tests/hygiene.rs`: the guard over each line gives `expect` |
 
-Drover's copy is written by hand once, in D1, from today's matcher. G3 copies it. From D2 on it is a generated
-file, and `just gen` writes it from the pinned release with the new verb:
+Gatekeeper wrote the set in G3, from this sample: D1 merged without drover's copy. Drover's copy arrives in D2 and
+is a generated file from its first day: `just gen` writes it from the pinned release with the `fixture` verb:
 
 ```
 $ ./.gatekeeper/run fixture core/hygiene/shared-names --to crates/cli/tests/golden/private-names
@@ -226,7 +209,7 @@ wrote names, lines.md, expect
 `fixture <pack>/<gate>/<case> --to <dir>` writes the case's files as the pack holds them, its `expect` and other
 case files included, and leaves nothing else in `<dir>`.
 
-## The pre-send guard's check (#1615, slice D1)
+## The pre-send guard's check (#1615, slice D1, merged)
 
 ```rust
 pub struct Check {

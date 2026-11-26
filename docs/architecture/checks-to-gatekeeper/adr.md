@@ -1,56 +1,66 @@
-# ADR: the 5 checks move into gatekeeper's core pack; drover runs them through gatekeeper (#1643)
+# ADR: the 4 checks (rules, arch, hygiene, pr-body) move into gatekeeper's core pack; drover runs them through gatekeeper (#1643)
 
 ## Summary
 
-Decision: gatekeeper gets the five checks as its own code, with the same findings. The files they read keep their paths. Drover keeps the cap view, lesson promotion and the pre-send leak guard. Its done gate runs gatekeeper on the lane's host and hands it the PR body and the names list. Private names are matched in two places, the guard and gatekeeper's check: one shared set of cases, which both must pass, keeps them the same.
-Slices: gatekeeper: inputs, the five checks, release 1.4.0. Every repo: one pin bump. Drover: #1615 with the shared names set, #1587 at 1.4.0, the done gate and lessons through gatekeeper, last the five verbs deleted.
-Open questions: gatekeeper's line cap has 4 lines left on staging and about 1,500 arrive. Approve one raise, 7,700 to 9,500?
+Decision: gatekeeper owns four checks as its own code: rules, arch, hygiene and PR body. The line cap is no longer one of them: the owner removed it (#1812). Gatekeeper deletes the cap check it already built (gatekeeper#127), and each repo drops its cap files in the same PR that bumps its gatekeeper pin. Everything else stands as approved.
+Slices: done: gatekeeper's six, the session-id fix (#1615), the done gate through gatekeeper. Left: one PR per repo (pin 1.5.0 or later, cap files out), drover's own adoption (#1587), the lesson lane reading gatekeeper's report, last the four verbs deleted.
+Open questions: (1) #1587 is held until #1643 merges, but #1643's own PR is the last slice and waits for #1587: swap that block? (2) After a repo's bump, a lane's own check in its pane fails the names gate, as the pane has no names list (#1642 was closed): leave it, since the done gate decides?
 
-Status: proposed 2026-11-23 (architect lane), revised the same day on the owner's note (q3300): the release is
-1.4.0, and the two name matchers share one set of cases. Read `README.md` first.
+Status: approved 2026-11-23 (q3305). Revised 2026-11-26 on the owner's amendment (q3842): the cap check is removed
+(#1812), so 5 checks become 4. This revision also records what has merged since. Read `README.md` first.
 
 ## Question
 
-Gatekeeper's core pack runs five of its gates by calling a pinned drover binary. Where does the code of those
+Gatekeeper's core pack ran five of its gates by calling a pinned drover binary. Where does the code of those
 checks live, what may it read, how does drover's done gate run it on a host that has none of drover's config, and
-in which order do two repos and their consumers change so that no repo is checked less on any day?
+in which order do two repos and their consumers change so that no repo is checked less on any day? Since
+2026-11-26 also: one of the five, the line cap, is removed everywhere. How does it leave without a red day?
 
-## Where it stands (drover staging 7c0a28c1c, gatekeeper main aa132f9 and staging 5b69691)
+## Where it stood (2026-11-23: drover staging 7c0a28c1c, gatekeeper main aa132f9)
 
-| Gate | Drover verb it calls | The code in drover | Lines that move |
+| Gate | Drover verb it called | The code in drover | Lines that move |
 |---|---|---|---|
-| `core/cap` | `cap-check` | part of `overlap.rs` | about 150 |
 | `core/rules` | `lesson-check` | part of `lesson.rs` | about 75 |
 | `core/arch` | `arch-check` | `arch.rs` | about 690 of 703 |
 | `core/hygiene` | `hygiene check` | part of `hygiene.rs` | about 95 of 527 |
 | `core/pr-body` | `pr-body` | part of `done.rs` | about 75 |
 
-- The pack pins one drover build in its tool file. The binary is 17.6 MB per target. A fix to a check is a drover
-  release, a gatekeeper release and a bump per repo.
-- Gatekeeper's boundaries doc has the rule "A pack calls a drover concept through drover. gatekeeper never
-  re-implements one." The owner's decision of 2026-11-23 reverses it.
-- `hygiene check` reads the fleet's `private_names` from the fleet config on the host it runs on. A remote host has
-  none, so the gate fails `list-missing` there (#1642).
-- The PR body rule is written three times: `turn done`'s own check (refusal `PR_BODY`), the `pr-body` verb, and
+The fifth, `core/cap` (`cap-check`, about 150 lines of `overlap.rs`), is out of this work: see decision 13.
+
+- The pack pinned one drover build in its tool file. The binary is 17.6 MB per target. A fix to a check was a
+  drover release, a gatekeeper release and a bump per repo.
+- Gatekeeper's boundaries doc had the rule "A pack calls a drover concept through drover. gatekeeper never
+  re-implements one." The owner's decision of 2026-11-23 reversed it.
+- `hygiene check` read the fleet's `private_names` from the fleet config on the host it ran on. A remote host has
+  none, so the gate failed `list-missing` there (#1642).
+- The PR body rule was written three times: `turn done`'s own check (refusal `PR_BODY`), the `pr-body` verb, and
   the shell script behind the `evidence` workflow.
-- Drover's adoption PR (#1634 for #1587) builds drover before it can check itself: a `[tools]` line, a wrapper
-  script, a 600 s budget for `core/arch`, and a local gate for the `Cap:` trailer, which `core/cap` does not check
-  because the gate passes no base.
+- Drover's adoption PR (#1634 for #1587) built drover before it could check itself: a `[tools]` line, a wrapper
+  script and a 600 s budget for `core/arch`.
 - `arch-check`'s `[docs] cli = true` checks docs against drover's own command tree. Only drover's repo sets it.
 - Only part of `hygiene.rs` is the gate. The rest is the pre-send guard (`PUBLIC_LEAK`), `hygiene scan` and
   `hygiene push`. #1615's `session-id` pattern is in the guard, not in the gate.
-- The guard and the gate find a private name with one function today: a whole word, any case, reported by its
-  number in the list. The guard needs it before every send, with no repo wrapper at hand, so after the move the
-  rule is written in both repos.
-- Drover's merge runs `cap-check` on the merged tree and runs the shadow lesson checks itself to record their
-  history; the lesson lane promotes or retires by that history.
+- The guard and the gate found a private name with one function: a whole word, any case, reported by its number
+  in the list. The guard needs it before every send, with no repo wrapper at hand, so after the move the rule is
+  written in both repos.
+- Drover's merge ran the shadow lesson checks itself to record their history; the lesson lane promotes or retires
+  by that history.
 - A built-in check in gatekeeper is one file in a collected folder with a generated module list. Every gate has
   fixture cases with the text each must print. Gatekeeper's files are capped at 400 lines, its functions at 60.
-- Gatekeeper's line cap is 7,700. Staging counts 7,696 (`drover cap gatekeeper`), main 7,641.
-- Gatekeeper's last tag is 1.2.0. Its staging is at 1.3.0 already (#71), so this work's release is 1.4.0.
-- Repos on gatekeeper today (integration branches): blocks and swag at 1.0.0, which has no `core/hygiene` or
-  `core/pr-body` yet; cooee at 1.1.0, shed at 1.1.1, loom, sendmeter and one private repo at 1.1.2. Not yet: drover (#1587), beacon, farrier, scene-esp32, compact. No repo
-  still has the pre-rename config folder.
+
+## Where it stands (2026-11-26: drover staging 53d0dd927, gatekeeper staging at 1.5.0)
+
+- Gatekeeper's six slices are merged. No 1.4.0 was released: the built-in checks first shipped in **1.5.0**
+  (2026-11-25). `git grep` finds no drover verb in its `packs/` at v1.5.0. `core/cap` shipped in it as a built-in
+  check.
+- In drover, #1615 (D1) and the done gate (D3) are merged. The five verbs are still there. The shared names set is
+  in gatekeeper only: D1 merged without drover's copy and its test.
+- No repo pins 1.5.0 yet (integration branches, read today): seven repos pin 1.0.0 to 1.1.2, one pins 1.3.0. Every
+  one of those releases calls a pinned drover build for the checks.
+- #1812 (queued) removes the cap from drover. Each repo with a cap has its own removal issue, blocked on #1812:
+  gatekeeper#127, cooee#834, shed#392, blocks#414, sendmeter#1067.
+- At every release so far, 1.0.0 to 1.5.0, `core/cap` fails when `ci/cap.toml` is missing. A gate can be turned
+  off with a reason from 1.2.0 on.
 
 ## Options
 
@@ -61,14 +71,14 @@ in which order do two repos and their consumers change so that no repo is checke
 | A. Stay: a pinned drover, and ship the config it needs to every host (#1642 alone) | No. Every job still fetches drover, every fix still needs two releases, and drover's own repo still builds itself first. The owner decided against it. |
 | B. Split a small checks binary out of drover and pin that | No. A smaller download, the same two-release path, and the checks are still drover's. |
 | C. Gatekeeper links a crate kept in drover's repo | No. One copy, but gatekeeper's build then hangs on drover's repo and its libraries. Gatekeeper links no other repo's code today. |
-| D. Port: five built-in checks in gatekeeper, printing what they print today | **Yes.** |
+| D. Port: built-in checks in gatekeeper, printing what they print today | **Yes.** |
 
 ### 2. The files the checks read
 
 | Option | Verdict |
 |---|---|
-| A. Keep the paths: `ci/cap.toml`, `ci/cap.d/`, `.drover/rules.md`, `.drover/arch.toml`, the arch baseline | **Yes.** Drover still reads all three (cap view, briefs, hotspots). A check ported with its files in place is proven by fixtures nobody edits. |
-| B. Move them under gatekeeper's folder | No. Every repo, every role prompt, the lane hook's cap guard and hotspots change for no change in behaviour. It can be its own issue later. |
+| A. Keep the paths: `.drover/rules.md`, `.drover/arch.toml`, the arch baseline | **Yes.** Drover still reads both (briefs, hotspots). A check ported with its files in place is proven by fixtures nobody edits. |
+| B. Move them under gatekeeper's folder | No. Every repo, every role prompt and hotspots change for no change in behaviour. It can be its own issue later. |
 
 ### 3. Where the private names come from
 
@@ -104,6 +114,16 @@ in which order do two repos and their consumers change so that no repo is checke
 | C. Two copies and one shared set of cases that both must pass | **Yes.** The owner's revise (q3300). |
 | D. Two copies, each with its own tests | No. Nothing fails when one of them changes. |
 
+### 7. How a repo's `core/cap` leaves (new, 2026-11-26)
+
+A repo on gatekeeper cannot just delete `ci/cap.toml`: its pinned `core/cap` then fails.
+
+| Option | Verdict |
+|---|---|
+| A. Wait for the gatekeeper release without `core/cap` (gatekeeper#127), then each repo pins it and deletes its cap files | No. Every repo's cap stays on until gatekeeper's next release, with drover no longer raising it. |
+| B. Turn the gate off at the repo's current pin and delete the files | No. The off list needs 1.2.0 and all but one repo pins an older release, so it is a bump anyway, and a second bump follows for this work. |
+| C. One PR per repo: pin the newest release (1.5.0 or later), delete the cap files, turn `core/cap` off while that release still has it | **Yes.** The bump this work needs anyway carries the cap out. No repo waits for gatekeeper. |
+
 ## Decision
 
 1. **Port, not link.** Each check is one file in gatekeeper's check folder; arch's parts get a folder of their own
@@ -123,7 +143,8 @@ in which order do two repos and their consumers change so that no repo is checke
    on stdin. Its own PR body check goes; a bad body is a `DONE_CHECK` whose text names `core/pr-body` and its fix.
    The fallbacks go too: a repo with no wrapper and no `done_checks` is refused, and `done_checks = []` says "none"
    on purpose.
-8. **The merge check** runs the wrapper for `core/cap` on the merged tree in place of drover's verb.
+8. **Withdrawn 2026-11-26.** The merge check ran `core/cap` through the wrapper, and D3 built that. #1812 removes
+   the cap from the merge check, and that call with it.
 9. **Lessons** (option 5A). The `rules` check runs shadow and active checks and writes `checks.json`. Drover's
    merge reads it for the `lesson-shadow` event; `lesson apply` reads it for the lines to rewrite. Drover knows the
    two marks it writes, `shadow since` and `active since`, and no more of the line format.
@@ -132,110 +153,138 @@ in which order do two repos and their consumers change so that no repo is checke
 11. **One module in drover names gatekeeper.** It builds the wrapper's command line and reads its report. An arch
     ban keeps the wrapper's path out of every other file.
 12. **One shared names set** (option 6C). A names list, lines of text and the hit each line must give
-    (`shapes.md`). Gatekeeper holds it as a fixture case of `core/hygiene`, so its selftest runs it. Drover holds
-    the same bytes and one test runs the guard over them. Drover writes the set first, from today's matcher (D1);
-    gatekeeper copies it in with the port (G3) and is its home from then on. Once drover pins 1.4.0 (D2) its copy
-    is a generated file, written from the pinned release, so a copy that differs fails `core/arch`.
+    (`shapes.md`). Gatekeeper holds it as a fixture case of `core/hygiene`, so its selftest runs it, and is its
+    home. Drover's copy is a generated file, written from the pinned release, and one test runs the guard over it:
+    a copy that differs fails `core/arch`. Both arrive in D2, since D1 merged without them.
+13. **The cap check leaves** (owner, #1812; option 7C). It is not one of the checks this work moves, and no slice
+    here builds or deletes anything for it. What exists is removed by the cap's own issues:
+    - drover, #1812: the `cap-check` verb, the cap view, the hook's rule, the merge check's cap command and the
+      module function D3 added for it.
+    - gatekeeper, gatekeeper#127: the check, its gate file and its seven cases. An `[off]` line that still names
+      `core/cap` keeps loading (its spec says so).
+    - each repo on gatekeeper, in its cap-removal issue: one PR pins the newest release, 1.5.0 or later, deletes
+      the cap files and, while the pinned release still has `core/cap`, turns it off with the reason. That PR is
+      also this work's bump for the repo.
 
 | | Moves to gatekeeper | Stays in drover |
 |---|---|---|
-| cap | counting the lines, the cap and its raises, the `Cap:` trailer on a commit that edits the cap | `drover cap` (the queue view), `cap log`, the `cap-near` alert, the hook's refusal to edit the cap from a lane |
 | rules | the line format, the 30-line limit, running each lesson check | the lesson lane: digest, the history, promote and retire, the `lesson-shadow` event |
 | arch | all of it: layers, bans, sizes, frozen, generated, shared, comments, stale docs, the baseline | hotspots reading three list keys; the docs-against-CLI test |
 | hygiene | the gate: tree, commit messages and PR body against the names; the shared names set's home | the pre-send guard (`PUBLIC_LEAK`) with its own name matcher, `hygiene scan`, `hygiene push`, doctor's line |
 | PR body | all of it: names the head, has `## For humans`, no "Generated with" line | nothing |
+| cap | nothing: removed in both repos (decision 13) | nothing |
 
 ## Consequences
 
-- A lane's host and a CI job fetch one binary. The drover tool file leaves the core pack, so a config that still
+- A lane's host and a CI job fetch one binary. The drover tool file left the core pack, so a config that still
   names it is refused.
 - A check fix ships with a gatekeeper release. Drover releases no longer gate the gates.
 - Three things a lane sees change. (a) The `PR_BODY` refusal code is gone; the same fault is `DONE_CHECK` with
   gatekeeper's lines. (b) `turn done` in a repo with neither the wrapper nor `done_checks` is refused, where today
   it passes with whatever fallback applies. (c) The arch baseline cannot grow: a redo on the owner's ask deletes the
   file first.
-- The merge check also runs the active lesson checks on the merged tree, since one run produces the report.
-- Drover still parses two things gatekeeper owns: the cap number in `ci/cap.toml` for its view, and three list
-  keys of `.drover/arch.toml` for hotspots. Both are typed reads of a few keys.
+- The merge runs the lesson checks on the merged tree through the wrapper, shadow and active in one run, since
+  one run produces the report.
+- Drover still parses one thing gatekeeper owns: three list keys of `.drover/arch.toml`, for hotspots.
 - Arch's patterns are read as gatekeeper globs. Where a repo's pattern means something else there, the parity run
   shows it and that repo's bump PR rewrites the pattern.
 - The rule for a whole-word name match is written twice. A change to it is a gatekeeper PR that edits the set and
   its matcher; drover's next bump PR regenerates its copy and its guard must pass it in that PR. An edit of drover's
   copy alone fails `core/arch`.
-- Gatekeeper gains one verb, `fixture`, which writes a fixture case's files to a folder: drover's generator.
-- Drover loses about 1,150 lines and gains about 200 (the module, the session ids): about 950 net, and about 2,000
-  lines of tests leave with the checks. Gatekeeper gains about 1,500.
-- Until a repo bumps, its pinned drover build keeps working: the done gate's env var and `--pr-body` are read by
-  old and new releases alike (1.0.0 accepts both and has neither gate).
+- Gatekeeper gained one verb, `fixture`, which writes a fixture case's files to a folder: drover's generator.
+- Drover loses about 1,000 lines for the four checks and gains about 200 (the module, the session ids); about
+  2,000 lines of tests leave with the checks. The cap's 150 lines and its view leave with #1812. Gatekeeper gained
+  about 1,500 and gives back the cap check (177 lines, seven cases) with gatekeeper#127.
+- Until a repo bumps, its pinned drover build keeps working, #1812 or not: an old pin calls the drover build it
+  pinned, never the host's. The done gate's env var and `--pr-body` are read by old and new releases alike.
+- A repo's cap ends with its own PR, not with #1812. In between, its pinned `core/cap` still counts lines and
+  drover no longer asks for a raise, so each repo's cap-removal issue goes to the top of its queue when #1812
+  merges.
+- A repo's bump is a bigger step than planned: 1.5.0 also turns the docs gate on. A new gate that finds
+  something is turned off in that PR with a reason and its own issue, as gatekeeper's README shows.
+- An `[off]` line for `core/cap` is dead once the repo pins a release without the gate. It loads, and the repo's
+  next bump deletes it.
 
 ## Slices
 
-Gatekeeper (six issues to file there). G2, G3 and G4 can run side by side: each adds files to collected folders.
+Gatekeeper:
 
-| # | Issue | Blocked on | AC |
+| # | Issue | State | Note |
 |---|---|---|---|
-| G0 | cap: raise gatekeeper to 9,500 (filed by the orchestrator, as every raise is) | the owner's answer below | the raise file with its reason; nothing else |
-| G1 | core checks, the frame: the names, the head, the PR body and the integration branch reach a built-in check as typed values; the boundaries rule reversed; this ADR copied in | G0 | selftest feeds a case's `env` file into the typed values; the names type cannot be printed; docs say the checks are gatekeeper's |
-| G2 | `core/pr-body`, `core/cap`, `core/rules` as built-in checks | G1 | each gate file has `check`, no tool; no `expect` file edited; drover's cases added; `core/cap` fails a cap edit without its trailer; `rules` writes `checks.json` |
-| G3 | `core/hygiene` as a built-in check, with the shared names set | G1, D1 | names only from the typed value; `list-missing` as today; `[off]` for it refused in a public repo's CI run; the shared names set is case `core/hygiene/shared-names`, the same bytes as drover's from D1, and selftest passes it; `fixture <pack>/<gate>/<case> --to <dir>` writes a case's files |
-| G4 | `core/arch` as a built-in check, with `baseline core/arch` | G1 | no `expect` file edited; drover's 24 arch tests added as cases; old and new print the same findings on every consumer's integration head (table in the PR body) |
-| G5 | the drover tool leaves the core pack; release 1.4.0 | G2, G3, G4 | `git grep` finds no drover verb in `packs/`; the two bans in "arch.toml lines" are in; the skill is regenerated |
+| G0 | cap: raise gatekeeper to 9,500 | merged (gatekeeper#78) | the cap itself goes with G6 |
+| G1 | core checks, the frame: typed names, head, PR body, integration branch | merged (gatekeeper#73) | |
+| G2 | `core/pr-body`, `core/cap`, `core/rules` as built-in checks | merged (gatekeeper#74) | G6 deletes `core/cap` again |
+| G3 | `core/hygiene` as a built-in check, the shared names set, the `fixture` verb | merged (gatekeeper#75) | the set was written there, from this ADR's sample |
+| G4 | `core/arch` as a built-in check, with `baseline core/arch` | merged (gatekeeper#76) | |
+| G5 | the drover tool leaves the core pack; release | merged (gatekeeper#77) | released as 1.5.0 |
+| G6 | gatekeeper#127: the cap check and gatekeeper's own cap files are removed | open, blocked on #1812 | its docs include gatekeeper's copy of this ADR: replace it with this revision |
 
-Every repo on gatekeeper (one issue each, after G5): `./.gatekeeper/run pin 1.4.0`. A private repo adds the `[off]`
-line for `core/hygiene`. The four repos not on gatekeeper adopt at 1.4.0, in gatekeeper's adoption order. 1.3.0
-(#71, on gatekeeper's staging) still calls drover for the five checks: a repo may pin it meanwhile, and bumps again.
+Every repo on gatekeeper, one PR each; a repo with a cap waits for #1812 first. It is the repo's cap-removal
+issue where one is filed (cooee#834, shed#392, blocks#414, sendmeter#1067); a repo without one gets one issue
+for both:
+
+- `./.gatekeeper/run pin <the newest release, 1.5.0 or later>`;
+- the cap files deleted, and `[off]` for `core/cap` unless the pinned release has dropped the gate;
+- a private repo adds the `[off]` line for `core/hygiene`.
+
+The repos not on gatekeeper adopt at the newest release, in gatekeeper's adoption order.
 
 Drover:
 
-| # | Issue | Blocked on | AC |
+| # | Issue | State, blocked on | AC |
 |---|---|---|---|
-| D1 | #1615: `session-id` hits only a known session id; the shared names set | nothing | #1615's own AC, and: the shared names set is in drover, written from today's matcher, and one test runs the guard over it and gets its `expect` file |
-| D2 | #1587, amended: adopt at 1.4.0 | G5 | #1587's AC, and: no `[tools]` line, no script that builds drover, no local `Cap:` trailer gate; `[docs] cli` is a test; the `evidence` workflow and its script are deleted; the shared names set is a generated file, written from the pin |
-| D3 | the done gate and the merge check run the wrapper, through one module (to file) | nothing | a test: a lane on a remote host with no fleet config passes `turn done`, the names on stdin and in no argument, file or log; the merge check runs `core/cap` through the wrapper; drover's own PR body check still runs |
-| D4 | the lesson lane reads gatekeeper's report (to file) | every bump | the merge's `lesson-shadow` event and `lesson apply` come from `checks.json`; drover runs no lesson check itself |
-| D5 | #1643's own PR: the five verbs and their code are deleted | D1 to D4, every bump, the four adoptions | `git grep` finds none of the five verbs in drover's code, workflows or roles; drover's own PR body check is gone and a bad body is `DONE_CHECK` naming `core/pr-body`; the remote-host test of D3 still passes; setup's baseline step calls the wrapper; the PR body names #1587 and #1615 with their commits |
+| D1 | #1615: `session-id` hits only a known session id | merged (#1693, 3e8d8dede) | its own AC. The shared names set did not land with it: see D2 |
+| D2 | #1587, amended again: adopt at the newest release, 1.5.0 or later | open; blocked on nothing (in the queue: on #1643, see the open question) | #1587's AC, and: no `[tools]` line, no script that builds drover; `[docs] cli` is a test; the `evidence` workflow and its script are deleted; the shared names set is a generated file, written from the pin, and one test runs the guard over it and gets its `expect` file; no cap file and no cap gate (after #1812: the `[off]` line of every repo) |
+| D3 | #1721: the done gate and the merge check run the wrapper, through one module | merged (#1725, c1683b70c) | the remote-host test is in. Its cap command goes with #1812 |
+| D4 | the lesson lane reads gatekeeper's report (to file) | every repo's PR above | the merge's `lesson-shadow` event and `lesson apply` come from `checks.json`; drover runs no lesson check itself |
+| D5 | #1643's own PR: the four verbs and their code are deleted | D2, D4, every repo's PR, the adoptions | `git grep` finds none of `lesson-check`, `arch-check`, `hygiene check`, `pr-body` in drover's code, workflows or roles; drover's own PR body check is gone and a bad body is `DONE_CHECK` naming `core/pr-body`; the remote-host test of D3 still passes; setup's baseline step calls the wrapper; the PR body names #1587 and #1615 with their commits |
 
-D3 keeps drover's own PR body check, and the old path for a repo without the wrapper. D5 removes both, once every
-repo's pin has `core/pr-body`: so no repo is checked less on any day. D1 and D3 can start on approval. D1 is the one
-drover slice a gatekeeper slice waits for: G3 copies the set D1 writes.
+D3 kept drover's own PR body check, and the old path for a repo without the wrapper. D5 removes both, once every
+repo's pin has `core/pr-body`: so no repo is checked less on any day. D5 does not wait for #1812 and does not
+touch the cap: whichever merges second finds the other's verbs gone already.
 
-## The folded issues
+## #1587, #1615 and #1642
 
-- **#1587** is fixed by D2. It needs an amendment before its lane continues: pin 1.4.0 in place of 1.1.0, and the
-  extra AC lines in D2's row. Its spec keeps the `evidence` workflow; with `core/pr-body` in the gates that
-  workflow is a second copy, so D2 deletes it and its PR body names the check to drop from branch protection.
-- **#1615** is not made moot by the move: its pattern is in the pre-send guard, which stays. It is fixed by D1, as
-  its own spec says. The guard's check gains the known session ids (`shapes.md`). Its PR also writes the shared
-  names set, since it is the slice that edits the guard's patterns.
-- **#1642** (under #1646) is half solved here: D3's done gate passes on a remote host. The lane's own run in its
-  pane still needs the names in its env file, which is #1642's spawn change.
+- **#1587** is slice D2 and closes with its own PR (amendment of 2026-11-24). Its amendment of 2026-11-23 says
+  "adopt at 1.4.0" and "waits for gatekeeper's 1.4.0 release": that release is 1.5.0, and it is out. It needs one
+  more amendment before its lane continues: pin the newest release, 1.5.0 or later; the shared names set is
+  generated from the pin, with the guard's test over it; the cap files its spec keeps as "drover's own" follow
+  #1812. Its spec keeps the `evidence` workflow; with `core/pr-body` in the gates that workflow is a second copy,
+  so D2 deletes it and its PR body names the check to drop from branch protection.
+- **#1615** was slice D1 and is merged. Its pattern is in the pre-send guard, which stays in drover.
+- **#1642** and its root #1646 are closed, not planned. What this work owed them is merged: D3's done gate hands
+  the names over itself and passes on a remote host with no fleet config (#1816 tracks one route where they do
+  not arrive). The pane is not covered: see open question 2.
 
 ## Open question
 
-1. Gatekeeper's staging counts 7,696 lines against a cap of 7,700 (main counted 7,641 before #71). About 1,100
-   lines move; at gatekeeper's line width and function limit, with the typed inputs, the report, the baseline
-   writer and the `fixture` verb, that is about 1,500, so about 9,200. Approve one raise to 9,500, as its own issue
-   (G0) ahead of the others? Drover's count falls by about 950. (The first draft asked for 9,400, on main's count.)
+1. In the queue #1587 is "blocked by #1643" and held until #1643 merges. That came from the symptoms rule of
+   2026-11-23; the amendment of 2026-11-24 made #1587 a slice. #1643's own PR is D5, the last slice, and it waits
+   for #1587: neither can go first as queued. Swap the block, so #1587 runs now and #1643 waits for #1587, D4
+   and the repo PRs? (Recommended: yes.)
+
+2. A built-in `core/hygiene` reads the names from the env var only. The done gate sets it; drover sets it in no
+   lane's pane, since #1642 (the names in the lane's env file) was closed. So once a public repo pins 1.5.0, a lane's own
+   `./.gatekeeper/run check` shows `core/hygiene` failing `list-missing` on every host, the main one included,
+   while `turn done` passes. Leave it, and have D5's role text say that the done gate decides that gate
+   (recommended: no names list at rest on any host)? Or reopen #1642's spawn change?
+
+The first draft's question, gatekeeper's cap raise, is closed: the raise merged and the cap now leaves.
 
 ## `.drover/arch.toml` lines
 
-Drover, in D3 (the module) and D2 (the key and the three generated files):
+Drover. D3's ban is in: the wrapper's path is named in drover's one gatekeeper module and nowhere else. D2 adds
+the rest:
 
 ```toml
-[[ban]]
-pattern = ".gatekeeper/run"
-paths = ["crates/*/src/**"]
-except = ["crates/core/src/gatekeeper.rs"]
-reason = "#1643: one module builds the gatekeeper command and reads its report"
-
 [docs]
 paths = ["docs/**/*.md", "README.md"]
 watch = ["crates/core/src/cli.rs", "crates/core/src/config.rs", "crates/server/src/api.rs"]
 skip = [".drover/**", "roles/usage-tail.md", "scripts/test-shards.txt"]
 ```
 
-The second block is today's `[docs]` without `cli = true`. D2 also adds three paths to the `generated` list, and
-one line to `just gen`, the `generate` command:
+That block is today's `[docs]` without `cli = true`. D2 also adds three paths to the `generated` list, and one
+line to `just gen`, the `generate` command:
 
 ```toml
 generated = [
@@ -252,23 +301,5 @@ generated = [
 
 No file joins `frozen`: the hot file this work touches, `ci.yml`, is frozen by #1587's own lines.
 
-Gatekeeper, in G4 (the folder) and G5 (the bans):
-
-```toml
-[[collect]]
-dir = "crates/gatekeeper-engine/src/arch"
-glob = "*.rs"
-
-[[ban]]
-pattern = "tool = \"drover\""
-paths = ["packs/**"]
-reason = "the core pack's checks are built in; no gate calls drover"
-
-[[ban]]
-pattern = "{tool:drover}"
-paths = ["packs/**"]
-reason = "the core pack's checks are built in; no gate calls drover"
-```
-
-The five new check files, the `fixture` verb's file and the shared set's case need no line: the check, verb and
-fixture folders are collected already, and the two module lists are generated by gatekeeper's `sh scripts/gen.sh`.
+Gatekeeper's lines are in since G4 and G5: the `[[collect]]` for the folder of arch's parts, and the two bans on
+`tool = "drover"` and `{tool:drover}` under its packs folder. The cap's removal needs no line in either repo.

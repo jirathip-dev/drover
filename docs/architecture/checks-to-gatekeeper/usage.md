@@ -1,7 +1,8 @@
-# The 5 checks in gatekeeper: how the callers read (#1643)
+# The 4 checks in gatekeeper: how the callers read (#1643)
 
 Sketches of the code and commands after the last slice. Names of functions inside a module are the impl lane's;
-the calls across modules are the design.
+the calls across modules are the design. Revised 2026-11-26: no cap anywhere (#1812), and the module's calls are
+written as D3 merged them.
 
 ## A lane, on any host
 
@@ -9,10 +10,8 @@ Nothing changes for the lane, and nothing of drover's is needed on the host: the
 
 ```
 $ ./.gatekeeper/run check
-gatekeeper 1.4.0 · legs core rust · base 7c0a28c1c1a2 · 6 files changed · host lane · cache on
+gatekeeper 1.5.0 · legs core rust · base 7c0a28c1c1a2 · 6 files changed · host lane · cache on
 ok    core/pin              0.0s /    1s
-ok    core/cap              0.1s /    5s
-      src lines (formatted): 64012 / cap 65000
 ok    core/rules            0.4s /    5s
       1 shadow check would fail: no-todo
 ok    core/arch             7.9s /   45s
@@ -24,6 +23,9 @@ ok    core/pr-body          0.0s /    2s
       no PR body: nothing to check
 ```
 
+In its own pane a lane has no names list, so in a public repo `core/hygiene` prints `list-missing` there instead
+of the hit above; the done gate, which hands the names over, is the run that counts (`adr.md`, open question 2).
+
 ## `drover turn done` (done.rs)
 
 The head check stays. The PR body check, the fallback to drover's arch verb and the fallback to `cargo fmt` go.
@@ -34,25 +36,29 @@ if !at.eq_ignore_ascii_case(&head) {
     return refuse(CODE, format!("push first: the worktree is at {at:.7}, the PR head is {head:.7}"));
 }
 let limit = Duration::from_secs(cfg.limits.gate_check_minutes * 60);
-let ended = match &f.done_checks {
-    Some(own) => own_checks(&on, wt, own, limit)?,
-    None if gatekeeper::present(&on, wt) => {
-        let pr = gatekeeper::Pr { head: &head, body: text };
-        let names = names_of(ctx, cfg, r, fleet);
-        gatekeeper::check(&on, wt, &gatekeeper::Run { gate: None, pr: Some(pr), names: &names, limit })?
-    }
-    None => return refuse(CODE, NO_DONE_CHECK.into()),
+let pr = gatekeeper::Pr { head: &head, body: text };
+let Some(checks) = checks(f, &on, wt) else {
+    return refuse(CODE, NO_DONE_CHECK.into());
 };
-match ended {
-    Ended::Passed => Ok(Some((head, None))),
-    Ended::Failed { code, tail } => refuse(CODE, format!("the done check failed (exit {code}):\n{tail}")),
-    Ended::TimedOut => refuse(CODE, format!("the done check timed out after {} min", cfg.limits.gate_check_minutes)),
-    Ended::CannotStart(why) => refuse(CODE, format!("the done check cannot start: {why}")),
+for c in checks {
+    let o = if c == gatekeeper::CHECK {
+        gatekeeper::check(&on, wt, &pr, &f.private_names, limit)
+    } else {
+        on.run_for("sh", &argv(&["-c", &format!("cd \"$0\" && {c}"), wt]), "", limit)
+    };
+    match o {
+        Ok(o) if o.code == 0 => {}
+        Ok(o) => return refuse(CODE, format!("`{c}` {}:\n{}", what(o.code), tail(&o))),
+        Err(e) => return refuse(CODE, format!("`{c}` cannot start: {e:#}")),
+    }
 }
+Ok(Some((head, None)))
 ```
 
-`names_of` is the fleet's `private_names` for a public fleet and empty for a private one. It runs on the main
-host, where `turn done` is handled; the lane's host is only where the command runs.
+`checks` is the fleet's `done_checks` when set, else the wrapper's check when the repo holds the wrapper, else
+`None`. The loop is D3's, as merged. D5 deletes what still stands before and beside it: drover's own PR body check
+(`PR_BODY`) and the two fallbacks. `f.private_names` is read on the main host, where `turn done` is handled; the
+lane's host is only where the command runs. A private repo turns `core/hygiene` off, so its list is never read.
 
 ## What the module sends (gatekeeper.rs)
 
@@ -63,10 +69,8 @@ no file and no log.
 on.write(&wt.join("target/gatekeeper/pr-body.md"), pr.body)?;
 let line = "cd \"$0\" && DROVER_PRIVATE_NAMES=\"$(cat)\" GATEKEEPER_HEAD=\"$1\" \
             ./.gatekeeper/run check --pr-body target/gatekeeper/pr-body.md";
-let out = on.run_for("sh", &argv(&["-c", line, wt, pr.head]), &run.names.join("\n"), run.limit)?;
+let out = on.run_for("sh", &argv(&["-c", line, wt, pr.head]), &names.join("\n"), limit)?;
 ```
-
-With `gate: Some("core/cap")` the line ends `check --gate core/cap` and carries no body and no head.
 
 ## The merge check (gate.rs)
 
@@ -74,14 +78,10 @@ With `gate: Some("core/cap")` the line ends `check --gate core/cap` and carries 
 pub(crate) fn premerge_checks(f: &Fleet) -> Vec<Check> {
     f.premerge.clone().map_or_else(Vec::new, named)
 }
-
-let cap = gatekeeper::present(&here, &wt).then(|| {
-    gatekeeper::check(&here, &wt, &gatekeeper::Run { gate: Some("core/cap"), pr: None, names: &[], limit })
-});
 ```
 
-A fleet's own `premerge` commands run as today. A cap failure is `STAGING_WOULD_BREAK` with gatekeeper's tail.
-The merge commit copies every `Cap: ` line of the PR's commits; gatekeeper has checked their form already.
+A fleet's own `premerge` commands run as today, and nothing else: no cap command, no `Cap:` line copied into
+the merge commit. That is #1812's diff, not a slice of this work; D3's `gatekeeper::cap` goes with it.
 
 ## The lesson lane (lesson.rs)
 
@@ -123,7 +123,7 @@ pub fn run(cx: &Cx) -> Result<Vec<String>> {
 
 ## The shared names set, in drover (tests/hygiene.rs)
 
-The guard's side of the set (D1). Gatekeeper's side needs no code: the set is a fixture case, and selftest runs it.
+The guard's side of the set (D2). Gatekeeper's side needs no code: the set is a fixture case, and selftest runs it.
 
 ```rust
 #[test]
@@ -138,20 +138,31 @@ fn the_guard_matches_private_names_as_the_shared_set_says() {
 }
 ```
 
-## A repo's bump PR
+## A repo's one PR
+
+The repo's cap-removal issue, which is also its bump (`adr.md`, decision 13):
 
 ```
-$ ./.gatekeeper/run pin 1.4.0
+$ ./.gatekeeper/run pin 1.5.0
+$ git rm -r ci/cap.toml ci/cap.d
 ```
 
-A private repo adds, in its gatekeeper config:
+and in its gatekeeper config, while the pinned release still has the gate:
+
+```toml
+[off]
+"core/cap" = "the line cap is removed (drover#1812)"
+```
+
+A PR that pins a release without `core/cap` (gatekeeper#127) adds no such line; a repo that has one deletes it
+at its next bump. A private repo adds:
 
 ```toml
 [off]
 "core/hygiene" = "private repo: nothing here is published"
 ```
 
-Drover's own config (#1587) loses its `[tools]` table, and its `arch.toml` loses `cli = true`.
+Drover's own config (#1587) has no `[tools]` table, and its `arch.toml` loses `cli = true`.
 
 In drover, a bump also runs `just gen`, which rewrites the shared names set from the new pin. If gatekeeper
 changed how a name matches, the test above fails until the guard matches the same way, in that PR.
@@ -159,8 +170,8 @@ changed how a name matches, the test above fails until the guard matches the sam
 ## The proofs the issue asks for
 
 ```
-# in gatekeeper, after G5
-$ git grep -nE 'drover (cap-check|lesson-check|arch-check|hygiene check|pr-body)' -- packs ; echo $?
+# in gatekeeper, after G5 (run 2026-11-26 at v1.5.0: no line, exit 1)
+$ git grep -nE 'drover (cap-check|lesson-check|arch-check|hygiene check|pr-body)' v1.5.0 -- packs ; echo $?
 1
 
 # in drover, after D5: the done gate against a lane host with no fleet config (D3's test, still green)
