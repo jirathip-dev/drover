@@ -2560,8 +2560,7 @@ fn a_no_repro_verdict_refiled_and_refused_again_is_one_owner_card() {
 
 fn lesson(name: &str, live: bool) -> (drover::Ctx, Fake) {
     let c = setup(name);
-    let filed = json!({"job": "lesson", "role": "lesson", "title": "lessons: sendmeter week of 1970-01-12"});
-    ev(&c, 9, "job-filed", filed);
+    ev(&c, 9, "job-filed", json!({"job": "lesson", "role": "lesson"}));
     let wt = lane(&c, 10, "lesson", "sendmeter-lesson-12", "issue-12");
     let list = [("sendmeter-lesson-12", "idle", wt.to_string_lossy().to_string())];
     let r = fake(if live { &list[..] } else { &[] })
