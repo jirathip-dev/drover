@@ -555,27 +555,6 @@ fn a_hold_never_routes_a_never_routed_command_or_an_unrouted_fleets() {
 }
 
 #[test]
-fn a_routed_fleets_gate_checks_go_to_the_build_machine_under_the_cargo_kind() {
-    let d = gated();
-    Command::new("git")
-        .args(["init", "-q"])
-        .current_dir(&d)
-        .status()
-        .unwrap();
-    let w = wrapped(&d, "just check");
-    assert!(
-        w.contains("'heavy' 'cargo'") && w.contains("'--remote' 'linux'") && w.ends_with("'--' 'just check'"),
-        "{w}"
-    );
-    let d = lane("");
-    assert_eq!(
-        hook(&d, "just check"),
-        "",
-        "an unrouted fleet's gate check is unchanged"
-    );
-}
-
-#[test]
 fn a_gatekeeper_check_never_goes_to_a_build_machine() {
     let d = gated();
     let gate = "./.gatekeeper/run check --gate core/fmt";

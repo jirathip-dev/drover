@@ -79,10 +79,9 @@ pattern overlaps that list, naming both. `drover clean` runs `runners forget --d
 removes; a failure is printed and kept in the `clean` event's `forget`, and the clean goes on. `drover top` marks a
 `runners run` process `[remote <tag>]`.
 
-Gate checks (#1747): a fleet with `[fleet.<n>.remote.cargo]` sends its gate checks the same way. A lane's
-`just check…` joins the `cargo` kind; `turn done` runs each done check of a lane on the main host under
-`drover heavy cargo --remote <tag>`, but the gatekeeper check: it reads git and a build machine's tree has no `.git` (#1803), so it runs in the
-lane's worktree; `drover hold` sends its command to the fleet whose repo is the job's (`GITHUB_REPOSITORY`)
+Gate checks (#1747): a fleet with `[fleet.<n>.remote.cargo]` sends its gate checks the same way. `turn done` runs
+each done check that is a plain `cargo` step under `drover heavy cargo --remote <tag>`; `just check…` and the
+gatekeeper check read git and a build machine's tree has no `.git` (#1803, #1827), so they run in the lane's worktree; `drover hold` sends its command to the fleet whose repo is the job's (`GITHUB_REPOSITORY`)
 and holds no slot. Each falls back here as above, printing the `runners:` line. The never-routed list still applies;
 a fleet whose gate builds platform-only code (Metal, `xcodebuild`) lists its gate command in `remote_deny`.
 
