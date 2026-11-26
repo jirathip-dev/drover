@@ -22,21 +22,18 @@ fn setup(name: &str, extra: &str, bazzite_up: bool, seen: u64) -> drover::Ctx {
     let cache = json!({
         "mini": {"tags": ["os:macos", "arch:arm64", "xcode"], "home": "/Users/me", "probed": NOW, "seen": NOW, "up": true},
         "bazzite": {"tags": ["os:linux", "arch:x86_64", "docker"], "home": "/home/me", "probed": NOW,
-                    "seen": NOW - seen, "up": bazzite_up, "load": 0.1, "mem": 12.0, "disk": 200.0},
+                    "seen": NOW - seen, "up": bazzite_up, "idle": 97.0, "mem": 12.0, "disk": 200.0},
     });
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
     c
 }
 
-fn fake(mini: f64, remote: f64) -> Fake {
+fn fake(mini: u32, remote: u32) -> Fake {
     Fake::default()
         .reply("which shed", "/opt/shed/bin/shed\n")
-        .reply("sysctl -n vm.loadavg", &format!("{{ {} 1 1 }}", mini * 4.0))
+        .reply("iostat", &iostat(mini))
         .reply("sysctl -n hw.ncpu", "4")
-        .reply(
-            &format!("{SSH}'cat' '/proc/loadavg'"),
-            &format!("{} 1 1 1/9 42", remote * 4.0),
-        )
+        .reply(&format!("{SSH}'vmstat' '1' '2'"), &vmstat(remote))
         .reply(&format!("{SSH}'nproc'"), "4")
         .reply(
             &format!("{SSH}'/opt/drover/bin/drover' 'profiles' 'sync' '--profile'"),
@@ -98,7 +95,7 @@ fn busy_wt(f: Fake, status: &str, ahead: &str) -> Fake {
 fn a_busy_last_host_whose_worktree_holds_only_untracked_scratch_yields_to_a_free_host() {
     let c = setup("hosts-scratch-983", "", true, 0);
     remote_spawn(&c, NOW - 60);
-    let scratch = busy_wt(fake(1.0, 4.0), "?? body.md\n?? notes.txt\n", "0\n");
+    let scratch = busy_wt(fake(70, 0), "?? body.md\n?? notes.txt\n", "0\n");
     let bazzite = FakeShed::new();
     let ssh = two(&scratch, &bazzite);
     let on = drover::hosts::On::new(&ssh, Some("bazzite"));
@@ -107,7 +104,7 @@ fn a_busy_last_host_whose_worktree_holds_only_untracked_scratch_yields_to_a_free
         "scratch never pins"
     );
     assert_eq!(placed(&c, &scratch, 12, "impl", None).as_deref(), Ok("mini"));
-    let tracked = busy_wt(fake(1.0, 4.0), " M src/lib.rs\n?? body.md\n", "0\n");
+    let tracked = busy_wt(fake(70, 0), " M src/lib.rs\n?? body.md\n", "0\n");
     let e = placed(&c, &tracked, 12, "impl", None).unwrap_err();
     assert!(
         e.starts_with("HOST_BUSY: bazzite") && e.ends_with("; stays on bazzite: its worktree there has unpushed work"),
@@ -145,7 +142,7 @@ fn a_fix_spawn_held_on_its_busy_pinned_host_past_the_stall_window_moves_with_its
     let c = setup("hosts-stall-move-1025", "", true, 0);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     load_wait(&c);
-    let busy = || busy_wt(fake(1.0, 4.0), "", "1\n");
+    let busy = || busy_wt(fake(70, 0), "", "1\n");
     let e = placed(&c, &busy(), 12, "impl", None).unwrap_err();
     assert!(e.starts_with("HOST_BUSY: bazzite"), "pinned before the pass: {e}");
     slo_pass(&c, &busy());
@@ -197,7 +194,7 @@ fn a_fix_spawn_held_on_its_busy_pinned_host_past_the_stall_window_moves_with_its
 fn a_load_wait_past_the_stall_window_with_no_free_host_is_a_stuck_card_never_the_busy_host() {
     let c = setup("hosts-stall-nofree", "", true, 0);
     load_wait(&c);
-    let busy = || busy_wt(fake(4.0, 4.0), "", "1\n");
+    let busy = || busy_wt(fake(0, 0), "", "1\n");
     slo_pass(&c, &busy());
     let e = placed(&c, &busy(), 12, "impl", None).unwrap_err();
     assert!(e.starts_with("HOST_BUSY: mini"), "never back on the busy host: {e}");

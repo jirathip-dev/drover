@@ -1,0 +1,18 @@
+[].block: object
+[].fleet: string
+[].handoff: null
+[].issue: null
+[].issue: number
+[].key: string
+[].kind = "alert"
+[].open: boolean
+[].prompt: null
+[].push.body: string
+[].push.tag: string
+[].push.title: string
+[].seq: number
+[].text: string
+[].to.k = "desk"
+[].to.k = "owner"
+[].to.repo: string
+[].ts: number

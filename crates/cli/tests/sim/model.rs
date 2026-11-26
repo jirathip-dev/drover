@@ -252,14 +252,15 @@ fn reply(w: &mut World, me: usize, prog: &str, args: &[String]) -> Out {
         }
         "sysctl" => match a.last().copied() {
             Some("kern.memorystatus_vm_pressure_level") => ok("1\n"),
-            Some("vm.loadavg") => {
-                let l = w.model.load;
-                ok(format!("{{ {l}.00 {l}.00 {l}.00 }}\n"))
-            }
             Some("hw.ncpu") => ok("10\n"),
             Some("hw.memsize") => ok("68719476736\n"),
             _ => err(1, "sysctl"),
         },
+        "iostat" => {
+            let idle = if w.model.load >= 25 { 5 } else { 80 };
+            ok(format!(" us sy id   1m   5m   15m\n 10 10 80  1 1 1\n 50 {} {idle}  1 1 1\n", 95 - idle))
+        }
+        "vmstat" => err(127, "vmstat"),
         "vm_stat" => ok("Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 400000.\nPages inactive: 400000.\nPages speculative: 0.\nSwapouts: 100.\n"),
         "df" => ok("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s5 1000000000 100000000 900000000 10% /\n"),
         "date" => err(1, "date"),

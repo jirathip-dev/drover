@@ -33,14 +33,14 @@ fn codes(d: &serde_json::Value) -> Vec<String> {
     a.iter().map(|a| a["code"].as_str().unwrap_or("").to_string()).collect()
 }
 
-fn fake(load: &str) -> Fake {
-    fake_with(load, Fake::default())
+fn fake(idle: u32) -> Fake {
+    fake_with(idle, Fake::default())
 }
 
-fn fake_with(load: &str, f: Fake) -> Fake {
+fn fake_with(idle: u32, f: Fake) -> Fake {
     f.reply("which shed", "/opt/shed/bin/shed\n")
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
-        .reply("sysctl -n vm.loadavg", &format!("{{ {load} {load} {load} }}\n"))
+        .reply("iostat", &iostat(idle))
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("gh issue view", r#"{"title":"t","body":"b"}"#)
@@ -72,7 +72,7 @@ fn pass(c: &drover::Ctx, r: &Fake) -> serde_json::Value {
 #[test]
 fn a_pass_with_ten_due_spawns_launches_ten_kicks_and_starts_no_harness() {
     let (c, sh) = fleet_with("kicks-ten", 11, "max_in_flight = 0", 10, &[]);
-    let r = fake("1.0");
+    let r = fake(80);
     let t0 = std::time::Instant::now();
     let d = pass(&c, &r);
     assert!(t0.elapsed().as_secs() < 5);
@@ -91,7 +91,7 @@ fn a_pass_with_ten_due_spawns_launches_ten_kicks_and_starts_no_harness() {
 #[test]
 fn kicks_respect_max_parallel_spawns_and_admission() {
     let (c, sh) = fleet("kicks-max", 3, 5);
-    let r = fake("1.0");
+    let r = fake(80);
     let d = pass(&c, &r);
     assert_eq!(pending(&d), 2, "{d}");
     assert!((1..=2).all(|n| launched(&r, n) == 1) && (3..=5).all(|n| launched(&r, n) == 0));
@@ -102,12 +102,12 @@ fn kicks_respect_max_parallel_spawns_and_admission() {
         .filter(|a| a["code"] == "SPAWN_PENDING")
         .count();
     assert_eq!(held, 3, "{d}");
-    let busy = fake("40.0");
+    let busy = fake(5);
     let (code, out) = run(&c, &busy, &["kick", "sendmeter", "1", "--why", "drive", "--now"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("HOST_BUSY"), "{out}");
     assert!(!started(&sh) && marker(&c, 1).is_none());
-    let r = fake("1.0");
+    let r = fake(80);
     pass(&c, &r);
     assert_eq!((launched(&r, 1), launched(&r, 2), launched(&r, 3)), (1, 0, 0));
 }
@@ -115,7 +115,7 @@ fn kicks_respect_max_parallel_spawns_and_admission() {
 #[test]
 fn two_quick_passes_launch_each_spawn_once() {
     let (c, _sh) = fleet("kicks-twice", 6, 2);
-    let r = fake("1.0");
+    let r = fake(80);
     pass(&c, &r);
     pass(&c, &r);
     assert_eq!((launched(&r, 1), launched(&r, 2)), (1, 1), "{:?}", r.calls.borrow());
@@ -124,7 +124,7 @@ fn two_quick_passes_launch_each_spawn_once() {
 #[test]
 fn a_failed_kick_clears_its_marker_and_the_next_pass_retries() {
     let (c, sh) = fleet("kicks-fail", 6, 1);
-    let r = fake("1.0");
+    let r = fake(80);
     pass(&c, &r);
     assert!(marker(&c, 1).is_some());
     let broken = Fake::default()
@@ -135,7 +135,7 @@ fn a_failed_kick_clears_its_marker_and_the_next_pass_retries() {
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n");
     let _ = run(&c, &broken, &["kick", "sendmeter", "1", "--why", "drive", "--now"]);
     assert!(!started(&sh) && marker(&c, 1).is_none());
-    let r = fake("1.0");
+    let r = fake(80);
     pass(&c, &r);
     assert_eq!(launched(&r, 1), 1);
 }
@@ -144,7 +144,7 @@ fn a_failed_kick_clears_its_marker_and_the_next_pass_retries() {
 fn a_stale_marker_does_not_hold_the_issue_forever() {
     let (c, _sh) = fleet("kicks-stale", 6, 1);
     mark(&c, 1, 4242, 3600);
-    let r = fake("1.0").reply("kill -0 4242", "");
+    let r = fake(80).reply("kill -0 4242", "");
     pass(&c, &r);
     assert_eq!(launched(&r, 1), 1);
 }
@@ -152,17 +152,17 @@ fn a_stale_marker_does_not_hold_the_issue_forever() {
 #[test]
 fn a_pass_counts_starting_spawns_against_serial_and_cap() {
     let (c, sh) = fleet_with("kicks-serial", 6, r#"serial_paths = ["db/**"]"#, 2, &["--serial"]);
-    let r = fake("1.0");
+    let r = fake(80);
     let d = pass(&c, &r);
     assert_eq!((launched(&r, 1), launched(&r, 2)), (1, 0), "{d}");
     assert_eq!(codes(&d)[1], "SERIAL_BUSY", "{d}");
-    let hook = fake("1.0");
+    let hook = fake(80);
     let (code, out) = run(&c, &hook, &["kick", "sendmeter", "2", "--why", "stop", "--now"]);
     assert_eq!(code, 0, "{out}");
     assert!(!started(&sh), "{out}");
 
     let (c, _sh) = fleet_with("kicks-cap", 6, "max_impl = 1", 3, &[]);
-    let r = fake("1.0");
+    let r = fake(80);
     let d = pass(&c, &r);
     assert_eq!(pending(&d), 1, "{d}");
     assert_eq!(codes(&d), ["", "CAP"], "CAP ends the fleet's starts: {d}");
@@ -171,11 +171,11 @@ fn a_pass_counts_starting_spawns_against_serial_and_cap() {
 #[test]
 fn a_hook_kick_never_clears_a_launched_kicks_marker() {
     let (c, _sh) = fleet("kicks-hook", 6, 1);
-    pass(&c, &fake("1.0"));
-    let (code, out) = run(&c, &fake("1.0"), &["kick", "sendmeter", "1", "--why", "stop", "--now"]);
+    pass(&c, &fake(80));
+    let (code, out) = run(&c, &fake(80), &["kick", "sendmeter", "1", "--why", "stop", "--now"]);
     assert_eq!(code, 0, "{out}");
     assert!(marker(&c, 1).is_some());
-    let r = fake("1.0");
+    let r = fake(80);
     pass(&c, &r);
     assert_eq!(launched(&r, 1), 0);
 }
@@ -199,16 +199,16 @@ fn stale(c: &drover::Ctx) -> Vec<drover::events::Event> {
 #[test]
 fn a_marker_carries_its_kicks_pid_and_goes_when_that_pid_dies() {
     let (c, _sh) = fleet("kicks-pid", 6, 1);
-    pass(&c, &fake("1.0").reply("sh -c nohup", "4242\n"));
+    pass(&c, &fake(80).reply("sh -c nohup", "4242\n"));
     let m: serde_json::Value = serde_json::from_str(&marker(&c, 1).unwrap().data).unwrap();
     assert_eq!(m["pid"], 4242, "{m}");
-    let r = fake("1.0")
+    let r = fake(80)
         .reply("kill -0 4242", "")
         .reply("ps -o etime= -p 4242", "  00:30\n");
     pass(&c, &r);
     assert_eq!(launched(&r, 1), 0);
     assert!(stale(&c).is_empty());
-    let r = fake("1.0");
+    let r = fake(80);
     pass(&c, &r);
     assert_eq!(launched(&r, 1), 1);
     let s = stale(&c);
@@ -224,12 +224,12 @@ fn a_marker_carries_its_kicks_pid_and_goes_when_that_pid_dies() {
 fn an_old_or_reused_pid_marker_is_stale() {
     let (c, _sh) = fleet("kicks-old", 6, 1);
     mark(&c, 1, 4242, 400);
-    let r = fake("1.0").reply("kill -0 4242", "");
+    let r = fake(80).reply("kill -0 4242", "");
     pass(&c, &r);
     assert_eq!((launched(&r, 1), stale(&c).len()), (1, 1));
     let (c, _sh) = fleet("kicks-reused", 6, 1);
     mark(&c, 1, 4242, 100);
-    let r = fake("1.0")
+    let r = fake(80)
         .reply("kill -0 4242", "")
         .reply("ps -o etime= -p 4242", "00:30\n");
     pass(&c, &r);
@@ -240,7 +240,7 @@ fn an_old_or_reused_pid_marker_is_stale() {
 fn six_dead_markers_never_hold_a_new_spawn() {
     let (c, _sh) = fleet("kicks-six-dead", 6, 1);
     (11..=16).for_each(|n| mark(&c, n, 4242, 10));
-    let r = fake("1.0");
+    let r = fake(80);
     let d = pass(&c, &r);
     assert_eq!((launched(&r, 1), Some(pending(&d))), (1, Some(1)), "{d}");
     assert_eq!(stale(&c).len(), 6);
@@ -255,7 +255,7 @@ fn a_dead_passs_admit_lock_and_marker_never_refuse_the_next_spawn() {
         lease_as(&c, k, 4242, drover::now() - 5, 60);
     }
     mark(&c, 2, 4242, 10);
-    let r = fake("1.0");
+    let r = fake(80);
     let d = pass(&c, &r);
     assert!(!codes(&d).iter().any(|c| c == "SPAWN_PENDING"), "{d}");
     assert_eq!((launched(&r, 1), pending(&d)), (1, 1), "{d}");
@@ -277,9 +277,9 @@ impl drover::runner::Runner for Panics {
 #[test]
 fn a_panicking_kick_leaves_no_marker_or_lock() {
     let (c, _sh) = fleet("kicks-panic", 6, 1);
-    pass(&c, &fake("1.0"));
+    pass(&c, &fake(80));
     assert!(marker(&c, 1).is_some());
-    let p = Panics(fake("1.0"));
+    let p = Panics(fake(80));
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         run(&c, &p, &["kick", "sendmeter", "1", "--why", "drive", "--now"])
     }));
@@ -320,11 +320,11 @@ fn spawn_pending_for_15_minutes_alerts_once() {
 #[test]
 fn a_kick_refused_disk_low_leaves_no_driven_ok() {
     let (c, _sh) = fleet("kicks-disk-low", 6, 1);
-    pass(&c, &fake("1.0"));
+    pass(&c, &fake(80));
     let df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s1 239362496 9 2097152 99% /\n";
     let (code, out) = run(
         &c,
-        &fake("1.0").reply("df -k /", df),
+        &fake(80).reply("df -k /", df),
         &["kick", "sendmeter", "1", "--why", "drive", "--now"],
     );
     assert_eq!(code, 0, "{out}");
@@ -350,7 +350,7 @@ fn a_full_hosts_pending_spawn_holds_no_slot_for_another_host() {
     mark(&c, 1, 4242, 0);
     let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- ";
     let df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 1048576 99% /\n";
-    let r = fake("1.0")
+    let r = fake(80)
         .reply(&format!("{ssh}'df' '-k' '/'"), df)
         .reply("kill -0 4242", "");
     let d = pass(&c, &r);
@@ -373,7 +373,7 @@ fn fix_due(c: &drover::Ctx, n: u64) {
 fn due_fix_rounds_run_before_the_starts() {
     let (c, _sh) = fleet("kicks-order", 6, 10);
     (21..=22).for_each(|n| fix_due(&c, n));
-    let r = fake("1.0");
+    let r = fake(80);
     let d = pass(&c, &r);
     let at = |n: u64| r.index(&format!("sh -c nohup '/opt/drover/bin/drover' kick sendmeter {n} "));
     let starts = (1..=10).filter_map(at).collect::<Vec<_>>();
@@ -390,7 +390,7 @@ fn a_due_fix_round_takes_the_reserved_slot() {
     let (c, _sh) = fleet("kicks-reserved", 6, 1);
     (11..=15).for_each(|n| mark(&c, n, 4242, 10));
     fix_due(&c, 21);
-    let r = fake("1.0")
+    let r = fake(80)
         .reply("kill -0 4242", "")
         .reply("ps -o etime= -p 4242", "  00:30\n");
     let d = pass(&c, &r);
@@ -403,7 +403,7 @@ fn a_kicks_own_spawn_takes_a_start_slot_like_a_start() {
     let (c, sh) = fleet("kicks-own-marker", 6, 1);
     (11..=16).for_each(|n| mark(&c, n, 4242, 10));
     fix_due(&c, 21);
-    let r = fake("1.0")
+    let r = fake(80)
         .reply("kill -0 4242", "")
         .reply("ps -o etime= -p 4242", "  00:30\n");
     let kick = ["kick", "sendmeter", "21", "--why", "webhook", "--now"];
@@ -429,7 +429,7 @@ fn a_kicks_own_spawn_takes_a_start_slot_like_a_start() {
 #[test]
 fn one_slot_and_nothing_in_flight_still_starts() {
     let (c, _sh) = fleet("kicks-one", 1, 2);
-    let r = fake("1.0");
+    let r = fake(80);
     let d = pass(&c, &r);
     assert_eq!((launched(&r, 1), launched(&r, 2)), (1, 0), "{d}");
 }
@@ -459,7 +459,7 @@ fn review_due(c: &drover::Ctx, n: u64, f: Fake) -> Fake {
 fn the_slots_go_to_the_review_and_the_fix_round_before_a_start() {
     let (c, _sh) = fleet("kicks-review-first", 2, 1);
     fix_due(&c, 21);
-    let r = fake_with("1.0", review_due(&c, 22, Fake::default()));
+    let r = fake_with(80, review_due(&c, 22, Fake::default()));
     let d = pass(&c, &r);
     assert_eq!((launched(&r, 22), launched(&r, 21), launched(&r, 1)), (1, 1, 0), "{d}");
 }
@@ -468,13 +468,13 @@ fn the_slots_go_to_the_review_and_the_fix_round_before_a_start() {
 fn a_busy_host_holds_every_spawn_and_stops_the_starts() {
     let (c, _sh) = fleet("kicks-busy", 6, 2);
     let f = review_due(&c, 22, Fake::default());
-    let r = fake_with("40.0", f);
+    let r = fake_with(5, f);
     let d = pass(&c, &r);
     assert_eq!((launched(&r, 22), launched(&r, 1), launched(&r, 2)), (0, 0, 0), "{d}");
     let a = d["actions"].as_array().unwrap();
     assert!(a.iter().any(|a| a["issue"] == 22 && a["code"] == "HOST_BUSY"), "{d}");
     assert!(a.iter().all(|a| a["issue"] != 2), "one busy start stops the rest: {d}");
-    let r = fake_with("1.0", review_due(&c, 22, Fake::default()));
+    let r = fake_with(80, review_due(&c, 22, Fake::default()));
     pass(&c, &r);
     let at = |n: u64| r.index(&format!("sh -c nohup '/opt/drover/bin/drover' kick sendmeter {n} "));
     assert!(at(22).is_some() && at(22) < at(1), "{:?}", r.calls.borrow());
@@ -484,7 +484,7 @@ fn a_busy_host_holds_every_spawn_and_stops_the_starts() {
 fn waiting_names_the_reviews_ahead() {
     let (c, _sh) = fleet("kicks-review-order", 1, 1);
     let f = (21..=23).fold(Fake::default(), |f, n| review_due(&c, n, f));
-    let r = fake_with("1.0", f);
+    let r = fake_with(80, f);
     pass(&c, &r);
     assert_eq!(launched(&r, 21), 1);
     let (code, out) = run(&c, &r, &["waiting", "sendmeter", "--json"]);
@@ -496,7 +496,7 @@ fn waiting_names_the_reviews_ahead() {
     assert!(out.contains("review waits behind 2 earlier reviews"), "{out}");
 }
 
-struct Inline(Fake, drover::Ctx, &'static str, fake_shed::Twin);
+struct Inline(Fake, drover::Ctx, u32, fake_shed::Twin);
 impl drover::runner::Runner for Inline {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         self.0.run(prog, args)
@@ -506,11 +506,11 @@ impl drover::runner::Runner for Inline {
         if args.first().is_none_or(|a| a != "kick") {
             return Ok(0);
         }
-        let (c, a, load, sh) = (self.1.clone(), args.to_vec(), self.2, self.3.clone());
+        let (c, a, idle, sh) = (self.1.clone(), args.to_vec(), self.2, self.3.clone());
         std::thread::spawn(move || {
             sh.config("");
             let a: Vec<&str> = a.iter().map(String::as_str).collect();
-            run(&c, &fake(load), &a)
+            run(&c, &fake(idle), &a)
         })
         .join()
         .unwrap();
@@ -531,7 +531,7 @@ fn act(d: &serde_json::Value, n: u64) -> serde_json::Value {
 #[test]
 fn a_kick_refused_host_busy_is_logged_by_its_kick_and_the_pass_never_waits_or_rewrites() {
     let (c, sh) = fleet("kicks-604-busy", 6, 1);
-    let r = Inline(fake("1.0"), c.clone(), "40.0", sh.twin());
+    let r = Inline(fake(80), c.clone(), 5, sh.twin());
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("sendmeter #1 start: pending"), "{out}");
@@ -554,7 +554,7 @@ fn a_kick_refused_host_busy_is_logged_by_its_kick_and_the_pass_never_waits_or_re
         .iter()
         .rfind(|e| e.kind == "drive-pass" && e.data.get("kick") == Some(&serde_json::Value::Null));
     assert!(!drover::drive::result(e.unwrap()).1.contains("started 1"), "{plan}");
-    let (code, out) = run(&c, &fake("1.0"), &["waiting", "sendmeter"]);
+    let (code, out) = run(&c, &fake(80), &["waiting", "sendmeter"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("HOST_BUSY"), "{out}");
 }
@@ -588,7 +588,7 @@ fn every_start_refused_by_one_host_gate_for_30_min_alerts_once() {
 #[test]
 fn a_start_returns_pending_and_its_kick_logs_the_spawn() {
     let (c, sh) = fleet("kicks-604-ok", 6, 1);
-    let (code, out) = run(&c, &Inline(fake("1.0"), c.clone(), "1.0", sh.twin()), &["drive"]);
+    let (code, out) = run(&c, &Inline(fake(80), c.clone(), 80, sh.twin()), &["drive"]);
     assert_eq!(code, 0, "{out}");
     let ev = read(&c.state).unwrap();
     assert!(ev.iter().any(|e| e.is("spawn", "sendmeter", 1)), "{out}");
@@ -632,7 +632,7 @@ fn starts_share_slots_across_fleets_passing_at_once() {
     let (c, _sh) = fleets("kicks-638-fair", &names, 7, 5);
     let alive = format!("kill -0 {}", std::process::id());
     for _ in 0..3 {
-        let r = fake_with("1.0", Fake::default().reply(&alive, ""));
+        let r = fake_with(80, Fake::default().reply(&alive, ""));
         let (code, out) = run(&c, &r, &["drive"]);
         assert_eq!(code, 0, "{out}");
         let k = kicked_fleets(&r);
@@ -659,9 +659,9 @@ impl drover::runner::Runner for Watch {
 #[test]
 fn a_kick_refused_host_busy_releases_its_slot_in_the_same_pass() {
     let (c, _sh) = fleet("kicks-638-busy", 6, 1);
-    pass(&c, &fake("1.0"));
+    pass(&c, &fake(80));
     assert!(marker(&c, 1).is_some());
-    let r = Watch(fake("40.0"), c.clone(), Shared::default());
+    let r = Watch(fake(5), c.clone(), Shared::default());
     let (code, out) = run(&c, &r, &["kick", "sendmeter", "1", "--why", "drive", "--now"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("HOST_BUSY"), "{out}");
@@ -673,15 +673,15 @@ fn a_kick_refused_host_busy_releases_its_slot_in_the_same_pass() {
 fn waiting_names_the_slot_holders() {
     let (c, _sh) = fleets("kicks-638-slots", &["alpha", "beta"], 4, 2);
     let alive = format!("kill -0 {}", std::process::id());
-    pass(&c, &fake_with("1.0", Fake::default().reply(&alive, "")));
-    let (code, out) = run(&c, &fake("1.0"), &["waiting"]);
+    pass(&c, &fake_with(80, Fake::default().reply(&alive, "")));
+    let (code, out) = run(&c, &fake(80), &["waiting"]);
     assert_eq!(code, 0, "{out}");
     let slots = ["slots: alpha 2, beta 1\n", "slots: beta 2, alpha 1\n"];
     assert!(slots.iter().any(|s| out.contains(s)), "{out}");
 }
 
 fn broken(f: Fake) -> Fake {
-    let mut f = fake_with("1.0", f);
+    let mut f = fake_with(80, f);
     let used = drover::runner::Out {
         code: 1,
         stderr: "fatal: 'issue-1' is already used by worktree at '/w/old/worktrees/x'".into(),
@@ -704,7 +704,7 @@ fn failing_retries_never_starve_another_fleets_start() {
     let due = || (21..=26).fold(Fake::default(), |f, n| review_due(&c, n, f));
     let mut beta = 0;
     for _ in 0..2 {
-        let r = fake_with("1.0", due());
+        let r = fake_with(80, due());
         let (code, out) = run(&c, &r, &["drive"]);
         assert_eq!(code, 0, "{out}");
         beta += kicked_fleets(&r).iter().filter(|f| *f == "beta").count();
@@ -718,10 +718,10 @@ fn failing_retries_never_starve_another_fleets_start() {
 #[test]
 fn a_failing_spawn_backs_off_and_a_kick_retries_it_at_once() {
     let (c, sh) = fleet("kicks-724-backoff", 6, 1);
-    pass(&c, &fake("1.0"));
+    pass(&c, &fake(80));
     let bad = broken(Fake::default());
     fail_kick(&c, &bad, "sendmeter", 1);
-    let r = fake("1.0");
+    let r = fake(80);
     pass(&c, &r);
     assert_eq!(launched(&r, 1), 1, "a first failure retries at once");
     fail_kick(&c, &bad, "sendmeter", 1);
@@ -730,21 +730,21 @@ fn a_failing_spawn_backs_off_and_a_kick_retries_it_at_once() {
         ..c.clone()
     };
     for s in [0, 60, 299] {
-        let r = fake("1.0");
+        let r = fake(80);
         pass(&at(s), &r);
         assert_eq!(launched(&r, 1), 0, "an attempt {s}s after the failure");
     }
-    let (code, out) = run(&at(120), &fake("1.0"), &["waiting", "sendmeter"]);
+    let (code, out) = run(&at(120), &fake(80), &["waiting", "sendmeter"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("retrying in 3m: "), "{out}");
-    let r = fake("1.0");
+    let r = fake(80);
     pass(&at(301), &r);
     assert_eq!(launched(&r, 1), 1, "retried past the wait");
     fail_kick(&at(302), &bad, "sendmeter", 1);
-    let r = fake("1.0");
+    let r = fake(80);
     pass(&at(310), &r);
     assert_eq!(launched(&r, 1), 0);
-    let r = fake("1.0");
+    let r = fake(80);
     let (code, out) = run(&at(311), &r, &["kick", "sendmeter", "1", "--why", "owner", "--now"]);
     assert_eq!(code, 0, "{out}");
     assert!(started(&sh), "{out}");
@@ -755,7 +755,7 @@ fn a_fleet_with_one_start_gets_a_slot_beside_one_with_six() {
     let (c, _sh) = fleets("kicks-724-fair", &["alpha", "beta"], 6, 1);
     let add = ["queue", "alpha", "add", "2", "3", "4", "5", "6"];
     assert_eq!(run(&c, &Fake::default(), &add).0, 0);
-    let r = fake("1.0");
+    let r = fake(80);
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     let k = kicked_fleets(&r);
@@ -814,7 +814,7 @@ fn waiting_names_a_slot_wait_not_a_stuck_tick() {
         serde_json::json!({"actions": a}),
     );
     drover::events::append(&c.state, &e).unwrap();
-    let (code, out) = run(&c, &fake("1.0"), &["waiting", "sendmeter"]);
+    let (code, out) = run(&c, &fake(80), &["waiting", "sendmeter"]);
     assert_eq!(code, 0, "{out}");
     assert!(
         out.contains("→ waiting for a spawn slot (1 failing retries hold them)"),
@@ -827,7 +827,7 @@ fn dead_six_live_one(name: &str) -> (drover::Ctx, Fake, FakeShed) {
     let (c, sh) = fleet(name, 6, 1);
     (11..=16).for_each(|n| mark(&c, n, 4242, 10));
     mark(&c, 17, 4343, 30);
-    let r = fake("1.0")
+    let r = fake(80)
         .reply("kill -0 4343", "")
         .reply("ps -o etime= -p 4343", "  00:40\n");
     (c, r, sh)
@@ -910,7 +910,7 @@ impl drover::runner::Runner for SlowAlpha {
 #[test]
 fn a_fleet_whose_gh_hangs_never_holds_another_fleets_pass_or_its_spawn() {
     let (c, sh) = fleets("kicks-896-slow", &["alpha", "beta"], 0, 1);
-    let r = SlowAlpha(fake("1.0"), c.clone(), Shared::default());
+    let r = SlowAlpha(fake(80), c.clone(), Shared::default());
     look(&c, &r);
     std::thread::scope(|s| {
         for f in ["alpha", "beta"] {
@@ -936,7 +936,7 @@ fn a_fleet_whose_gh_hangs_never_holds_another_fleets_pass_or_its_spawn() {
 struct Meet(Fake, std::sync::Barrier);
 impl drover::runner::Runner for Meet {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
-        if prog == "sysctl" && args.join(" ") == "-n vm.loadavg" {
+        if prog == "iostat" {
             let (tx, rx) = std::sync::mpsc::channel();
             std::thread::scope(|s| {
                 s.spawn(|| {
@@ -958,7 +958,7 @@ fn two_fleets_passes_at_once_never_admit_a_spawn_past_the_host_limit() {
     let (c, _sh) = fleets("kicks-896-admit", &["alpha", "beta"], 2, 1);
     let pid = std::process::id();
     let r = Meet(
-        fake_with("1.0", Fake::default().reply(&format!("kill -0 {pid}"), "")),
+        fake_with(80, Fake::default().reply(&format!("kill -0 {pid}"), "")),
         std::sync::Barrier::new(2),
     );
     let (code, out) = run(&c, &r, &["drive"]);
@@ -1005,7 +1005,7 @@ fn each_host_fills_its_own_start_slots_in_one_pass() {
     let c = hosted("kicks-1186-hosts", &[("alpha", 1), ("beta", 1), ("gamma", 1)], 3, BOATS);
     let sh = FakeShed::new();
     sh.attach(&c);
-    let r = fake_with("1.0", Fake::default().reply("ssh ", ""));
+    let r = fake_with(80, Fake::default().reply("ssh ", ""));
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     let on = starting_on(&c);
@@ -1029,7 +1029,7 @@ fn a_shared_host_splits_its_start_slots_by_fleet_weight() {
     );
     let sh = FakeShed::new();
     sh.attach(&c);
-    let r = fake_with("1.0", Fake::default().reply("ssh ", ""));
+    let r = fake_with(80, Fake::default().reply("ssh ", ""));
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     let on = starting_on(&c);
@@ -1044,7 +1044,7 @@ fn a_fast_pass_starts_a_queued_issue_once_a_slot_frees() {
     let (c, _sh) = fleet("kicks-1186-fast", 2, 2);
     mark(&c, 9, 4242, 10);
     let alive = || {
-        fake("1.0")
+        fake(80)
             .reply("kill -0 4242", "")
             .reply("ps -o etime= -p 4242", "  00:10\n")
     };
@@ -1071,7 +1071,7 @@ fn started_mark(c: &drover::Ctx, n: u64, release: &str) -> (drover::Ctx, Fake) {
     let cfg = std::fs::read_to_string(&c.config).unwrap();
     let hosts = format!("\n[hosts.mini]\nstart_release = \"{release}\"\n");
     std::fs::write(&c.config, cfg + &hosts).unwrap();
-    let r = fake("1.0")
+    let r = fake(80)
         .reply("kill -0 4242", "")
         .reply("ps -o etime= -p 4242", "  00:10\n");
     (c.clone(), r)
@@ -1095,7 +1095,7 @@ impl drover::runner::Runner for KickWatch {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         let started = marker(&self.0, 1).is_some_and(|l| l.data.contains(r#""started":true"#));
         self.1.borrow_mut().push(started);
-        fake("1.0").run(prog, args)
+        fake(80).run(prog, args)
     }
     fn sleep(&self, _: u64) {}
 }
@@ -1103,7 +1103,7 @@ impl drover::runner::Runner for KickWatch {
 #[test]
 fn a_kicks_spawn_marks_its_slot_started_once_its_harness_is_up() {
     let (c, sh) = fleet("kicks-1186-mark", 6, 1);
-    pass(&c, &fake("1.0"));
+    pass(&c, &fake(80));
     assert!(marker(&c, 1).is_some_and(|l| !l.data.contains("started")));
     let r = KickWatch(c.clone(), Shared::default());
     let (code, out) = run(&c, &r, &["kick", "sendmeter", "1", "--why", "drive", "--now"]);
@@ -1119,10 +1119,10 @@ fn a_kicks_spawn_marks_its_slot_started_once_its_harness_is_up() {
 fn one_free_slot_goes_to_the_fix_round_and_over_the_load_limit_neither_spawns() {
     let (c, _sh) = fleet("kicks-fix-first", 1, 1);
     fix_due(&c, 21);
-    let busy = fake("40.0");
+    let busy = fake(5);
     let d = pass(&c, &busy);
     assert_eq!((launched(&busy, 21), launched(&busy, 1)), (0, 0), "{d}");
-    let r = fake("1.0");
+    let r = fake(80);
     let d = pass(&c, &r);
     assert_eq!((launched(&r, 21), launched(&r, 1)), (1, 0), "{d}");
 }
@@ -1139,7 +1139,7 @@ fn a_start_whose_spawn_ended_frees_its_slot_while_its_holder_lives() {
         let (c, _sh) = fleet(&format!("kicks-1234-{kind}"), 2, 1);
         mark(&c, 9, 4242, 10);
         ended(&c, 9, kind);
-        let r = fake("1.0")
+        let r = fake(80)
             .reply("kill -0 4242", "")
             .reply("ps -o etime= -p 4242", "  00:10\n");
         let d = pass(&c, &r);
@@ -1163,7 +1163,7 @@ fn one_fleets_stale_markers_never_hold_another_fleets_start() {
     };
     stale(8, c.now - 730, 4242);
     stale(9, c.now - 10, 4343);
-    let r = fake_with("1.0", Fake::default().reply("ssh ", ""));
+    let r = fake_with(80, Fake::default().reply("ssh ", ""));
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     let on = starting_on(&c);
@@ -1179,7 +1179,7 @@ fn one_fleets_stale_markers_never_hold_another_fleets_start() {
 fn waiting_shows_no_starting_count_once_the_slot_is_free() {
     let (c, _sh) = fleet("kicks-1234-waiting", 2, 1);
     mark(&c, 9, 4343, 10);
-    let r = fake("1.0")
+    let r = fake(80)
         .reply("kill -0 4343", "")
         .reply("ps -o etime= -p 4343", "  00:10\n");
     let d = pass(&c, &r);
@@ -1200,11 +1200,11 @@ fn waiting_shows_no_starting_count_once_the_slot_is_free() {
 fn a_laneless_marker_past_the_limit_is_dropped_and_logged_once() {
     let (c, _sh) = fleet("kicks-laneless", 1, 1);
     mark(&c, 1, 0, 400);
-    let r = fake("1.0");
+    let r = fake(80);
     let d = pass(&c, &r);
     assert!(!codes(&d).iter().any(|c| c == "SPAWN_PENDING"), "{d}");
     assert_eq!(launched(&r, 1), 1, "{d}");
-    pass(&c, &fake("1.0"));
+    pass(&c, &fake(80));
     let s = stale(&c);
     assert_eq!(
         (s.len(), s[0].str("file")),
@@ -1217,7 +1217,7 @@ fn a_laneless_marker_past_the_limit_is_dropped_and_logged_once() {
 fn a_start_that_never_finishes_stops_blocking_the_next_spawn_once_the_limit_passes() {
     let (c, _sh) = fleet("kicks-1269-timeout", 3, 3);
     let alive = |at: &str| {
-        fake("1.0")
+        fake(80)
             .reply("sh -c nohup", "4242\n")
             .reply("kill -0 4242", "")
             .reply("ps -o etime= -p 4242", at)
@@ -1244,7 +1244,7 @@ fn a_start_that_never_finishes_stops_blocking_the_next_spawn_once_the_limit_pass
 fn free_in_flight_slots_go_to_the_first_queued_issues_while_their_kicks_run_slowly() {
     let (c, _sh) = fleet_with("kicks-1371-order", 11, "max_in_flight = 3", 6, &[]);
     let alive = |at: &str| {
-        fake("1.0")
+        fake(80)
             .reply("sh -c nohup", "4242\n")
             .reply("kill -0 4242", "")
             .reply("ps -o etime= -p 4242", at)
@@ -1278,7 +1278,7 @@ fn free_in_flight_slots_go_to_the_first_queued_issues_while_their_kicks_run_slow
         .filter(|&n| ev.iter().any(|e| e.is("spawn", "sendmeter", n)))
         .collect();
     assert_eq!(lanes, [1, 2, 3], "{d}");
-    pass(&later, &fake("1.0"));
+    pass(&later, &fake(80));
     let s = stale(&later);
     let once = |n: u64| s.iter().filter(|e| e.issue == Some(n)).count();
     assert_eq!((once(1), once(2), once(3)), (1, 1, 1), "{s:?}");
@@ -1310,7 +1310,7 @@ impl drover::runner::Runner for Kicked {
 }
 
 fn ci_red_after_pass(name: &str, live: bool) -> (drover::Ctx, FakeShed, Replies) {
-    let (c, sh) = fleet(name, 6, 1);
+    let (c, sh) = fleet_with(name, 6, "ci_flaky_retries = 0", 1, &[]);
     let wt = c.worktrees.join("sendmeter/issue-1");
     let rev = c.worktrees.join("sendmeter/rev-1-r1");
     std::fs::create_dir_all(&wt).unwrap();
@@ -1344,7 +1344,7 @@ fn ci_red_after_pass(name: &str, live: bool) -> (drover::Ctx, FakeShed, Replies)
     .to_string();
     let git = format!("git -C {}", wt.display());
     let r: Replies = std::sync::Arc::new(move || {
-        fake("1.0")
+        fake(80)
             .reply("gh pr view issue-1", &pr)
             .reply("gh run view 777", "error: ui-webkit sheet close failed\n")
             .reply(
@@ -1433,7 +1433,7 @@ impl drover::runner::Runner for Admitting {
 }
 
 fn boats() -> Fake {
-    fake_with("1.0", Fake::default().reply("ssh ", ""))
+    fake_with(80, Fake::default().reply("ssh ", ""))
         .reply("kill -0 4242", "")
         .reply("ps -o etime= -p 4242", "  00:10\n")
 }

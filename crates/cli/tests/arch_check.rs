@@ -799,6 +799,31 @@ fn a_frozen_file_missing_at_the_base_may_be_created_and_then_only_shrinks() {
     );
 }
 
+#[test]
+fn a_removed_or_retyped_line_of_an_append_only_file_fails_but_an_added_one_passes() {
+    let keys = "a: string\nb: number\n";
+    let d = committed(
+        "arch-append-only",
+        "append_only = [\"contract/*.keys\"]\n",
+        &[("contract/rows.keys", keys)],
+    );
+    std::fs::write(d.join("contract/rows.keys"), "a: string\nb: number\nc: boolean\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    std::fs::write(d.join("contract/rows.keys"), "a: string\nb: string\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("contract/rows.keys:2: `b: number` removed or changed in an append-only file"),
+        "{out}"
+    );
+    std::fs::write(d.join(".drover/arch.toml"), "").unwrap();
+    std::fs::write(d.join("contract/rows.keys"), "a: string\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("contract/rows.keys:2: `b: number` removed"), "{out}");
+}
+
 struct Slow;
 
 impl drover_core::runner::Runner for Slow {

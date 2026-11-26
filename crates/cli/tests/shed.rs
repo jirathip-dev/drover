@@ -411,6 +411,37 @@ fn a_shed_without_run_meta_is_a_doctor_cross_and_refuses_acp_lanes() {
     assert!(out.contains("✓ shed run --meta — "), "{out}");
 }
 
+#[test]
+fn doctor_prints_an_account_row_per_acp_agent_and_crosses_a_shed_under_protocol_5() {
+    let b = FakeShed::new();
+    let c = acp_ctx("acp-accounts", &acp_config(&b.sock, "claude"));
+    let f = acp_fake(&["echo", "claude-agent-acp"]);
+    let (_, out) = run(&c, &f, &["doctor"]);
+    assert!(
+        out.contains("✗ account claude: no signed-in named account → shed account add claude <name>"),
+        "{out}"
+    );
+    let acct = |name: &str, state: &str| json!({"provider": "claude", "name": name, "state": state});
+    b.lock().accounts = vec![
+        acct("default", "ready"),
+        acct("work", "ready"),
+        acct("spare", "signed-out"),
+        acct("personal", "limited"),
+        json!({"provider": "codex", "name": "x", "state": "ready"}),
+    ];
+    let (_, out) = run(&c, &f, &["doctor"]);
+    let rows: Vec<&str> = out.lines().filter(|l| l.contains(" account")).collect();
+    assert_eq!(rows, ["✓ account claude: work, personal"], "{out}");
+    b.lock().hello.as_mut().unwrap().protocol = 4;
+    let (code, out) = run(&c, &f, &["doctor"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("✗ account — shed serve is "), "{out}");
+    assert!(
+        out.contains(&format!("protocol 4, accounts need protocol 5 → {}", shed::UPDATE)),
+        "{out}"
+    );
+}
+
 fn bash_call(cmd: &str, cwd: &std::path::Path) -> String {
     json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": cwd})
         .to_string()
@@ -2010,18 +2041,19 @@ fn a_pending_tool_call_whose_process_died_is_silent() {
 #[test]
 fn a_silent_lanes_respawn_waits_under_host_busy_and_mem_low() {
     for (name, prog, sample, spawns) in [
-        ("acp-busy", "sysctl -n vm.loadavg", "{ 90.00 80.00 70.00 }\n", 1),
+        ("acp-busy", "iostat", iostat(5), 1),
         (
             "acp-memlow",
             "vm_stat",
-            "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 100.\nPages inactive: 100.\n",
+            "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 100.\nPages inactive: 100.\n"
+                .to_string(),
             1,
         ),
     ] {
         let (c, b, mut f, wt, _) = acp_lane(name);
         mid_turn(&b);
         session(&b, &[turn()]);
-        host(&mut f, prog, sample);
+        host(&mut f, prog, &sample);
         let cli = Push(b.cli(&f), wt.clone());
         drive_at(&c, &cli, 60);
         drive_at(&c, &cli, 60 + SILENT);
@@ -2082,12 +2114,12 @@ fn a_skipped_fix_round_spawn_shows_its_refusal_in_waiting() {
     let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
         "mergeable": "MERGEABLE", "statusCheckRollup": []});
     f = f.reply("gh pr view issue-12", &pr.to_string());
-    host(&mut f, "sysctl -n vm.loadavg", "{ 90.00 80.00 70.00 }\n");
+    host(&mut f, "iostat", &iostat(5));
     let cli = Push(b.cli(&f), wt.clone());
     drive_at(&c, &cli, 60);
     assert_eq!(logged(&c, "spawn").len(), 2, "the fix round (a new lane) waits");
     let (_, w) = run(&later(&c, 3 * 3600), &cli, &["waiting", "sendmeter"]);
-    assert!(w.contains("held: HOST_BUSY load/cpu 9.00 > "), "{w}");
+    assert!(w.contains("held: HOST_BUSY cpu idle 5% < "), "{w}");
     assert!(!w.contains("nothing drives this"), "{w}");
 }
 

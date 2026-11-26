@@ -1,0 +1,35 @@
+[
+  {
+    "block": {
+      "blocks": [
+        {
+          "id": "m-5-t",
+          "markdown": "lane ask q1 on #12",
+          "type": "text"
+        }
+      ],
+      "id": "m-5",
+      "kind": "sys",
+      "type": "card"
+    },
+    "fleet": "sendmeter",
+    "handoff": null,
+    "issue": null,
+    "key": "system-5",
+    "kind": "system",
+    "open": false,
+    "prompt": "lane ask q1 on #12",
+    "push": {
+      "body": "lane ask q1 on #12",
+      "tag": "system-5",
+      "title": "sendmeter"
+    },
+    "seq": 5,
+    "text": "lane ask q1 on #12",
+    "to": {
+      "id": "t1",
+      "k": "thread"
+    },
+    "ts": 999004
+  }
+]

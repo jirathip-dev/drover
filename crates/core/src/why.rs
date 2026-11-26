@@ -12,7 +12,7 @@ struct Blamed {
     blame: String,
     dir: String,
     tip: Option<String>,
-    shas: crate::compact::Shas,
+    shas: crate::reroot::Shas,
 }
 
 impl Blamed {
@@ -35,7 +35,7 @@ fn blamed(ctx: &Ctx, r: &dyn Runner, dir: &str, (name, line): (&str, u64), event
     let git = |d: &str, a: &[&str]| ok(r, "git", &[&["-C", d][..], a].concat());
     let lines = format!("{line},{line}");
     let blame = git(dir, &["blame", "--porcelain", "-L", &lines, "--", name])?;
-    let shas = crate::compact::Shas::of(events);
+    let shas = crate::reroot::Shas::of(events);
     let first = blame.split_whitespace().next().unwrap_or_default();
     let Some(run) = shas.root(first) else {
         return Ok(Blamed {
@@ -45,7 +45,7 @@ fn blamed(ctx: &Ctx, r: &dyn Runner, dir: &str, (name, line): (&str, u64), event
             shas,
         });
     };
-    let copy = crate::compact::dir(ctx, &run.repo).join("old.git");
+    let copy = crate::reroot::dir(ctx, &run.repo).join("old.git");
     if !copy.join("HEAD").exists() {
         let why = format!(
             "{first:.9} is older than the compact's cut; its history is in {}",

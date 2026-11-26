@@ -297,7 +297,7 @@ pub fn plain(prog: &str, args: &[String]) -> Vec<String> {
     flag.into_iter().chain(args.iter().cloned()).collect()
 }
 
-/// Every call's time limit by the program's file name, unless `run_for` gives one: a call that hits it is killed and exits 124. - `security`, `codesign`: 10 s; they wait on the login Keychain, which can stop answering (11-08). - `git clone|fetch|pull|push`: 10 min; a large repo over the network. - `cp`, `rm`: 10 min; copying (spawn's build cache) or deleting a worktree's build folder of many GB. - `cargo`: 30 min; self-update's release build. - `ssh` through `hosts::On`: the limit of the command it carries. - arch-check's `generate`: `gate_check_minutes` by `run_for`. - anything else: 60 s.
+/// Every call's time limit by the program's file name, unless `run_for` gives one: a call that hits it is killed and exits 124. - `security`, `codesign`: 10 s; they wait on the login Keychain, which can stop answering (11-08). - `git clone|fetch|pull|push`: 10 min; a large repo over the network. - `cp`, `rm`: 10 min; copying (spawn's build cache) or deleting a worktree's build folder of many GB. - `compact`: 10 min; its dry run mirrors the repo. - `cargo`: 30 min; self-update's release build. - `ssh` through `hosts::On`: the limit of the command it carries. - arch-check's `generate`: `gate_check_minutes` by `run_for`. - anything else: 60 s.
 pub fn limit(prog: &str, args: &[String]) -> Duration {
     let net = |w: &String| ["clone", "fetch", "pull", "push"].contains(&w.as_str());
     let name = std::path::Path::new(prog)
@@ -314,7 +314,7 @@ pub fn limit(prog: &str, args: &[String]) -> Duration {
     let secs = match &*name {
         "security" | "codesign" => 10,
         "git" if args.iter().any(net) => 600,
-        "cp" | "rm" => 600,
+        "cp" | "rm" | "compact" => 600,
         "cargo" => 1800,
         _ => 60,
     };
@@ -332,15 +332,15 @@ pub fn answers(dir: &std::path::Path) -> bool {
 }
 
 fn listed(dir: &str) -> String {
-    let load = crate::host::load().map_or("?".into(), |l| format!("{:.1}", l.0));
+    let idle = crate::host::idle().map_or("?".into(), |i| format!("{i:.0}%"));
     match probes().get(dir) {
         Some(p) if !p.done.load(std::sync::atomic::Ordering::Relaxed) => {
             format!(
-                "folder listing still running after {:.1} s at load {load}",
+                "folder listing still running after {:.1} s at cpu idle {idle}",
                 p.at.elapsed().as_secs_f64()
             )
         }
-        _ => format!("a call on its disk ran out of time; load {load}"),
+        _ => format!("a call on its disk ran out of time; cpu idle {idle}"),
     }
 }
 

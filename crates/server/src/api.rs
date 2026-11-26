@@ -275,7 +275,7 @@ pub struct LaneNow {
     pub t: Option<String>,
 }
 
-/// API v1's `chat`, the [chat] tab: a card per repo (`all` first) with its threads, then every thread's view (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
+/// API v1's `chat`, the [chat] tab: a card per repo (`all` first) with its open threads' rows (`?archived=1`: the archived ones too), and `?thread=<t>`'s view alone (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
 pub struct ChatTab {
     pub now: u64,
     pub rw: bool,
@@ -414,6 +414,21 @@ pub struct HandoffChoice {
     pub op: String,
     pub fleet: String,
     pub id: String,
+}
+
+/// API v1's `rows` and `thread/<id>/rows` (docs/rows.md): `seq` the newest row's; `more`: ask again from the last row's seq.
+pub struct Rows {
+    pub seq: u64,
+    pub more: bool,
+    pub rows: Vec<RowView>,
+}
+
+/// A row as cooee reads it: the row, what every surface draws (`block`), and a handoff row's item.
+pub struct RowView {
+    #[serde(flatten)]
+    pub row: drover_core::thread::Row,
+    pub block: Value,
+    pub handoff: Option<Handoff>,
 }
 
 /// API v1's `repo/<fleet>/threads`: the repo's conductor threads, newest-active first.
@@ -1107,6 +1122,16 @@ pub struct AttachEnv {
     pub thread: String,
     #[serde(rename = "DROVER_PORT")]
     pub port: String,
+}
+
+/// `POST /api/v1/thread/<id>/said`: one owner line of an attached chat, copied for `answer --typed`.
+pub struct Said {
+    /// The client's item id: posting it twice logs it once.
+    pub id: String,
+    pub ts: u64,
+    /// `owner`; the agent's own lines stay in the client.
+    pub from: String,
+    pub text: String,
 }
 
 }

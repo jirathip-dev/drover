@@ -27,6 +27,8 @@ pub struct State {
     pub held: Option<String>,
     /// What the link does to each connection (`Fault::None`: answers at once).
     pub fault: Fault,
+    /// The accounts `account.ls` answers with.
+    pub accounts: Vec<Value>,
 }
 
 /// A fault the fake link injects into each connection: `Hang` reads and never answers, `Latency` answers late, `Loss(n)` closes the next n unanswered, `Gone` takes the socket away.
@@ -294,6 +296,7 @@ fn handle(m: &str, p: &Value, st: &mut State) -> Result<Value, RpcError> {
         }
         "ls" => Ok(json!(terms.values().collect::<Vec<_>>())),
         "events" => Ok(json!({})),
+        "account.ls" => Ok(json!(st.accounts)),
         _ if !terms.contains_key(&name) => Err(gone()),
         "get" => Ok(terms[&name].clone()),
         "read" if p["events"] == true && terms[&name]["acp"].is_string() => {
@@ -301,9 +304,12 @@ fn handle(m: &str, p: &Value, st: &mut State) -> Result<Value, RpcError> {
             let kept = terms[&name]["events"].as_array().cloned().unwrap_or_default();
             let all: Vec<&Value> = kept.iter().filter(|e| e["seq"].as_u64() < Some(before)).collect();
             let n = p["n"].as_u64().map_or(all.len(), |n| usize::try_from(n).unwrap());
-            Ok(json!({"text": "", "events": all[all.len().saturating_sub(n)..]}))
+            Ok(json!({"text": "", "events": all[all.len().saturating_sub(n)..], "cursor": {"seq": 0, "screen": 0}}))
         }
-        "read" => Ok(json!({"text": terms[&name]["text"].as_str().map_or(format!("screen of {name}"), String::from)})),
+        "read" => Ok(json!({
+            "text": terms[&name]["text"].as_str().map_or(format!("screen of {name}"), String::from),
+            "cursor": {"seq": 0, "screen": 0},
+        })),
         "send" | "keys" => Ok(json!({})),
         "wait" => {
             let outcome = st.waits.get(&name).map_or("matched", String::as_str);

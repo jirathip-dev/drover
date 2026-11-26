@@ -133,18 +133,6 @@ pub fn settled<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
     settled.into_iter().find(|e| e.str("id") == Some(id))
 }
 
-/// A card with exactly `cmd` is approved, started and not yet done: the run it is.
-pub fn running(events: &[Event], cmd: &str) -> bool {
-    let id = |k: &str, id: &str| events.iter().any(|e| e.kind == k && e.str("id") == Some(id));
-    (events
-        .iter()
-        .filter(|e| e.kind == "run-card" && e.str("cmd") == Some(cmd)))
-    .filter_map(|c| c.str("id"))
-    .any(|c| {
-        settled(events, c).is_some_and(|s| s.val("approved") == true) && id("run-started", c) && !id("run-done", c)
-    })
-}
-
 /// The owner's [approve] (`sha`: the prefix of the command's sha the owner saw, if the tap carries it) or [deny] on card `id`; the line the thread records.
 pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, approve: bool, sha: Option<&str>) -> Result<String> {
     settle_via(ctx, cfg, r, id, approve, sha, None)
@@ -200,7 +188,7 @@ pub fn settle_via(
     } else {
         format!("run {id} denied by owner; nothing ran")
     };
-    orchestrator::tell(ctx, cfg, r, thread, &line);
+    crate::thread::route::tell(ctx, cfg, r, thread, &line);
     Ok(line)
 }
 
@@ -239,7 +227,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> 
     let d = json!({"thread": thread, "id": id, "sha": sum, "by": "owner", "code": code, "tail": tail});
     emit(&ctx.state, cfg, Event::new(ctx.now, &c.fleet, None, "run-done", d))?;
     let line = format!("run {id} approved by owner, ran in {dir}: exit {code}\n```\n{tail}\n```");
-    orchestrator::tell(ctx, cfg, r, thread, &line);
+    crate::thread::route::tell(ctx, cfg, r, thread, &line);
     if code == 124 {
         r.run("kill", &argv(&["-KILL", "--", &format!("-{pid}")])).ok();
     }

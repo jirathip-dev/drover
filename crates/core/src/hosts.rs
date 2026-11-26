@@ -528,7 +528,7 @@ impl Runner for Pass<'_> {
     }
 }
 
-/// What the last look at a host saw (`<state dir>/hosts.json`): detected tags and `$HOME` (probed hourly), reachability, load/cpu, free memory and disk in GB.
+/// What the last look at a host saw (`<state dir>/hosts.json`): detected tags and `$HOME` (probed hourly), reachability, CPU idle %, free memory and disk in GB.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable, rename = "HostSeen"))]
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -538,7 +538,7 @@ pub struct Seen {
     pub probed: u64,
     pub seen: u64,
     pub up: bool,
-    pub load: Option<f64>,
+    pub idle: Option<f64>,
     pub mem: Option<f64>,
     pub disk: Option<f64>,
     /// A remote host's failed checks from `health` (`✗` keeps lanes off it, `!` warns), with the probe.
@@ -623,7 +623,7 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
             }
             let mut hs = host::sample(&on);
             host::pace(&ctx.state, on.machine, &mut hs, ctx.now);
-            (s.load, s.mem, s.mem_total) = (hs.load_per_cpu, hs.free_mem_gb, hs.mem_total_gb);
+            (s.idle, s.mem, s.mem_total) = (hs.cpu_idle, hs.free_mem_gb, hs.mem_total_gb);
             ((s.disk, s.disk_total), s.swap) = (host::df(&on).unzip(), hs.swapout);
             s.pressure = hs.pressure.as_deref().map(level);
             s.roots = crate::roots::rows(cfg, &events, &on, name, &s.home);
@@ -978,18 +978,19 @@ pub fn gate(ctx: &Ctx, cfg: &Config, on: &On) -> (Host, Option<(&'static str, St
     if on.machine.is_none() {
         host::window(&ctx.state, &mut hs);
     }
-    let mem = cfg.limits.min_free_mem_gb;
+    let lim = cfg.limits_on(on.machine);
+    let mem = lim.min_free_mem_gb;
     if let Some(gb) = hs.free_mem_gb.filter(|g| *g < mem) {
         let why = format!("only {gb:.1} GB of memory free (floor {mem} GB); a lane needs about 0.5–1.5 GB");
         return (hs, Some(("MEM_LOW", format!("{why}; retry when a lane finishes"))));
     }
-    let load = hs.load_per_cpu.is_some_and(|x| x > cfg.limits.load_per_cpu);
+    let load = hs.cpu_idle.is_some_and(|x| x < lim.min_cpu_idle);
     let hog = || {
         let dirs = lane_dirs(&crate::events::read(&ctx.state).unwrap_or_default(), on.machine);
         let (lane, share, top) = host::lane_cpu(on, &dirs).into_iter().next()?;
         Some(format!("; {lane} holds {share:.0}% ({top})"))
     };
-    let busy = host::admit(&hs, &cfg.limits).err();
+    let busy = host::admit(&hs, &lim).err();
     let busy = busy.map(|w| ("HOST_BUSY", w + &load.then(hog).flatten().unwrap_or_default()));
     (hs, busy)
 }
@@ -1153,7 +1154,7 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
         rank: (
             refusal.is_some(),
             full,
-            hs.load_per_cpu.unwrap_or(0.0),
+            -hs.cpu_idle.unwrap_or(100.0),
             -hs.free_mem_gb.unwrap_or(0.0),
         ),
         refusal: refusal.map(|(c, w)| (c, format!("{name}: {w}"))),
@@ -1663,7 +1664,7 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
         words.extend(probed.map(|m| format!(" · {}", probe::why_down(ctx, r, m))));
         let t = tags(h, Some(&s)).join(",");
         let built = there.and_then(|m| crate::release::sha_of(view.as_ref()?.build(Some(m))?));
-        let (l, m, d, k, ls) = (n(s.load, 2), n(s.mem, 1), n(s.disk, 0), lanes.len(), lanes.join(" "));
+        let (l, m, d, k, ls) = (n(s.idle, 0), n(s.mem, 1), n(s.disk, 0), lanes.len(), lanes.join(" "));
         let v = match built.as_deref().unwrap_or_default() {
             "" => String::new(),
             x if x == env!("DROVER_SHA") => format!(" · drover {x} ✓"),
@@ -1671,7 +1672,7 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
         };
         writeln!(
             out,
-            "{name} · {words} · tags {t}{v} · load/cpu {l} · mem {m} GB · disk {d} GB free · {k} lane(s) {ls} · seen {} ago",
+            "{name} · {words} · tags {t}{v} · cpu idle {l}% · mem {m} GB · disk {d} GB free · {k} lane(s) {ls} · seen {} ago",
             age(ctx.now.saturating_sub(s.seen))
         )?;
     }
@@ -1734,7 +1735,7 @@ pub fn cards<'a>(cfg: &'a Config, r: &dyn Runner) -> Vec<(String, Option<&'a Hos
 pub struct Row {
     pub ts: u64,
     pub host: String,
-    pub load_cpu: Option<f64>,
+    pub cpu_idle: Option<f64>,
     pub pressure: Option<u8>,
     pub swap_out: Option<f64>,
     pub mem_free_gb: Option<f64>,
@@ -1746,10 +1747,10 @@ pub struct Row {
 }
 
 impl Row {
-    /// Key `k` (load, swap, mem, disk, pressure, lanes): its value, and true when low is bad (free space).
+    /// Key `k` (idle, swap, mem, disk, pressure, lanes): its value, and true when low is bad (free CPU or space).
     pub fn get(&self, k: &str) -> (Option<f64>, bool) {
         match k {
-            "load" => (self.load_cpu, false),
+            "idle" => (self.cpu_idle, true),
             "swap" => (self.swap_out, false),
             "mem" => (self.mem_free_gb, true),
             "disk" => (self.disk_free_gb, true),
@@ -1806,7 +1807,7 @@ fn row(ts: u64, host: &str, s: &Seen, (lanes, procs): (usize, Option<[u64; 5]>))
     Row {
         ts,
         host: host.into(),
-        load_cpu: q(s.load, 100.0),
+        cpu_idle: q(s.idle, 1.0),
         pressure: s.pressure,
         swap_out: q(s.swap, 1.0),
         mem_free_gb: q(s.mem, 10.0),
@@ -1821,7 +1822,7 @@ pub fn sample(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Resu
     let mut hs = host::sample(r);
     host::pace(&ctx.state, None, &mut hs, ctx.now);
     let s = Seen {
-        load: hs.load_per_cpu,
+        idle: hs.cpu_idle,
         mem: hs.free_mem_gb,
         disk: host::free_gb(r),
         pressure: hs.pressure.as_deref().map(level),
@@ -1872,7 +1873,6 @@ fn ranges(rows: &[Row], (h, k, now, all): (&str, &str, u64, bool), f: &dyn Fn((f
 /// `ranges` of the values, as few decimals as the row has.
 pub fn series(rows: &[Row], h: &str, k: &str, now: u64, all: bool) -> String {
     let p = match k {
-        "load" => 2,
         "mem" | "disk" => 1,
         _ => 0,
     };

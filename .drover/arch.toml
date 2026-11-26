@@ -24,6 +24,7 @@ generated = [
     "docs/flow.md",
 ]
 generate = "just gen"
+append_only = ["crates/cli/tests/golden/contract/v1/*.keys"]
 shared = [
     "crates/core/src/check.rs",
     "crates/core/src/cli.rs",
@@ -52,6 +53,10 @@ shared = [
 [[collect]]
 dir = "crates/core/flow"
 glob = "**/*.toml"
+
+[[collect]]
+dir = "roles/jobs"
+glob = "*.toml"
 
 [[collect]]
 dir = "ci/cap.d"
@@ -358,3 +363,23 @@ pattern = ".gatekeeper/run"
 paths = ["crates/*/src/**"]
 except = ["crates/core/src/gatekeeper.rs"]
 reason = "#1643: one module builds the gatekeeper command and reads its report"
+
+[[ban]]
+pattern = "/plugin/"
+paths = ["crates/*/src/**"]
+reason = "#1571: drover never calls cooee; it serves rows and actions in /api/v1"
+
+[[ban]]
+pattern = "lesson::"
+paths = ["crates/core/src/jobs.rs"]
+reason = "#1756: the job mechanism names no job; a job is an entry in roles/jobs/ or the fleet's config"
+
+[[ban]]
+pattern = "triage::"
+paths = ["crates/core/src/jobs.rs"]
+reason = "#1756: the job mechanism names no job; a job is an entry in roles/jobs/ or the fleet's config"
+
+[[ban]]
+pattern = "hotspots::"
+paths = ["crates/core/src/jobs.rs"]
+reason = "#1756: the job mechanism names no job; a job is an entry in roles/jobs/ or the fleet's config"
