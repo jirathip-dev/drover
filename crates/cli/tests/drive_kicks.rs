@@ -1310,7 +1310,7 @@ impl drover::runner::Runner for Kicked {
 }
 
 fn ci_red_after_pass(name: &str, live: bool) -> (drover::Ctx, FakeShed, Replies) {
-    let (c, sh) = fleet(name, 6, 1);
+    let (c, sh) = fleet_with(name, 6, "ci_flaky_retries = 0", 1, &[]);
     let wt = c.worktrees.join("sendmeter/issue-1");
     let rev = c.worktrees.join("sendmeter/rev-1-r1");
     std::fs::create_dir_all(&wt).unwrap();
