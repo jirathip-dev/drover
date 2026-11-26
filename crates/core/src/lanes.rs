@@ -447,7 +447,12 @@ pub fn secret(l: &str) -> Option<&str> {
             let f = |x: usize| f64::from(u32::try_from(x).unwrap_or(u32::MAX));
             let n = f(v.chars().count());
             let bits: f64 = v.chars().map(|c| -(f(v.matches(c).count()) / n).log2() / n).sum();
-            let word = !has(v, u8::is_ascii_digit) || v.contains('_') && v == v.to_ascii_lowercase();
+            let id = v.contains(['-', '_'])
+                && v.split(['-', '_']).all(|w| {
+                    !w.is_empty()
+                        && (w.bytes().all(|b| b.is_ascii_lowercase()) || w.bytes().all(|b| b.is_ascii_digit()))
+                });
+            let word = id || !has(v, u8::is_ascii_digit) || v.contains('_') && v == v.to_ascii_lowercase();
             let code = v.contains(['(', '{', ' ']) || v.contains("::") || v.starts_with(['/', '~', '.', '$']);
             ((named(&l[..i]) || named(first) || bearer) && n >= 20.0 && bits >= 3.5 && !word && !code).then_some(v)
         })
