@@ -240,6 +240,7 @@ thread_local! {
     static IN_ACT: Cell<bool> = const { Cell::new(false) };
     static ROOM: RefCell<(bool, Option<(&'static str, String)>)> = const { RefCell::new((false, None)) };
     static SLOT: Cell<bool> = const { Cell::new(false) };
+    static UNHEARD: Cell<bool> = const { Cell::new(false) };
 }
 
 /// A pass's own command runs (its `clean` leaves disabled hosts alone).
@@ -764,6 +765,7 @@ pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
         }
     };
     mark("look, repair");
+    UNHEARD.set(false);
     crate::link::look(ctx, cfg, r, out, KICK.get().is_some()).map_or_else(|e| drop(writeln!(out, "look: {e:#}")), drop);
     if let Err(e) = repair(ctx, cfg, r, out, fleet) {
         writeln!(out, "repair: {e:#}")?;
@@ -831,7 +833,7 @@ fn one(
     mark("spawns");
     res = res.or(failed(starts(ctx, cfg, r, out, name), out, name, "spawns"));
     if KICK.get().is_none() {
-        res = res.or(failed(undriven::cards(ctx, cfg, out, name), out, name, "spawns"));
+        res = res.or(failed(undriven::cards(ctx, cfg, r, out, name), out, name, "spawns"));
     }
     laps.lap("spawns");
     let acts = pass::shadow(ctx, cfg, out, name)?;
@@ -848,6 +850,33 @@ fn one(
         append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", laps.with(d))).ok();
     }
     res.map_or(Ok(()), Err)
+}
+
+/// Each host's sessions, the main host polled again when its view went stale; None: it did not answer, its lane checks skip this pass.
+pub(crate) fn lanes(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    fleet: &str,
+) -> Result<Option<crate::session::Sessions>> {
+    if UNHEARD.get() {
+        return Ok(None);
+    }
+    let got = match crate::link::view::View::load(ctx, cfg)?.sessions().checked() {
+        Ok(s) => Ok(s),
+        Err(_) => crate::link::look_at(ctx, cfg, r, None).and_then(|v| v.sessions().checked()),
+    };
+    let why = match got {
+        Ok(s) => return Ok(Some(s)),
+        Err(e) => e,
+    };
+    UNHEARD.set(true);
+    writeln!(
+        out,
+        "{fleet}: the main host gave no word ({why:#}): its lane checks skipped this pass"
+    )?;
+    Ok(None)
 }
 
 fn failed(res: Result<()>, out: &mut dyn Write, fleet: &str, step: &str) -> Option<anyhow::Error> {
@@ -873,7 +902,10 @@ fn repair(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         if s.state == "impl" {
             let live = match &mut agents {
                 Some(a) => a,
-                None => agents.insert(crate::link::view::View::load(ctx, cfg)?.sessions().checked()?.running()),
+                None => match lanes(ctx, cfg, r, out, fleet)? {
+                    Some(l) => agents.insert(l.running()),
+                    None => return Ok(()),
+                },
             };
             let lane = s.active_lane().is_some_and(|(_, l)| live.iter().any(|a| a.name == l));
             if lane
@@ -1145,7 +1177,9 @@ fn pass(
     fleet: &str,
 ) -> Result<()> {
     let f = cfg.fleet(fleet)?;
-    let sessions = crate::link::view::View::load(ctx, cfg)?.sessions().checked()?;
+    let Some(sessions) = lanes(ctx, cfg, r, out, fleet)? else {
+        return Ok(());
+    };
     let agents = sessions.running();
     let ev = working(&ctx.state)?;
     let st = fold(&ev);
