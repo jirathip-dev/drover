@@ -310,3 +310,23 @@ fn top_shows_a_routed_command_as_remote_with_its_tag() {
     let procs = v["lanes"][0]["procs"].as_array().unwrap();
     assert_eq!(procs.iter().find(|p| p["pid"] == "107").unwrap()["remote"], "linux");
 }
+
+#[test]
+fn top_shows_a_lanes_slot_held_here_with_why_its_route_fell_back() {
+    let (c, _sh, f, _) = setup("top-here", "");
+    let _held = ticket(&c, 1, "sendmeter:12:impl", "cargo", true);
+    let p = c.state.with_file_name("heavy").join(format!("{:020}-1.json", 1));
+    let mut t: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+    t["here"] = json!("exit 75");
+    std::fs::write(&p, t.to_string()).unwrap();
+    let (code, out) = run(&c, &f, &["top"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("  heavy slot cargo here (exit 75) 4m: sh cargo.sh\n"),
+        "{out}"
+    );
+    let (_, out) = run(&c, &f, &["top", "--json"]);
+    let v: Value = serde_json::from_str(&out).unwrap();
+    let held = json!([{"kind": "cargo", "cmd": "sh cargo.sh", "secs": 240, "here": "exit 75"}]);
+    assert_eq!(v["lanes"][0]["held"], held);
+}

@@ -179,7 +179,8 @@ fn the_threads_screens_are_their_golden_json_and_the_tab_is_standalone_only() {
         "! choose · conductor: Retry-After only, or the X-RateLimit headers too?"
     );
     assert_eq!(find(&list, "t2")["tap"], json!({"open": "/screens/threads/t2"}));
-    assert_eq!(find(&list, "t1")["swipe"][0]["action"], "thread-restore");
+    let gone = get(&s, "/screens/threads/archived", "");
+    assert_eq!(find(&gone, "t1")["swipe"][0]["action"], "thread-restore");
 
     let t = get(&s, "/screens/threads/t2", "");
     golden("thread", &t);
@@ -300,8 +301,12 @@ fn parity_15_the_owner_reads_a_thread_sends_and_answers_from_the_tab() {
     let arch = json!({"screen": "threads", "block": "t3", "action": "thread-archive", "values": {"thread": "t3"}});
     assert_eq!(post(arch, &ck).0, 200);
     let list = get(&s, "/screens/threads", &ck);
-    assert_eq!(find(&list, "t3")["swipe"][0]["action"], "thread-restore");
-    assert!(find(&list, "archived").to_string().contains("\"t3\""), "{list}");
+    assert_eq!(
+        find(&list, "archived-row")["tap"],
+        json!({"open": "/screens/threads/archived"})
+    );
+    let gone = get(&s, "/screens/threads/archived", &ck);
+    assert_eq!(find(&gone, "t3")["swipe"][0]["action"], "thread-restore");
 }
 
 #[test]
@@ -1083,7 +1088,18 @@ fn one_older_card_holds_every_repos_older_threads_and_an_archive_brings_none_up(
     let list = get(&s, "/screens/threads", &ck);
     assert_eq!(rows(&list, "l-sendmeter"), ["s5", "s3"]);
     assert_eq!(rows(&list, "l-older-threads"), ["s2", "s1"]);
-    assert_eq!(rows(&list, "l-archived"), ["s4"]);
+    assert_eq!(rows(&list, "archived"), ["archived-row"]);
+    assert_eq!(
+        find(&list, "archived-row")["tap"],
+        json!({"open": "/screens/threads/archived"})
+    );
+    assert!(
+        !list.to_string().contains("\"s4\""),
+        "an archived row in the list: {list}"
+    );
+    let gone = get(&s, "/screens/threads/archived", &ck);
+    assert_eq!(rows(&gone, "l-archived"), ["s4"]);
+    assert_eq!(find(&gone, "s4")["swipe"][0]["action"], "thread-restore");
     assert_eq!(find(&list, "r-sendmeter")["header"], "sendmeter · 4 threads");
 
     ev(

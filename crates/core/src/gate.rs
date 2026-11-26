@@ -989,6 +989,7 @@ pub fn merge(
             return Err(rf.into());
         }
     };
+    gh::flaky(ctx, out, (fleet, Some(issue)), &events, &head)?;
     gh::forget_pr(ctx, fleet, issue);
     let fields = "number,title,body,files,commits";
     let view = ["pr", "view", &num, "-R", &f.repo, "--json", fields];

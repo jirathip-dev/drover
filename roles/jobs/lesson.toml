@@ -1,3 +1,7 @@
+every = "7d"
+check = "{drover} lesson digest {fleet} --days 7 --min-fails 2"
+title = "lessons: {fleet} week of {date}"
+body = """
 This week's lessons for `{fleet}`, worked by a `lesson` lane (#419).
 
 1. Read `drover lesson digest {fleet} --days 7`.
@@ -11,4 +15,6 @@ This week's lessons for `{fleet}`, worked by a `lesson` lane (#419).
 6. New checks start in shadow (`shadow since <date>` on their rules line); `drover lesson apply {fleet}` promotes or
    retires the existing ones by their history (#510). Hand-written rules lines are never changed.
 
-No class qualifies: `drover done --no-change "no repeated class" {fleet} <this issue>`; drover closes this issue.
+No class qualifies: `drover done --no-change "no repeated class" {fleet} <this issue>`; drover closes this issue."""
+role = "lesson"
+empty = "no repeated class"

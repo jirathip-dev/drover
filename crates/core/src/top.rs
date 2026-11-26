@@ -25,12 +25,15 @@ pub struct Proc {
     pub background: bool,
 }
 
-/// A heavy check in line for a slot, and how long it has waited.
+/// A heavy check in line for a slot or holding one here, and for how long.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Wait {
     pub kind: String,
     pub cmd: String,
     pub secs: u64,
+    /// Why a routed check holds a slot here instead of running on its build machine.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub here: Option<String>,
 }
 
 /// A live lane: its agent, `<fleet>:<issue>:<role>`, process tree and heavy-slot waits.
@@ -40,6 +43,8 @@ pub struct Lane {
     pub lane: String,
     pub procs: Vec<Proc>,
     pub waits: Vec<Wait>,
+    /// Its heavy checks holding a slot on this host.
+    pub held: Vec<Wait>,
     /// An impl or rev lane, whose processes all belong at background priority.
     pub build: bool,
 }
@@ -125,17 +130,22 @@ fn lanes(
         for root in mine.iter().filter(|p| !mine.iter().any(|q| q.pid == p.ppid)) {
             walk(&mine, root, 0, &mut procs);
         }
-        let waits = (queue.iter().filter(|(_, t)| !t.running && t.lane == key)).map(|(_, t)| Wait {
-            kind: t.kind.clone(),
-            cmd: t.cmd.clone(),
-            secs: ctx.now.saturating_sub(t.since),
-        });
-        let waits = waits.collect();
+        let of = |running: bool| {
+            (queue.iter().filter(|(_, t)| t.running == running && t.lane == key))
+                .map(|(_, t)| Wait {
+                    kind: t.kind.clone(),
+                    cmd: t.cmd.clone(),
+                    secs: ctx.now.saturating_sub(t.since),
+                    here: t.here.clone(),
+                })
+                .collect()
+        };
         Some(Lane {
             agent: agent.into(),
+            waits: of(false),
+            held: of(true),
             lane: key,
             procs,
-            waits,
             build: matches!(family, Some("impl" | "rev")),
         })
     };
@@ -243,6 +253,10 @@ pub fn print(t: &Top, out: &mut dyn Write) -> Result<()> {
         }
         for w in &l.waits {
             writeln!(out, "  waiting for heavy slot {} {}: {}", w.kind, age(w.secs), w.cmd)?;
+        }
+        for w in &l.held {
+            let why = w.here.as_ref().map_or(String::new(), |h| format!(" ({h})"));
+            writeln!(out, "  heavy slot {} here{why} {}: {}", w.kind, age(w.secs), w.cmd)?;
         }
     }
     for h in &t.holds {

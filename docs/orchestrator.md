@@ -147,7 +147,7 @@ thread tap or push opens `#threads/<id>` (back returns to the list), and its con
 thread. Files and queued messages come with #1086 and #1087.
 
 - **Archive (#405):** the thread's orchestrator stops (its pane closes; the folder, uploads and log stay) and the
-  thread folds under "N archived"; `restore` brings it back and its next message resumes the same session. CLI:
+  thread moves to the "archived" row, its own list loaded only when opened (#1622); `restore` brings it back and its next message resumes the same session. CLI:
   `drover thread archive|restore <thread>` (logged `thread-archive` / `thread-restore`). Nothing is deleted.
 - **Writes** are `POST /thread` (`op` = `new`, `say` with an optional base64 file of at most 10 MB, `answer`,
   `read`, `retry`; #407 `queue`, `unqueue`, `steer`, `stop`) from a paired device, 10 a minute. #403: `new` and `say`

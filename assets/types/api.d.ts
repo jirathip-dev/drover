@@ -119,7 +119,7 @@ export type LaneNow = { title: string, w?: string | null, n?: string | null, t?:
 export type ShedRow = { host: string, error?: string | null, name?: string | null, runtime?: string | null, labels?: { [key in string]: string } | null, state?: string | null, last?: string | null, age?: string | null, };
 
 /**
- * API v1's `chat`, the [chat] tab: a card per repo (`all` first) with its threads, then every thread's view (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
+ * API v1's `chat`, the [chat] tab: a card per repo (`all` first) with its open threads' rows (`?archived=1`: the archived ones too), and `?thread=<t>`'s view alone (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
  */
 export type ChatTab = { now: number, rw: boolean, error?: string | null, repos: Array<ChatRepo>, threads: Array<ThreadView>, };
 

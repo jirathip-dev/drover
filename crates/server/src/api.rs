@@ -275,7 +275,7 @@ pub struct LaneNow {
     pub t: Option<String>,
 }
 
-/// API v1's `chat`, the [chat] tab: a card per repo (`all` first) with its threads, then every thread's view (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
+/// API v1's `chat`, the [chat] tab: a card per repo (`all` first) with its open threads' rows (`?archived=1`: the archived ones too), and `?thread=<t>`'s view alone (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
 pub struct ChatTab {
     pub now: u64,
     pub rw: bool,

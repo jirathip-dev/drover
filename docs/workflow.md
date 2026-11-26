@@ -66,12 +66,10 @@ flowchart TD
     t1["drive"] --> t2
     t2["clean"] --> t3
     t3["trim"] --> t4
-    t4["lesson"] --> t5
-    t5["triage"] --> t6
-    t6["deps"] --> t7
-    t7["soak"] --> t8
-    t8["hotspots"] --> t9
-    t9["compact"]
+    t4["jobs"] --> t5
+    t5["soak"] --> t6
+    t6["hotspots"] --> t7
+    t7["compact"]
     d0["look, repair"] --> d1
     d1["closed issues"] --> d2
     d2["PR reads, gates, steps"] --> d3
@@ -99,6 +97,7 @@ flowchart TD
     d2 -.- k_silent_minutes(["silent_minutes = 10"])
     d2 -.- k_ci_start_minutes(["ci_start_minutes = 10"])
     d2 -.- k_ci_stuck_minutes(["ci_stuck_minutes = 30"])
+    d2 -.- k_ci_flaky_retries(["ci_flaky_retries = 1"])
     d2 -.- k_gate_check_minutes(["gate_check_minutes = 30"])
     d2 -.- k_review_rounds(["review_rounds = 3"])
     d2 -.- k_update_rounds(["update_rounds = 3"])

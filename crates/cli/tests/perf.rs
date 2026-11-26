@@ -1,4 +1,6 @@
 mod common;
+#[path = "perf/fleet.rs"]
+mod fleet;
 #[path = "perf/idle.rs"]
 mod idle;
 #[path = "perf/screens.rs"]

@@ -273,7 +273,7 @@ impl Heavy {
         let mut kinds = f.heavy_kinds();
         if f.remote.contains_key(GATE_KIND) {
             let gates = kinds.entry(GATE_KIND.into()).or_default();
-            gates.extend([format!("{}*", crate::gatekeeper::CHECK), "just check*".into()]);
+            gates.push("just check*".into());
         }
         Heavy {
             kinds,
@@ -348,9 +348,10 @@ impl Heavy {
         let ps = self.kinds.get(kind).map_or(&[][..], Vec::as_slice);
         let never = |p: &Part| (self.never.iter()).any(|n| hits(n, &p.plain()) || hits(n, &p.text()));
         let routed: Vec<bool> = line.parts.iter().map(|p| matches(ps, p) && !never(p)).collect();
-        let (mut prev, mut piped) = ("", false);
+        let (mut prev, mut piped, mut split) = ("", false, false);
         for (p, r) in line.parts.iter().zip(&routed) {
-            piped |= *r && (p.op == "|" || prev == "|");
+            piped |= *r && prev == "|";
+            split |= *r && (p.op == "|" || !p.redirs.is_empty());
             prev = &p.op;
         }
         if !routed.contains(&true) {
@@ -359,7 +360,7 @@ impl Heavy {
         if let Some(why) = line.unsplit.or(piped.then_some("a pipe")) {
             return format!("echo 'heavy: {why} in the line, running here' >&2; {here}");
         }
-        if !line.parts.iter().any(never) {
+        if !split && !line.parts.iter().any(never) {
             return self.slot(exe, kind, Some((r, dir)), cmd);
         }
         let part = |(p, on): (&Part, &bool)| {
@@ -386,21 +387,21 @@ impl Heavy {
     }
 }
 
-/// `runners run` for `cmd` in worktree `dir` on route `r`: `Some(code)` once it ran there (the command's own code), else `None` with the reason printed: run it here.
-pub fn remote(run: &dyn Runner, r: &Route, dir: &str, cmd: &str) -> Option<i32> {
+/// `runners run` for `cmd` in worktree `dir` on route `r`: `Ok(code)` once it ran there (the command's own code), else the reason, printed: run it here.
+pub fn remote(run: &dyn Runner, r: &Route, dir: &str, cmd: &str) -> Result<i32, String> {
     let mut a: Vec<String> = ["run", "--tag", &r.tag, "--dir", dir].map(String::from).to_vec();
     a.extend(r.flags("--wait"));
     a.extend(["--", "bash", "-c", cmd].map(String::from));
     let why = match run.attached("runners", &a) {
         Ok(c @ (75 | 76 | 64 | 78)) => format!("exit {c}"),
-        Ok(c) => return Some(c),
+        Ok(c) => return Ok(c),
         Err(e) => match e.downcast_ref::<std::io::Error>().map(std::io::Error::kind) {
             Some(std::io::ErrorKind::NotFound) => "not found".into(),
             _ => format!("{e:#}"),
         },
     };
     crate::stderr!("runners: {why}, running here");
-    None
+    Err(why)
 }
 
 /// `drover heavy`: a lane's heavy command, its host slot limits and its route's build machines.
@@ -422,20 +423,23 @@ pub struct Args {
 }
 
 impl Args {
-    /// Run it on its route's build machines, else as `who` in slot folder `dir`'s line.
+    /// Run it on its route's build machines, else as `who` in slot folder `dir`'s line; `fell` gets a routed run that falls back here.
     pub fn run(
         self,
         r: &dyn Runner,
         dir: &Path,
         who: String,
+        fell: impl FnOnce(&Ticket),
         late: impl FnOnce(&Ticket, &str) -> Option<i32>,
     ) -> Result<i32> {
+        let mut me = Ticket::new(who, self.kind, self.cmd, self.kind_max);
         if let (Some(route), Some(wt)) = (&self.route, &self.dir) {
-            if let Some(code) = remote(r, route, wt, &self.cmd) {
-                return Ok(code);
+            match remote(r, route, wt, &me.cmd) {
+                Ok(code) => return Ok(code),
+                Err(why) => me.here = Some(why),
             }
+            fell(&me);
         }
-        let me = Ticket::new(who, self.kind, self.cmd, self.kind_max);
         run(r, dir, me, self.max, self.wait, &|| None, late)
     }
 }
@@ -461,6 +465,9 @@ pub struct Ticket {
     pub since: u64,
     pub running: bool,
     pub kind_max: Option<usize>,
+    /// Why a routed command runs here instead of on its build machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub here: Option<String>,
 }
 
 impl Ticket {
@@ -474,6 +481,7 @@ impl Ticket {
             since,
             running: false,
             kind_max,
+            here: None,
         }
     }
 }
@@ -605,7 +613,7 @@ pub fn hold(ctx: &crate::Ctx, r: &dyn crate::runner::Runner, wait: u64, cmd: &[S
     let heavy = fleet.map(|f| Heavy::of(f, host)).filter(|h| h.gated(&cmd.join(" ")));
     let route = heavy.as_ref().and_then(|h| h.routes.get(GATE_KIND));
     let here = std::env::current_dir()?;
-    if let Some(code) = route.and_then(|rt| remote(r, rt, &here.to_string_lossy(), &line)) {
+    if let Some(Ok(code)) = route.map(|rt| remote(r, rt, &here.to_string_lossy(), &line)) {
         return Ok(code);
     }
     let kind_max = host.and_then(|h| h.heavy_kind_max.get("ci").copied());

@@ -13,6 +13,7 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `silent_minutes` | `10` | an ACP lane's open turn with no session event this long is cancelled and nudged |
 | `ci_start_minutes` | `10` | a PR head with no checks this long after its push alerts `ci-missing` |
 | `ci_stuck_minutes` | `30` | a ready PR's check still pending this long after its run completed is re-run once, then alerts `ci-stuck` |
+| `ci_flaky_retries` | `1` | re-runs of a failed check's jobs a head gets before its red counts, `ci-rerun` why failed (0 = off; a fleet may set its own) |
 | `min_cpu_idle` | `15.0` | spawn refuses HOST_BUSY under this percent of the CPUs idle over a 1 s sample; `[hosts.<n>]` may set its own |
 | `overload_minutes` | `10` | CPU idle under `min_cpu_idle` this long alerts `host-overloaded` once, with the 5 busiest processes |
 | `swapout_rate` | `2000.0` | pages swapped out per 2 s sample that count as swapping; `[hosts.<n>]` may set its own |
