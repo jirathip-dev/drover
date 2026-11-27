@@ -96,7 +96,7 @@ fn profile(ctx: &Ctx, cfg: &Config, id: &str) -> Result<ChatProfile> {
         return Ok(hidden(id, seat.name, "", why));
     };
     let p = seat.role.profile_or("orchestrator");
-    let why = crate::spawn::unguarded(ctx, (&p, "orchestrator", &seat.role.harness), agent, false);
+    let why = crate::spawn::unguarded(ctx, (&p, "orchestrator", &seat.role.harness), agent);
     if !why.is_empty() {
         return Ok(hidden(id, seat.name, agent, why));
     }

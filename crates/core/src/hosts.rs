@@ -603,23 +603,8 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
             if let Some((tags, home)) = due.then(|| probe(&on)).flatten() {
                 (s.tags, s.home, s.probed) = (tags, home, ctx.now);
             }
-            let tunnel = h
-                .machine
-                .as_deref()
-                .filter(|_| cfg.host_acp(name).is_some())
-                .map(|m| crate::proxy::ensure(ctx, cfg, r, (name, m)));
             if due && h.machine.is_some() && h.enabled {
                 s.health = health(ctx, cfg, &on, &tags(h, Some(&*s)), &s.home);
-            }
-            s.health.retain(|w| !w.starts_with(crate::proxy::DOWN));
-            let down = match tunnel {
-                Some(Ok(false)) => Some("no answer through it there; restarted".to_string()),
-                Some(Err(e)) => Some(format!("{e:#}")),
-                _ => None,
-            };
-            if let Some(why) = down {
-                crate::stderr!("proxy {name}: tunnel down: {why}");
-                s.health.push(format!("{}: {why}", crate::proxy::DOWN));
             }
             let mut hs = host::sample(&on);
             host::pace(&ctx.state, on.machine, &mut hs, ctx.now);
@@ -875,16 +860,6 @@ pub fn slots_line(cfg: &Config, events: &[Event], agents: &[Session]) -> String 
     out
 }
 
-/// Add `row` to host `name`'s last-seen health (a `✗` keeps new lanes off it until the next health look).
-pub fn sick(ctx: &Ctx, name: &str, row: &str) {
-    let mut all = cached(ctx);
-    let s = all.entry(name.into()).or_default();
-    if !s.health.iter().any(|w| w == row) {
-        s.health.push(row.into());
-        std::fs::write(file(ctx), serde_json::to_string(&all).unwrap_or_default()).ok();
-    }
-}
-
 /// Some `[hosts]` entry runs on machine `m`.
 pub fn configured(cfg: &Config, m: &str) -> bool {
     cfg.hosts.values().any(|h| h.machine.as_deref() == Some(m))
@@ -918,19 +893,15 @@ pub fn held_since(events: &[Event], machine: Option<&str>) -> u64 {
     events.iter().rfind(on).map_or(0, |e| e.ts)
 }
 
-/// The alert holding new lanes off the host on `machine`: a lane's usage limit or sign-out since its last `host-on`, or a proxy lane's sign-out once its retry window passed with no proxy call through since.
-pub fn login_hold<'a>(events: &'a [Event], machine: Option<&str>, (now, retry): (u64, u64)) -> Option<&'a str> {
+/// The alert holding new lanes off the host on `machine`: a lane's usage limit or sign-out since its last `host-on`.
+pub fn login_hold<'a>(events: &'a [Event], machine: Option<&str>) -> Option<&'a str> {
     let mine = |e: &Event| e.str("machine") == machine;
     let from = events
         .iter()
         .rposition(|e| e.kind == "host-on" && mine(e))
         .map_or(0, |i| i + 1);
-    let retried = |e: &Event| {
-        e.val("proxy").as_bool() == Some(true) && (now < e.ts + retry || proxy_ok(events, e.str("agent")) >= Some(e.ts))
-    };
     let lane = |e: &Event| e.data.get("account").is_none();
-    let hold =
-        |e: &&Event| ["usage-limit", "signed-out"].contains(&e.kind.as_str()) && mine(e) && lane(e) && !retried(e);
+    let hold = |e: &&Event| ["usage-limit", "signed-out"].contains(&e.kind.as_str()) && mine(e) && lane(e);
     events.iter().skip(from).rfind(hold)?.str("reason")
 }
 
@@ -939,42 +910,23 @@ pub fn on_account(sp: &Event) -> bool {
     sp.str("account").is_some()
 }
 
-/// When the token proxy last relayed a good answer to lane `agent` after it signed out.
-pub fn proxy_ok(events: &[Event], agent: Option<&str>) -> Option<u64> {
-    events
-        .iter()
-        .rfind(|e| e.kind == "proxy-ok" && e.str("agent") == agent)
-        .map(|e| e.ts)
-}
-
-/// The data of the alert that holds new lanes off spawn `sp`'s host because its lane `what` (keyed once per hold); a proxy lane's names the proxy, keyed again after each proxy call through.
+/// The data of the alert that holds new lanes off spawn `sp`'s host because its lane `what` (keyed once per hold).
 pub fn hold_alert(events: &[Event], sp: &Event, what: &str) -> Value {
     let (host, m, lane) = (sp.str("host").unwrap_or("main"), sp.str("machine"), sp.str("agent"));
-    let proxied = m.is_some() && sp.str("runtime") == Some("shed-acp");
-    let mut key = format!("{host}:{}", held_since(events, m));
-    let fix = if proxied {
-        key += &format!(":{}:{}", lane.unwrap_or_default(), proxy_ok(events, lane).unwrap_or(0));
-        let setup = crate::providers::proxied().map_or("", |p| p.setup);
-        format!("it signs in through the token proxy: check the token proxy's `[proxy] token-file` on the main host (`{setup}` makes a new one)")
-    } else {
-        let login = crate::providers::get(sp.str("harness").unwrap_or_default()).login();
-        format!("run `{}` there", login.unwrap_or("its CLI login"))
-    };
+    let key = format!("{host}:{}", held_since(events, m));
+    let login = crate::providers::get(sp.str("harness").unwrap_or_default()).login();
+    let fix = format!("run `{}` there", login.unwrap_or("its CLI login"));
     let why = format!(
         "{} lane {} {what} on {host}; new lanes there wait: {fix}, then `drover hosts on {host}`",
         sp.str("role").unwrap_or_default(),
         lane.unwrap_or_default()
     );
-    json!({"key": key, "agent": lane, "host": host, "machine": m, "reason": why, "proxy": proxied})
+    json!({"key": key, "agent": lane, "host": host, "machine": m, "reason": why})
 }
 
 /// Admission on one host, in order `LOGIN_NEEDED`, `DISK_LOW`, `MEM_LOW`, `HOST_BUSY`: its sample and the first refusal.
 pub fn gate(ctx: &Ctx, cfg: &Config, on: &On) -> (Host, Option<(&'static str, String)>) {
-    if let Some(why) = login_hold(
-        &working(&ctx.state).unwrap_or_default(),
-        on.machine,
-        (ctx.now, cfg.limits.proxy_retry_secs),
-    ) {
+    if let Some(why) = login_hold(&working(&ctx.state).unwrap_or_default(), on.machine) {
         return (Host::default(), Some(("LOGIN_NEEDED", why.to_string())));
     }
     if let Some(why) = disk_low(ctx, cfg, on) {
@@ -1179,18 +1131,6 @@ pub fn under(p: &str, home: Option<&str>) -> PathBuf {
 }
 
 pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> Vec<String> {
-    let at = |h: &(&String, &HostCfg)| h.1.machine.is_some() && h.1.machine.as_deref() == on.machine;
-    if let Some(name) = cfg
-        .hosts
-        .iter()
-        .find(at)
-        .map(|h| h.0)
-        .filter(|n| cfg.host_acp(n).is_some())
-    {
-        let mut bad = acp_health(ctx, cfg, on, (name, tags, home));
-        bad.extend(shed_row(on));
-        return bad;
-    }
     let mut bad = vec![];
     let mut fail = |pass: bool, row: String| bad.extend((!pass).then_some(row));
     for (name, f) in cfg.fleet.iter().filter(|f| f.1.needs.iter().all(|t| tags.contains(t))) {
@@ -1288,107 +1228,6 @@ pub fn sshd_row(on: &On, name: &str) -> String {
     } else {
         format!("! {line} → hosts bootstrap {name}, then restart sshd there")
     }
-}
-
-fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[String], &str)) -> Vec<String> {
-    let mut bad = vec![];
-    let fits = cfg.fleet.iter().filter(|f| f.1.needs.iter().all(|t| tags.contains(t)));
-    for (fleet, f) in fits {
-        let url = format!("https://github.com/{}.git", f.repo);
-        if !on
-            .run("git", &argv(&["ls-remote", &url, "HEAD"]))
-            .is_ok_and(|o| o.code == 0)
-        {
-            bad.push(format!(
-                "✗ git {fleet} — can't reach {}: → hosts bootstrap {name}",
-                f.repo
-            ));
-        }
-    }
-    for (profile, family, id) in acp_profiles(cfg, name, tags) {
-        match acp_guard(ctx, on, home, (&profile, family, id)) {
-            Ok(()) => {}
-            Err(why @ Unguarded::Build { .. }) => bad.push(format!(
-                "! acp guard {profile} — {why} → the next self-update catches it up"
-            )),
-            Err(why) => bad.push(format!("✗ acp guard {profile} — {why}")),
-        }
-    }
-    if ok(on, "sh", &["-lc", "gh auth status"]).is_err() {
-        bad.push(format!(
-            "✗ gh — logged out → ssh {} gh auth login",
-            on.machine.unwrap_or_default()
-        ));
-    }
-    bad
-}
-
-/// Each ACP profile, once, of the roles `place` can put on host `name` (none pinned elsewhere) of the fleets its `tags` fit: (profile, role family, adapter id).
-pub fn acp_profiles(cfg: &Config, name: &str, tags: &[String]) -> Vec<(String, &'static str, &'static str)> {
-    let mut seen = std::collections::BTreeSet::new();
-    let fits = cfg.fleet.values().filter(|f| f.needs.iter().all(|t| tags.contains(t)));
-    let roles = fits.flat_map(|f| f.role.iter().map(move |(role, rc)| (f, role, rc)));
-    let main = |f: &crate::config::Fleet, role: &str| crate::events::STAGES.contains(&f.family(role)).then_some("main");
-    roles
-        .filter(|(f, role, rc)| rc.host.as_deref().or_else(|| main(f, role)).is_none_or(|h| h == name))
-        .filter_map(|(f, role, rc)| Some((rc.profile_or(role), f.family(role), providers::get(&rc.harness).acp()?)))
-        .filter(|p| seen.insert(p.0.clone()))
-        .collect()
-}
-
-/// Why a remote ACP lane would run unguarded: no hook or adapter, or (a warning only) another drover build there.
-#[derive(Debug)]
-pub enum Unguarded {
-    Build { theirs: String, mine: String },
-    Hook(String),
-    Adapter(String),
-}
-
-impl std::fmt::Display for Unguarded {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Unguarded::Build { theirs, mine } => write!(f, "drover there is {theirs}, not {mine}"),
-            Unguarded::Hook(w) | Unguarded::Adapter(w) => f.write_str(w),
-        }
-    }
-}
-
-/// Why a remote ACP lane of `profile` would run unguarded on `on` (`$HOME` `home`), proven there: `profiles sync` gave the profile drover's `PreToolUse` hook for `family`, its shed lists the hooked adapter `id`, then its drover is this one's version.
-pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &str, &str)) -> Result<(), Unguarded> {
-    let exe = real_exe(ctx, home);
-    let root = ok(on, &exe, &["--version"]).map_or("missing".into(), |v| v.trim().to_string());
-    let theirs = with_path(on, &exe, root).0;
-    let dir = rehome(
-        vec![providers::profiles_root(ctx).join(profile).display().to_string()],
-        Some(home),
-    )
-    .remove(0);
-    let s: Value = on
-        .read(&Path::new(&dir).join("settings.json"))
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
-    let pre = s.at("hooks").at("PreToolUse").as_array().into_iter().flatten();
-    let mut hooks = pre.flat_map(|m| m["hooks"].as_array().into_iter().flatten());
-    let hook = format!("drover' hook --role {family}");
-    if !hooks.any(|h| {
-        h["command"]
-            .as_str()
-            .is_some_and(|c| c.starts_with('\'') && c.ends_with(&hook))
-    }) {
-        return Err(Unguarded::Hook(format!(
-            "profile {profile} there has no drover PreToolUse hook; `drover profiles sync` there"
-        )));
-    }
-    if crate::shed::adapter(on, id).ok().flatten().is_none() {
-        return Err(Unguarded::Adapter(format!(
-            "shed there lists no {id} (`shed agents add {id}` there)"
-        )));
-    }
-    let mine = format!("drover {}", crate::VERSION);
-    if theirs != mine {
-        return Err(Unguarded::Build { theirs, mine });
-    }
-    Ok(())
 }
 
 pub(crate) fn real_exe(ctx: &Ctx, home: &str) -> String {
@@ -1564,11 +1403,11 @@ pub fn lanes_on(cfg: &Config, events: &[Event], name: &str) -> Vec<String> {
 }
 
 /// The order that keeps new lanes off host `name` while its lanes finish: the owner's off switch or a sign-in hold.
-pub fn drain(cfg: &Config, events: &[Event], name: &str, now: u64) -> Option<String> {
+pub fn drain(cfg: &Config, events: &[Event], name: &str) -> Option<String> {
     let h = cfg.hosts.get(name);
     let m = h.and_then(|h| h.machine.as_deref());
     let off = h.is_some_and(|h| !h.enabled).then(|| format!("turned off: {name}"));
-    let hold = || login_hold(events, m, (now, cfg.limits.proxy_retry_secs)).map(String::from);
+    let hold = || login_hold(events, m).map(String::from);
     off.or_else(hold)
 }
 
@@ -1692,9 +1531,7 @@ pub fn toggle(ctx: &Ctx, out: &mut dyn Write, name: &str, on: bool, by: &str) ->
     let cfg = Config::parse(&text)?;
     let events = working(&ctx.state)?;
     let machine = match cfg.hosts.get(name) {
-        None if on && name == "main" && login_hold(&events, None, (ctx.now, cfg.limits.proxy_retry_secs)).is_some() => {
-            None
-        }
+        None if on && name == "main" && login_hold(&events, None).is_some() => None,
         None => bail!("no [hosts.{name}] in fleet.toml"),
         Some(h) if !on && h.machine.is_none() => return refused("MAIN_HOST", "main host: edit fleet.toml by hand"),
         Some(h) => {

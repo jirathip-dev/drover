@@ -377,11 +377,6 @@ enum Cmd {
         cmd: Option<HostsCmd>,
     },
     #[command(
-        about = "Owner only: the token proxy remote ACP lanes' model calls go through, on `[proxy] port` (#637, docs/hosts.md)"
-    )]
-    #[command(hide = true)]
-    Proxy,
-    #[command(
         about = "Phone page (PWA): queue, lanes, host, events; buttons for queue order, pause/resume, role model/effort"
     )]
     Serve {
@@ -920,19 +915,6 @@ enum HostsCmd {
         about = "Empty a root (default the host's first): new lanes skip it, its lanes are saved and restarted on the next root"
     )]
     Eject { name: String, root: Option<String> },
-    #[command(
-        about = "The token proxy's per-lane keys (#637): id, state, lane, host; `revoke <id>` (owner only) ends one at once"
-    )]
-    Keys {
-        #[command(subcommand)]
-        cmd: Option<KeysCmd>,
-    },
-}
-
-#[derive(Subcommand)]
-enum KeysCmd {
-    #[command(about = "Owner only: this key stops signing at once; logs `proxy-key-revoked`")]
-    Revoke { id: String },
 }
 
 #[derive(Subcommand)]
@@ -1231,8 +1213,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 let look = crate::snapshot::Snap::read(ctx, &spared);
                 let (at, slots) = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
                 let skip = |s: &crate::events::IssueState| {
-                    let f = cfg.as_ref().and_then(|c| c.fleet.get(&s.fleet));
-                    let skip = queue::skipped(&events, &all, f, &s.fleet, (s.issue, ctx), &slots);
+                    let skip = queue::skipped(&events, &all, cfg.as_ref(), &s.fleet, (s.issue, ctx), &slots);
                     skip.map(|s| format!("skipped this pass: {}", s.1))
                 };
                 let skips: Vec<_> = rows.iter().map(|s| skip(s)).collect();
@@ -1710,12 +1691,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     Some(HostsCmd::Eject { name, root }) => {
                         return crate::roots::eject(ctx, &cfg, r, out, &name, root.as_deref());
                     }
-                    Some(HostsCmd::Keys { cmd: None }) => crate::proxy::list(ctx, out)?,
-                    Some(HostsCmd::Keys {
-                        cmd: Some(KeysCmd::Revoke { id }),
-                    }) => crate::proxy::revoke(ctx, &cfg, &id, out)?,
                 },
-                Cmd::Proxy => crate::proxy::serve(ctx, &cfg, r)?,
                 Cmd::SelfUpdate { dry_run, pause, resume } => {
                     return crate::update::self_update(ctx, &cfg, r, out, (dry_run, pause, resume));
                 }
@@ -1762,7 +1738,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             }
                             None => match crate::drive::retrying(ctx, &events, &s.fleet, s.issue)
                                 .map(|w| (String::new(), w))
-                                .or_else(|| queue::skipped(&events, &st, Some(f), &s.fleet, (s.issue, ctx), &slots))
+                                .or_else(|| queue::skipped(&events, &st, Some(&cfg), &s.fleet, (s.issue, ctx), &slots))
                             {
                                 Some((_, why)) => ("drive", format!("next in the queue, held back: {why}{note}")),
                                 None => ("drive", format!("next in the queue: drive starts it{note}")),

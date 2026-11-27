@@ -171,39 +171,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let events = closed_on_github((ctx, cfg, r, &mut *out), events, None)?;
     crate::drive::markers(ctx, cfg, r, true);
     let passes = crate::events::since(&ctx.state, &["drive-pass"], ctx.now.saturating_sub(2 * 86_400))?;
-    let mut held = BTreeMap::<(&str, u64), (u64, u64)>::new();
-    for e in &passes {
-        let acts = e.data.get("actions").and_then(serde_json::Value::as_array);
-        for a in acts.into_iter().flatten() {
-            let Some(n) = a["issue"].as_u64() else { continue };
-            if a["code"] == "SPAWN_PENDING" {
-                held.entry((&e.fleet, n)).or_insert((e.ts, e.ts)).1 = e.ts;
-            } else {
-                held.remove(&(e.fleet.as_str(), n));
-            }
-        }
-    }
-    held.retain(|_, (since, last)| ctx.now >= *since + 900 && ctx.now < *last + 900);
-    for name in cfg.fleet.keys() {
-        let mine: Vec<_> = held.iter().filter(|h| h.0 .0 == name).collect();
-        let Some(since) = mine.iter().map(|h| h.1 .0).min() else {
-            continue;
-        };
-        let ns: Vec<String> = mine.iter().map(|h| format!("#{}", h.0 .1)).collect();
-        let by = crate::drive::held_by(ctx, cfg, r);
-        let by = if by.is_empty() {
-            "no spawn starting now".into()
-        } else {
-            format!("slots held by {by}")
-        };
-        let why = format!(
-            "{} held back by SPAWN_PENDING for {}: {by}",
-            ns.join(", "),
-            age(ctx.now - since)
-        );
-        let d = json!({"key": since, "reason": why});
-        fire(ctx, cfg, out, &events, (name, None), "spawn-held", d)?;
-    }
     let ids: std::collections::BTreeSet<_> = events
         .iter()
         .filter(|e| e.kind == "spawn-error")
@@ -2416,6 +2383,7 @@ fn snapshot(
             git(&["reset", "-q", "--", &format!(":(literal){p}")])?;
             skip.push(format!("{p} ({} MB)", n >> 20));
         }
+        git(&["fetch", "-q", "origin", crate::clone::ALL, "^refs/heads/wip/*"]).ok();
         Ok((
             git(&["diff", "--cached"])?,
             git(&[&UNPUSHED[..], kept.as_slice()].concat())?,

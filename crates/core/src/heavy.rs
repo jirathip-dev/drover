@@ -268,15 +268,10 @@ fn matches(ps: &[String], p: &Part) -> bool {
 pub const GATE_KIND: &str = "cargo";
 
 impl Heavy {
-    /// Fleet `f`'s kinds, routes and never-routed list under host `h`'s slot limits; with a `cargo` route its gate checks join that kind.
+    /// Fleet `f`'s kinds, routes and never-routed list under host `h`'s slot limits.
     pub fn of(f: &crate::config::Fleet, h: Option<&crate::config::HostCfg>) -> Heavy {
-        let mut kinds = f.heavy_kinds();
-        if f.remote.contains_key(GATE_KIND) {
-            let gates = kinds.entry(GATE_KIND.into()).or_default();
-            gates.push("just check*".into());
-        }
         Heavy {
-            kinds,
+            kinds: f.heavy_kinds(),
             max: h.and_then(|h| h.heavy_max).unwrap_or(3),
             kind_max: h.map(|h| h.heavy_kind_max.clone()).unwrap_or_default(),
             wait_minutes: h.and_then(|h| h.heavy_wait_minutes).unwrap_or(30),

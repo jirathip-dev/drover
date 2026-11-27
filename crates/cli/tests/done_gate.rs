@@ -833,3 +833,32 @@ fn a_routed_fleets_gatekeeper_done_check_runs_in_the_lanes_git_tree() {
         assert_eq!(ran, want);
     }
 }
+
+#[test]
+fn a_routed_fleets_just_check_reaching_gatekeeper_runs_in_the_lanes_git_tree() {
+    for (code, name) in [(0, "done-just-here"), (2, "done-just-here-fail")] {
+        let (repo, c, f, bin) = routed_done(name, 0, "done_checks = [\"just check\"]");
+        std::fs::write(repo.wt.join("justfile"), "check:\n    ./.gatekeeper/run check\n").unwrap();
+        tool(&repo.wt.join(".gatekeeper"), "run", code, "FAIL gate-3: needs git");
+        std::fs::write(bin.join("just"), "#!/bin/sh\nexec ./.gatekeeper/run \"$@\"\n").unwrap();
+        let mut p = std::fs::metadata(bin.join("just")).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut p, 0o755);
+        std::fs::set_permissions(bin.join("just"), p).unwrap();
+        let r = ui(Git::new(&f), &bin, false);
+        if code == 0 {
+            let (code, out) = run(&c, &r, &["turn", "done"]);
+            assert_eq!(code, 0, "{out}");
+        } else {
+            let (out, _) = refused(&c, &r, "DONE_CHECK");
+            assert!(
+                out.contains("`just check` failed (exit 2):\nFAIL gate-3: needs git"),
+                "{out}"
+            );
+        }
+        assert!(!bin.join("ran.log").exists(), "never sent to runners run");
+        let wt = repo.wt.canonicalize().unwrap();
+        assert!(wt.join(".git").exists());
+        let ran = std::fs::read_to_string(repo.wt.join(".gatekeeper/ran.log")).unwrap();
+        assert_eq!(ran, format!("run check {}\n", wt.display()));
+    }
+}

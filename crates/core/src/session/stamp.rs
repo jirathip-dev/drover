@@ -93,18 +93,9 @@ fn gone(
         return Ok(false);
     }
     let said = (exit.cause == Cause::Crash).then(said).flatten();
-    let refused = [&exit.note, &said]
-        .into_iter()
-        .flatten()
-        .any(|w| w.contains("ECONNREFUSED"));
-    let cause = if refused && exit.cause == Cause::Crash {
-        Cause::Refused
-    } else {
-        exit.cause
-    };
     d.put("state", json!("gone"))
         .put("code", json!(exit.code))
-        .put("cause", json!(cause.word()));
+        .put("cause", json!(exit.cause.word()));
     if let Some(n) = &exit.note {
         d.put("note", json!(n));
     }

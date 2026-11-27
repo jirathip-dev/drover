@@ -283,7 +283,7 @@ pub(crate) fn respawns(events: &[Event], fleet: &str, n: u64) -> (usize, u64) {
 
 /// A gone lane's wait (or `respawn` why) that names a resumable exit cause.
 pub fn resumed(why: &str) -> bool {
-    [Cause::Limit, Cause::Crash, Cause::Refused]
+    [Cause::Limit, Cause::Crash]
         .iter()
         .any(|c| why.contains(&format!("({})", c.word())))
 }
@@ -967,6 +967,12 @@ pub fn scan_where(
                 Some(p) => format!("{p}{h}"),
                 None => format!("{} · {h}", w.what),
             };
+        }
+        if let Some((_, at)) = spawn
+            .then(|| crate::starts::place(cfg, events, ctx.now, (&s.fleet, s.issue)))
+            .flatten()
+        {
+            w.what += &format!(" · {at}");
         }
         let pass = w.what.starts_with("PASS · ");
         let at = pass.then(|| gh::cached_at(ctx, &s.fleet, s.issue)).flatten();

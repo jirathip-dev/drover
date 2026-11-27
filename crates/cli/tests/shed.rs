@@ -808,7 +808,6 @@ fn no_runtime_is_no_shed_and_herdr_fails_to_load() {
     for herdr in [
         format!("{CONFIG}\n[runtime]\nkind = \"herdr\"\n"),
         format!("{CONFIG}\n[fleet.sendmeter.runtime]\nkind = \"herdr\"\n"),
-        format!("{CONFIG}\n[hosts.air]\nmachine = \"air\"\nruntime = \"herdr\"\n"),
     ] {
         let e = format!("{:#}", drover::config::Config::parse(&herdr).unwrap_err());
         assert!(e.contains(drover::config::RETIRED_RUNTIME), "{e}");

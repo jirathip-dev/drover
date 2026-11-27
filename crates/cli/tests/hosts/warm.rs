@@ -44,7 +44,6 @@ fn remote_root(name: &str) -> (drover::Ctx, std::path::PathBuf) {
     let cfg = std::fs::read_to_string(&c.config).unwrap() + &format!("root = \"{}\"\n", root.display());
     std::fs::write(&c.config, cfg).unwrap();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    remote::proxied(&c);
     (c, root)
 }
 

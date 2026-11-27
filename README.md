@@ -18,7 +18,7 @@ drover-serve (the page relay, webpush, paired devices) and drover-tui (a termina
 ## Non-goals
 
 - **shed** owns the runtime: terminals, ACP sessions, the link to machines it can reach (ssh, exec, files), their
-  processes, CPU and memory, accounts and credentials, secrets, the token proxy, usage, self-update and provider
+  processes, CPU and memory, accounts and credentials, secrets, usage, self-update and provider
   facts as catalog records. drover uses shed-client; it has no ssh plumbing, protocol client or provider facts of
   its own.
 - **shed-cloud** owns what a machine has on it (toolchains, sccache, disk) and pool VM lifecycle: drover runs no

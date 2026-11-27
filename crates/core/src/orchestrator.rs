@@ -79,7 +79,7 @@ pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
     let t = hold(ctx, cfg, fleet, id, json!({}))?;
     let p = role.profile_or("orchestrator");
     let acp = providers::get(&role.harness).acp().unwrap_or(&role.harness);
-    let why = crate::spawn::unguarded(ctx, (&p, "orchestrator", &role.harness), acp, false);
+    let why = crate::spawn::unguarded(ctx, (&p, "orchestrator", &role.harness), acp);
     let port = crate::spawn::lane_port(range, &format!("{fleet}/orchestrator-{id}"), &[]);
     let settings = providers::profiles_root(ctx).join(&p).join("settings.json");
     let env = json!({"DROVER_LANE": format!("{fleet}:-:orchestrator"), "DROVER_THREAD": id,
