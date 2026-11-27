@@ -620,6 +620,7 @@ fn a_dead_or_quiet_lane_supersedes_with_no_why() {
     let (exit, out) = spawn(&c, &r, &["--supersede"]);
     assert_eq!(exit, 0, "quiet past stall_minutes: {out}");
     assert!(read(&c.state).unwrap().iter().any(|e| e.kind == "supersede"));
+    assert!(sh.has("sendmeter-impl-12"), "the new lane started");
     let c = ctx(&tmpdir("supersede-dead"), CONFIG);
     let w = wt(&c).to_string_lossy().into_owned();
     let d0 = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12", "worktree": w});

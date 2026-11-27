@@ -25,7 +25,11 @@ fn at(c: &drover::Ctx, mins: u64) -> drover::Ctx {
 }
 
 fn respawn(c: &drover::Ctx, r: &Fake, mins: u64) -> (i32, String) {
-    run(&at(c, mins), r, &["spawn", "sendmeter", "12", "impl", "--supersede"])
+    run(
+        &at(c, mins),
+        r,
+        &["spawn", "sendmeter", "12", "impl", "--supersede", "--why", "retry"],
+    )
 }
 
 fn wips(r: &Fake) -> usize {
