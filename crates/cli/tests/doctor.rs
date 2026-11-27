@@ -40,7 +40,7 @@ fn write(p: &Path, text: &str, mode: u32) {
 }
 
 fn setup(name: &str, harness: &str) -> (drover::Ctx, PathBuf) {
-    let d = tmpdir(name);
+    let d = tmpdir(name.get(..8).unwrap_or(name));
     let c = ctx(&d, &config(&d, harness));
     std::fs::create_dir_all(d.join("local")).unwrap();
     std::fs::create_dir_all(&c.worktrees).unwrap();
@@ -68,6 +68,7 @@ fn setup(name: &str, harness: &str) -> (drover::Ctx, PathBuf) {
     let last = format!(r#"{{"at":{},"secs":4,"late":[]}}"#, c.now - 60);
     write(&st.join("housekeep.last"), &last, 0o644);
     assert_eq!(run(&c, &good(), &["timer", "install", "--no-load"]).0, 0);
+    fake_service(&c, 4242);
     (c, d)
 }
 

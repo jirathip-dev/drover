@@ -679,12 +679,7 @@ fn rows_list(id: &str, rows: Vec<k::Block>) -> k::Block {
     k::List::new(rows).id(id).block()
 }
 
-fn check_rows(
-    st: Option<&crate::events::IssueState>,
-    hist: &[Round],
-    fl: Option<&crate::config::Fleet>,
-    r: &QueueRow,
-) -> Vec<k::Row> {
+fn check_rows(hist: &[Round], r: &QueueRow) -> Vec<k::Row> {
     let toned_row = |id: &str, title: &str, text: &str, t: Tone| titled(id, title).subtitle(toned(text, t));
     let mut rows = vec![];
     if r.dead {
@@ -717,13 +712,11 @@ fn check_rows(
             continue;
         }
         seen.push(h.key);
-        let lim = fl.map(|fl| crate::gate::limit(fl, v.str("loop").unwrap_or(h.key), st));
-        let lim = lim.filter(|l| l.0 != u32::MAX).map(|l| l.1).unwrap_or_default();
         let round = v
             .data
             .get("round")
             .and_then(Value::as_u64)
-            .map_or(String::new(), |k| format!("{k}{lim}"));
+            .map_or(String::new(), |k| k.to_string());
         let mut row = titled(format!("v-{}", h.key), h.key)
             .badge(verdict_badge(v))
             .value(round);
@@ -758,13 +751,7 @@ fn history_rows(now: u64, f: &str, n: u64, hist: &[Round], live: bool) -> Vec<k:
     hist.iter().enumerate().rev().map(row).collect()
 }
 
-fn issue_sheet(
-    ctx: &Ctx,
-    ev: &crate::events::Log,
-    fl: Option<&crate::config::Fleet>,
-    c: &QueueCard,
-    r: &QueueRow,
-) -> k::Block {
+fn issue_sheet(ctx: &Ctx, ev: &crate::events::Log, c: &QueueCard, r: &QueueRow) -> k::Block {
     let (f, n) = (c.name.as_str(), r.issue);
     let hist = history(ev, f, n);
     let mut status = vec![];
@@ -785,7 +772,7 @@ fn issue_sheet(
         let at = [r.place.as_str(), r.host.as_str()].into_iter().find(|s| !s.is_empty());
         rows.push(l.subtitle(plain(at.unwrap_or(if r.live { "live" } else { "gone" }))));
     }
-    rows.extend(check_rows(ev.states.get(&(f.to_string(), n)), &hist, fl, r));
+    rows.extend(check_rows(&hist, r));
     rows.extend(r.notes.iter().enumerate().map(|(i, x)| titled(format!("note-{i}"), x)));
     status.push(rows_list("status-list", rows.into_iter().map(Kind::block).collect()));
     let mut blocks = vec![section("status", "status", status)];
@@ -1493,9 +1480,7 @@ impl Server<'_> {
             })?,
             "/screens/issue" => {
                 let ev = working(&ctx.state).ok()?;
-                let cfg = Config::kept(ctx).ok();
-                let fl = |c: &QueueCard| cfg.as_ref().and_then(|x| x.fleet.get(&c.name));
-                self.on_row(ctx, q, |c, r| issue_sheet(ctx, &ev, fl(c), c, r))?
+                self.on_row(ctx, q, |c, r| issue_sheet(ctx, &ev, c, r))?
             }
             "/screens/verdict" => verdict_sheet(&working(&ctx.state).ok()?, q)?,
             "/screens/backlog" => {

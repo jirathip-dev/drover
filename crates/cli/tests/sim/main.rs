@@ -280,8 +280,8 @@ fn a_sometimes_state_never_reached_fails_the_run() {
         <[String; 0]>::default()
     );
     assert_eq!(
-        gates::unreached(&outs, &["round-limit"]),
-        ["sometimes round-limit: never reached in seeds [9591]"]
+        gates::unreached(&outs, &["stuck"]),
+        ["sometimes stuck: never reached in seeds [9591]"]
     );
 }
 

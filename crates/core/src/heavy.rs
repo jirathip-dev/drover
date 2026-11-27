@@ -60,12 +60,28 @@ struct Part {
 }
 
 impl Part {
-    fn plain(&self) -> String {
-        let w: Vec<&String> = self.plain.iter().filter(|w| !w.is_empty()).collect();
+    fn args(&self) -> Vec<&str> {
+        let mut w: Vec<&str> = (self.plain.iter())
+            .map(String::as_str)
+            .filter(|w| !w.is_empty())
+            .collect();
         let at = w.iter().position(|w| !w.contains('=') || w.starts_with('-'));
-        at.and_then(|i| w.get(i..)).map_or(String::new(), |t| {
-            t.iter().map(|w| w.as_str()).collect::<Vec<_>>().join(" ")
-        })
+        w.split_off(at.unwrap_or(w.len()))
+    }
+
+    fn plain(&self) -> String {
+        self.args().join(" ")
+    }
+
+    fn dirs(&self) -> Vec<&str> {
+        let a = self.args();
+        let cd = matches!(a.first(), Some(&("cd" | "pushd"))).then(|| a.get(1).copied().unwrap_or("~"));
+        let pairs = a.iter().zip(a.iter().skip(1));
+        let flags = pairs
+            .filter(|(f, _)| matches!(**f, "-C" | "--manifest-path"))
+            .map(|(_, v)| *v);
+        let joined = a.iter().filter_map(|w| w.strip_prefix("--manifest-path="));
+        cd.into_iter().chain(flags).chain(joined).collect()
     }
 
     fn text(&self) -> String {
@@ -254,6 +270,22 @@ impl Line {
     }
 }
 
+fn inside(dir: &str, to: &str) -> bool {
+    use std::path::Component;
+    if to == "-" || to.contains(['$', '~', '`']) {
+        return false;
+    }
+    let mut n = std::path::PathBuf::new();
+    for c in Path::new(dir).join(to).components() {
+        match c {
+            Component::ParentDir if !n.pop() => return false,
+            Component::ParentDir | Component::CurDir => {}
+            c => n.push(c),
+        }
+    }
+    n.starts_with(dir)
+}
+
 /// Whether shell pattern `p` (`*` any text) matches `s`.
 pub fn hits(p: &str, s: &str) -> bool {
     crate::config::glob(p.replace('*', "**").as_bytes(), s.as_bytes())
@@ -298,6 +330,23 @@ impl Heavy {
         } else {
             cmd.into()
         }
+    }
+
+    /// Fleet `f`'s heavy kinds under host `host`'s slot limits (None or unknown: the main host's).
+    pub fn at(cfg: &crate::config::Config, f: &crate::config::Fleet, host: Option<&str>) -> Heavy {
+        let main = || cfg.hosts.values().find(|h| h.machine.is_none());
+        Self::of(f, host.and_then(|n| cfg.hosts.get(n)).or_else(main))
+    }
+
+    /// `run` as a check's `sh -c` argv in `wt` at background priority: on the `cargo` route when `gated`, else in a slot of the kind it matches.
+    pub fn check(&self, exe: &str, run: &str, wt: &str) -> Vec<String> {
+        let line = match self.kind(run) {
+            _ if self.gated(run) => self.wrap(exe, GATE_KIND, run, Some(wt)),
+            Some(kind) => self.wrap(exe, kind, run, None),
+            None => run.to_string(),
+        };
+        let sh = format!("renice -n 19 -p $$ >/dev/null 2>&1; cd \"$0\" && {line}");
+        crate::runner::argv(&["-c", &sh, wt])
     }
 
     /// The first kind with a pattern matching one of `cmd`'s commands (leading `VAR=value` words, quoted text, comments and here-doc bodies skipped).
@@ -352,7 +401,9 @@ impl Heavy {
         if !routed.contains(&true) {
             return here;
         }
-        if let Some(why) = line.unsplit.or(piped.then_some("a pipe")) {
+        let away = line.parts.iter().flat_map(Part::dirs).any(|to| !inside(dir, to));
+        let why = line.unsplit.or(piped.then_some("a pipe"));
+        if let Some(why) = why.or(away.then_some("another checkout")) {
             return format!("echo 'heavy: {why} in the line, running here' >&2; {here}");
         }
         if !split && !line.parts.iter().any(never) {

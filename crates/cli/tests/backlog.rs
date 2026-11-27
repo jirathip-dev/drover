@@ -171,7 +171,10 @@ fn the_queue_api_carries_the_backlog_from_the_last_read_with_no_github_call() {
         Value::Null,
         "never read: no backlog section"
     );
-    assert_eq!(run(&c, &Fake::default().once(READ, 0, &first_read()), &["housekeep"]).0, 0);
+    assert_eq!(
+        run(&c, &Fake::default().once(READ, 0, &first_read()), &["housekeep"]).0,
+        0
+    );
     for q in [queue(&s, &cookie), queue(&s, "")] {
         let bl = &q["fleets"][0]["backlog"]["issues"];
         assert_eq!(keys(bl), ["12", "15", "17"], "#20 queued and #21 with a lane left out");

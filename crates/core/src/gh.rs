@@ -856,8 +856,14 @@ pub fn findings(r: &dyn Runner, f: &Fleet, pr: &Value, head: &str, twice: &[Stri
     if !twice.is_empty() {
         what += &format!("; failed again after its re-run: `{}`", twice.join("`, `"));
     }
+    let name = failed
+        .and_then(|c| c["name"].as_str().or(c["context"].as_str()))
+        .unwrap_or("CI");
+    let tail = match crate::lanes::mask(&tail.join("\n")) {
+        t if t.trim().is_empty() => "(no failed log)".to_string(),
+        t => t,
+    };
     format!(
-        "FAIL\n\nCI is red at {head}: {what}.\n\n```\n{}\n```\n",
-        crate::lanes::mask(&tail.join("\n"))
+        "FAIL\n\nCI is red at {head}: {what}.\n\n- blocking [ci] {name}: red at {head:.7}\n  Proof: run\n  ```\n  gh run view {run} --log-failed\n  ```\n```\n{tail}\n```\n"
     )
 }

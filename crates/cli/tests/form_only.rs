@@ -59,7 +59,7 @@ fn a_fail_blocking_on_the_done_gates_paperwork_is_refused_naming_it() {
     let file = d.join("verdict.md");
     for tag in ["format", "pr-body", "why-note"] {
         let body = format!(
-            "FAIL\n\n- blocking [{tag}] src/x.rs:3: paperwork\n{SPEC}- blocking [code] src/x.rs:9: wrong\n{SPEC}"
+            "FAIL\n\n- blocking [{tag}] src/x.rs:3: paperwork\n{SPEC}- blocking [ac] src/x.rs:9: wrong\n{SPEC}"
         );
         std::fs::write(&file, body).unwrap();
         let sha = "a".repeat(40);
@@ -84,10 +84,9 @@ fn a_fail_blocking_on_the_done_gates_paperwork_is_refused_naming_it() {
         assert!(!out.contains("[code]"), "only the paperwork blocker is named: {out}");
     }
     assert_eq!(logged(&c, "verdict"), 0);
-    let note =
-        format!("FAIL\n\n- non-blocking [format] src/x.rs:3: a nit\n- blocking [code] src/x.rs:9: wrong\n{SPEC}");
+    let note = format!("FAIL\n\n- non-blocking [format] src/x.rs:3: a nit\n- blocking [ac] src/x.rs:9: wrong\n{SPEC}");
     let out = verdict(&c, &d, 'b', &note);
-    assert!(out.contains("(round 1/3)"), "a paperwork note is fine: {out}");
+    assert!(out.contains("(round 1)"), "a paperwork note is fine: {out}");
 }
 
 #[test]
@@ -113,9 +112,9 @@ fn an_all_form_fail_is_not_counted() {
         &c,
         &d,
         'b',
-        &format!("FAIL\n\n- blocking [code] src/x.rs:9: wrong\n{SPEC}"),
+        &format!("FAIL\n\n- blocking [ac] src/x.rs:9: wrong\n{SPEC}"),
     );
-    assert!(out.contains("(round 1/3)"), "{out}");
+    assert!(out.contains("(round 1)"), "{out}");
     assert_eq!(state(&c).state, "fix(2)");
 }
 
@@ -126,41 +125,51 @@ fn one_substantive_or_untagged_blocker_counts() {
         &c,
         &d,
         'a',
-        &format!("{FORM}- blocking [code] src/x.rs:9: wrong result\n{SPEC}"),
+        &format!("{FORM}- blocking [ac] src/x.rs:9: wrong result\n{SPEC}"),
     );
-    assert!(
-        out.contains("form-only-rejected") && out.contains("(round 1/3)"),
-        "{out}"
-    );
+    assert!(out.contains("form-only-rejected") && out.contains("(round 1)"), "{out}");
     assert_eq!(
         (state(&c).state.as_str(), logged(&c, "form-only-rejected")),
         ("fix(1)", 1)
     );
-    let out = verdict(&c, &d, 'b', &format!("{FORM}- blocking src/x.rs:9: no tag\n{SPEC}"));
-    assert!(out.contains("(round 2/3)"), "{out}");
+    let out = verdict(
+        &c,
+        &d,
+        'b',
+        &format!("{FORM}- blocking [rules] src/x.rs:9: a rule\n{SPEC}"),
+    );
+    assert!(out.contains("(round 2)"), "{out}");
     let s = state(&c);
     assert_eq!((s.form, logged(&c, "form-only-rejected")), (0, 2));
     assert_eq!(read(&c.state).unwrap().last().unwrap().val("form_only"), false);
 }
 
 #[test]
-fn past_form_rounds_they_count_and_needs_you_says_how_many_were_form() {
+fn past_form_rounds_they_count_and_the_same_form_blocker_gets_stuck() {
     let (c, d) = fixture("form-bound", "form_rounds = 1\n");
+    let rev = |ts| {
+        let d = json!({"role": "rev", "agent": "sendmeter-rev-12", "branch": "issue-12"});
+        append(&c.state, &Event::new(ts, "sendmeter", Some(12), "spawn", d)).unwrap();
+    };
     assert!(verdict(&c, &d, 'a', FORM).contains("not counted · form 1/1"));
+    rev(10);
     let out = verdict(&c, &d, 'b', FORM);
     assert!(
-        out.contains("form-rounds-exhausted") && out.contains("(round 1/3)"),
+        out.contains("form-rounds-exhausted") && out.contains("(round 1)"),
         "{out}"
     );
     assert_eq!(logged(&c, "form-rounds-exhausted"), 1);
-    verdict(&c, &d, 'c', FORM);
-    let out = verdict(&c, &d, 'd', FORM);
-    assert!(out.contains("(round 3/3)") && out.contains("needs-human"), "{out}");
+    rev(20);
+    let out = verdict(&c, &d, 'c', FORM);
+    assert!(
+        out.contains("(round 2)") && out.contains("stuck → needs-human"),
+        "{out}"
+    );
     let ev = read(&c.state).unwrap();
     let nh = ev.iter().rfind(|e| e.kind == "needs-human").unwrap();
     assert_eq!(
         nh.str("reason"),
-        Some("review rounds ran out (3/3, 1 form-only not counted)")
+        Some("stuck: the same blocking finding `[docs-fresh] docs/x.md` in 3 FAILs in a row (2 fix rounds)")
     );
 }
 
@@ -191,7 +200,8 @@ fn a_fleet_overrides_the_form_categories() {
         ),
     )
     .unwrap();
-    let out = verdict(&c, &d, 'a', FORM);
+    let trailer = "FAIL (form-only)\n\n- blocking [trailer] abc1234: an AI trailer\n  Proof: spec\n  > No AI co-author trailers\n  abc1234:5\n";
+    let out = verdict(&c, &d, 'a', trailer);
     assert!(out.contains("form-only-rejected"), "{out}");
     let out = verdict(
         &c,
@@ -207,10 +217,10 @@ fn form_only_parses_tags() {
     let cats = ["format".to_string(), "pr-body".to_string()];
     let ok = |b: &str| drover::gate::form_only(b, &cats);
     assert!(ok(
-        "FAIL (form-only)\n- **blocking** [format] a.rs:1\n- non-blocking [code] b.rs:2\n"
+        "FAIL (form-only)\n- **blocking** [format] a.rs:1\n- non-blocking [ac] b.rs:2\n"
     ));
     assert!(!ok("FAIL (form-only)\n- non-blocking [format] a.rs:1\n"), "no blocker");
-    assert!(!ok("FAIL (form-only)\n- blocking [code] a.rs:1\n"));
+    assert!(!ok("FAIL (form-only)\n- blocking [ac] a.rs:1\n"));
     let line = "Tests checked against anti-patterns: yes\n";
     assert!(ok(&format!("FAIL (form-only)\n{line}- blocking [format] a.rs:1\n")));
 }

@@ -8,13 +8,14 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 pub const TICK: &str = "dev.drover.tick";
-/// The every-minute `drive` job: it starts each fleet's pass, its own job so the slow tick never delays it.
+/// The retired every-minute `drive` job: `timer install` removes it, the service took its place.
 pub const FAST: &str = "dev.drover.fast";
-/// The build's own jobs (label, args); `install` derives each one's interval from its args. `drover service`, kept alive; it runs the fast step itself (and the board with `--board`).
+/// `drover service`, kept alive; it runs the fast step itself.
 pub const SERVICE: &str = "dev.drover.service";
+/// The build's own jobs (label, args); `install` derives each one's interval from its args.
 /// The housekeeping job: check, clean, reclaim and the chores, beside the drive passes, never inside one.
 pub const HOUSEKEEP: &str = "dev.drover.housekeep";
-pub const JOBS: [(&str, &[&str]); 3] = [(TICK, &["tick"]), (FAST, &["drive"]), (HOUSEKEEP, &["housekeep"])];
+pub const JOBS: [(&str, &[&str]); 3] = [(TICK, &["tick"]), (SERVICE, &["service"]), (HOUSEKEEP, &["housekeep"])];
 /// The tick's steps in order (`tick.step` names the running one) and the `[limits]` keys that time them.
 pub const TICK_STEPS: [(&str, &[&str]); 1] = [("drive", &[])];
 /// Drover's own install every 5 min; `setup` and `timer` write it.
@@ -113,12 +114,16 @@ pub fn serving(ctx: &Ctx, r: &dyn Runner, label: &str, addr: &str) -> bool {
     })
 }
 
+/// Whether job `label`'s file is written.
+pub fn has_job(ctx: &Ctx, label: &str) -> bool {
+    files(ctx, label, &[], "", 0, MAC).first().is_some_and(|f| f.0.exists())
+}
+
 /// Load the installed board job when it is not loaded; logs `serve-revived`.
 pub fn revive(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<()> {
     let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
-    let installed = files(ctx, label, &[], "", 0, MAC).first().is_some_and(|f| f.0.exists());
     let down = || job_pid(ctx, r, label).is_err();
-    if !installed || !down() || rebootstrap(ctx, r, label, false).is_err() || down() {
+    if !has_job(ctx, label) || !down() || rebootstrap(ctx, r, label, false).is_err() || down() {
         return Ok(());
     }
     let d = serde_json::json!({"label": label});
@@ -188,8 +193,12 @@ fn exec(r: &dyn Runner, cmd: &str) -> Result<String> {
     ok(r, w.next().unwrap_or_default(), &w.collect::<Vec<_>>())
 }
 
+fn every(args: &[&str]) -> bool {
+    !args.first().is_some_and(|a| ["serve", "service"].contains(a))
+}
+
 fn expect(ctx: &Ctx, cfg: &Config, label: &str, args: &[&str], path: &str) -> Vec<(PathBuf, String)> {
-    let every = !args.first().is_some_and(|a| ["serve", "service"].contains(a));
+    let every = every(args);
     let secs = match args.first().copied().unwrap_or_default() {
         _ if !every => 0,
         "drive" => cfg.limits.fast_secs,
@@ -212,7 +221,7 @@ pub fn drift(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<(&'static str, &'st
     };
     let state = |(label, args): (&'static str, &[&str])| {
         let files = expect(ctx, cfg, label, args, "\0");
-        let up = files.iter().all(|f| f.0.exists()) && exec(r, &ctl(ctx, label, true)[0]).is_ok();
+        let up = files.iter().all(|f| f.0.exists()) && exec(r, &ctl(ctx, label, every(args))[0]).is_ok();
         let i = usize::from(up) + usize::from(up && files.iter().all(same));
         let abandons = |(p, _): &(PathBuf, String)| std::fs::read_to_string(p).is_ok_and(|x| x.contains(ABANDON));
         if i == 1 && MAC && !files.iter().all(abandons) {
@@ -262,10 +271,7 @@ fn path(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
 
 /// Write the job and load it (unless `!load`): `= already` when written (and loaded) as is, else `✓` or `✗ … → fix`.
 pub fn install(ctx: &Ctx, cfg: &Config, r: &dyn Runner, label: &str, args: &[&str], load: bool) -> String {
-    let (every, files) = (
-        !args.first().is_some_and(|a| ["serve", "service"].contains(a)),
-        expect(ctx, cfg, label, args, &path(ctx, cfg, r)),
-    );
+    let (every, files) = (every(args), expect(ctx, cfg, label, args, &path(ctx, cfg, r)));
     let [probe, up, down] = ctl(ctx, label, every);
     let live = load && exec(r, &probe).is_ok() && !refused(ctx, r, label, every);
     let same = |(p, t): &(PathBuf, String)| std::fs::read_to_string(p).is_ok_and(|x| x == *t);
@@ -307,10 +313,24 @@ pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: 
         "install" => {
             let lines = both.map(|(l, args)| (l, install(ctx, cfg, r, l, args, load)));
             installed(ctx, cfg, &lines)?;
-            let lines = lines.map(|l| l.1).into_iter().chain([remove(ctx, r, CLEAN)]);
-            lines.filter(|l| !l.starts_with("= no ")).collect::<Vec<_>>().join("\n")
+            let fast = load.then(|| remove(ctx, r, FAST, true));
+            let retired = [fast, Some(remove(ctx, r, CLEAN, true))].map(|l| l.filter(|l| l.starts_with('✓')));
+            lines
+                .map(|l| l.1)
+                .into_iter()
+                .chain(retired.into_iter().flatten())
+                .collect::<Vec<_>>()
+                .join("\n")
         }
-        "remove" => both.map(|(label, _)| remove(ctx, r, label)).join("\n"),
+        "remove" => (both.iter().map(|(l, args)| remove(ctx, r, l, every(args))))
+            .chain(
+                [FAST, CLEAN]
+                    .map(|l| remove(ctx, r, l, true))
+                    .into_iter()
+                    .filter(|l| l.starts_with('✓')),
+            )
+            .collect::<Vec<_>>()
+            .join("\n"),
         _ => {
             let up = exec(r, &ctl(ctx, label, true)[0]).is_ok();
             let on = if up { "loaded" } else { "not loaded" };
@@ -322,17 +342,16 @@ pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: 
     Ok(i32::from(line.contains('✗')))
 }
 
-fn remove(ctx: &Ctx, r: &dyn Runner, label: &str) -> String {
-    let files = files(ctx, label, &[], "", 1, MAC);
-    if files.iter().any(|f| f.0.exists()) {
-        exec(r, &ctl(ctx, label, true)[2]).ok();
+fn remove(ctx: &Ctx, r: &dyn Runner, label: &str, every: bool) -> String {
+    let files = files(ctx, label, &[], "", u64::from(every), MAC);
+    if !files.iter().any(|f| f.0.exists()) {
+        return format!("= no {label} job");
     }
-    let gone = files.iter().filter(|f| std::fs::remove_file(&f.0).is_ok()).count();
-    if gone > 0 {
-        format!("✓ removed {label}")
-    } else {
-        format!("= no {label} job")
+    exec(r, &ctl(ctx, label, every)[2]).ok();
+    for f in &files {
+        std::fs::remove_file(&f.0).ok();
     }
+    format!("✓ removed {label}")
 }
 
 fn installed(ctx: &Ctx, cfg: &Config, lines: &[(&str, String)]) -> Result<()> {
@@ -477,7 +496,7 @@ pub fn stuck_secs(cfg: &Config) -> u64 {
 
 fn repair(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Result<()> {
     for ((label, state), (_, args)) in drift(ctx, cfg, r).into_iter().zip(JOBS) {
-        if label == TICK || state == "loaded" || label == FAST && crate::service::up(ctx).is_some() {
+        if label == TICK || state == "loaded" || label == SERVICE && crate::service::up(ctx).is_some() {
             continue;
         }
         let line = install(ctx, cfg, r, label, args, true);
@@ -492,9 +511,13 @@ fn repair(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Result<(
             alert(ctx, cfg, events, "timer-repair-failed", label, &line)?;
         }
     }
-    if remove(ctx, r, CLEAN).starts_with('✓') {
+    if remove(ctx, r, CLEAN, true).starts_with('✓') {
         let d = serde_json::json!({"label": CLEAN, "was": "folded into housekeeping"});
-        emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "timer-repaired", d))?;
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, "drover", None, "timer-repaired", d),
+        )?;
     }
     Ok(())
 }
@@ -547,37 +570,24 @@ pub fn setup(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, load: bool) -> Resu
         Ok(()) => "✓ profiles synced".into(),
     };
     let tick = install(ctx, &cfg, r, TICK, &["tick"], load);
-    let fast = install(ctx, &cfg, r, FAST, &["drive"], load);
-    let housekeep = install(ctx, &cfg, r, HOUSEKEEP, &["housekeep"], load);
+    let service = install(ctx, &cfg, r, SERVICE, JOBS[1].1, load);
+    let fast = load.then(|| remove(ctx, r, FAST, true)).filter(|l| l.starts_with('✓'));
+    let housekeep = install(ctx, &cfg, r, HOUSEKEEP, JOBS[2].1, load);
     let update = install(ctx, &cfg, r, UPDATE, MORE[0].1, load);
-    let clean = remove(ctx, r, CLEAN);
+    let clean = Some(remove(ctx, r, CLEAN, true)).filter(|l| l.starts_with('✓'));
     let labels = cfg
         .fleet
         .values()
         .filter_map(|f| Some(crate::gh::ensure_label(r, f, f.merge_label.as_deref()?)));
-    let rows: Vec<_> = [tick, fast, housekeep, board, tailscale, sync, update, clean]
+    let rows: Vec<_> = [tick, service, housekeep, board, tailscale, sync, update]
         .into_iter()
-        .filter(|l| !l.starts_with("= no "))
+        .chain(fast)
+        .chain(clean)
         .chain(labels)
         .chain(cfg.fleet.keys().flat_map(|n| crate::setup::hygiene(ctx, &cfg, r, n)))
         .collect();
     writeln!(out, "{}", rows.join("\n"))?;
     crate::doctor::doctor(ctx, r, out, false, false)
-}
-
-/// `drover service --install`: write its unit (kept alive: launchd/systemd restart it) and print the commands that swap it in for the fast-step job (and the board job, with `--board`); loads nothing itself.
-pub fn service_unit(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, api: &str, board: Option<&str>) -> Result<()> {
-    let cfg = Config::load(&ctx.config)?;
-    let mut args = vec!["service", "--api", api];
-    args.extend(board.iter().flat_map(|b| ["--board", *b]));
-    writeln!(out, "{}", install(ctx, &cfg, r, SERVICE, &args, false))?;
-    let serve = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
-    writeln!(out, "To swap it in, run:")?;
-    for (label, every) in std::iter::once((FAST, true)).chain(board.map(|_| (serve, false))) {
-        writeln!(out, "  {}", ctl(ctx, label, every)[2])?;
-    }
-    writeln!(out, "  {}", ctl(ctx, SERVICE, false)[1])?;
-    Ok(())
 }
 
 /// The phone alerts state: on/off, devices and last sent, unless a webpush failure is newer.

@@ -76,29 +76,21 @@ fn install_no_load_writes_without_loading_and_remove_deletes() {
     assert!(!r.called("launchctl bootstrap") && !r.called("systemctl --user enable"));
     assert_eq!(
         run(&c, &r, &["timer", "install", "--no-load"]).1,
-        "= already dev.drover.tick\n= already dev.drover.fast\n= already dev.drover.housekeep\n= already dev.drover.update\n"
+        "= already dev.drover.tick\n= already dev.drover.service\n= already dev.drover.housekeep\n= already dev.drover.update\n"
     );
-    let fast = std::fs::read_to_string(job(&c, "dev.drover.fast")).unwrap();
-    let every = if MAC {
-        fast.clone()
-    } else {
-        std::fs::read_to_string(c.home.join(".config/systemd/user/dev.drover.fast.timer")).unwrap()
-    };
-    assert!(
-        fast.contains("drive") && !fast.contains("--fast") && every.contains("60"),
-        "{fast}\n{every}"
-    );
+    let service = std::fs::read_to_string(job(&c, "dev.drover.service")).unwrap();
+    assert!(service.contains("service") && !service.contains("drive"), "{service}");
 
     let (code, out) = run(&c, &r, &["timer", "remove"]);
     assert_eq!(
         (code, out.as_str()),
-        (0, "✓ removed dev.drover.tick\n✓ removed dev.drover.fast\n✓ removed dev.drover.housekeep\n✓ removed dev.drover.update\n")
+        (0, "✓ removed dev.drover.tick\n✓ removed dev.drover.service\n✓ removed dev.drover.housekeep\n✓ removed dev.drover.update\n")
     );
-    assert!(!job(&c, "dev.drover.tick").exists() && !job(&c, "dev.drover.fast").exists());
+    assert!(!job(&c, "dev.drover.tick").exists() && !job(&c, "dev.drover.service").exists());
     assert!(r.called("launchctl bootout") || r.called("systemctl --user disable --now dev.drover.tick.timer"));
     assert_eq!(
         run(&c, &r, &["timer", "remove"]).1,
-        "= no dev.drover.tick job\n= no dev.drover.fast job\n= no dev.drover.housekeep job\n= no dev.drover.update job\n"
+        "= no dev.drover.tick job\n= no dev.drover.service job\n= no dev.drover.housekeep job\n= no dev.drover.update job\n"
     );
 }
 
@@ -119,13 +111,14 @@ fn install_loads_and_prints_the_command() {
         "{out}"
     );
     let unit = |job: &str| {
+        let kind = if job == "service" { "service" } else { "timer" };
         if MAC {
             cmd.to_string()
         } else {
-            format!("systemctl --user enable --now dev.drover.{job}.timer")
+            format!("systemctl --user enable --now dev.drover.{job}.{kind}")
         }
     };
-    let jobs = ["fast", "housekeep", "update"];
+    let jobs = ["service", "housekeep", "update"];
     let r = jobs
         .iter()
         .fold(host(Fake::default()).reply(cmd, ""), |r, j| r.reply(&unit(j), ""));
@@ -229,7 +222,7 @@ fn setup_twice_is_all_already_and_tailscale_absent_is_skipped() {
     let (_, out) = run(&c, &r, &["setup"]);
     let s = steps(&out);
     assert!(s[0].starts_with("✓ ") && s[0].contains("dev.drover.tick"), "{out}");
-    assert!(s[1].starts_with("✓ ") && s[1].contains("dev.drover.fast"), "{out}");
+    assert!(s[1].starts_with("✓ ") && s[1].contains("dev.drover.service"), "{out}");
     assert!(s[2].starts_with("✓ ") && s[2].contains("dev.drover.serve"), "{out}");
     assert_eq!(s[3], "= tailscale serve skipped: tailscale is not on PATH");
     assert_eq!(s[4], "✓ profiles synced");
@@ -513,7 +506,7 @@ fn drift_is_missing_outdated_or_loaded() {
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let up = host(Fake::default()).reply(PROBE, "");
     let drift = |r: &Fake| drover::timer::drift(&c, &cfg, r);
-    let both = |a, b| vec![("dev.drover.tick", a), ("dev.drover.fast", b)];
+    let both = |a, b| vec![("dev.drover.tick", a), ("dev.drover.service", b)];
     assert_eq!(drift(&up), both("missing", "missing"));
     assert_eq!(run(&c, &up, &["timer", "install", "--no-load"]).0, 0);
     assert_eq!(drift(&up), both("loaded", "loaded"));
@@ -531,11 +524,11 @@ fn drift_is_missing_outdated_or_loaded() {
     edit("dev.drover.tick", "/usr/sbin:/sbin", "/usr/sbin:/sbin:/opt/x");
     assert_eq!(drift(&up), both("loaded", "loaded"));
     let (from, to) = if MAC {
-        (">60<", ">120<")
+        (">service<", ">serve<")
     } else {
-        ("OnUnitActiveSec=60", "OnUnitActiveSec=120")
+        (" service\n", " serve\n")
     };
-    edit("dev.drover.fast", from, to);
+    edit("dev.drover.service", from, to);
     assert_eq!(drift(&up), both("loaded", "outdated (args or interval differ)"));
     let (from, to) = if MAC {
         (">tick<", ">check<")
@@ -545,7 +538,7 @@ fn drift_is_missing_outdated_or_loaded() {
     edit("dev.drover.tick", from, to);
     assert_eq!(drift(&up)[0].1, "outdated (args or interval differ)");
     if MAC {
-        edit("dev.drover.fast", "<key>AbandonProcessGroup</key><true/>\n", "");
+        edit("dev.drover.service", "<key>AbandonProcessGroup</key><true/>\n", "");
         assert_eq!(drift(&up)[1].1, "outdated (no AbandonProcessGroup)");
     }
 }
@@ -559,7 +552,7 @@ fn tick_repairs_only_the_missing_job() {
         .reply(LOAD, "")
         .reply("git -C", "");
     assert_eq!(run(&c, &r, &["timer", "install", "--no-load"]).0, 0);
-    std::fs::remove_file(job(&c, "dev.drover.fast")).unwrap();
+    std::fs::remove_file(job(&c, "dev.drover.service")).unwrap();
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     let loads: Vec<_> = r
@@ -569,17 +562,17 @@ fn tick_repairs_only_the_missing_job() {
         .filter(|l| l.starts_with(LOAD))
         .cloned()
         .collect();
-    assert!(loads.len() == 1 && loads[0].contains("dev.drover.fast"), "{loads:?}");
-    assert!(job(&c, "dev.drover.fast").exists());
+    assert!(loads.len() == 1 && loads[0].contains("dev.drover.service"), "{loads:?}");
+    assert!(job(&c, "dev.drover.service").exists());
     let events = read(&c.state).unwrap().to_vec();
     let fixed: Vec<_> = events.iter().filter(|e| e.kind == "timer-repaired").collect();
     assert_eq!(fixed.len(), 1, "{events:?}");
     assert_eq!(
         (fixed[0].str("label"), fixed[0].str("was")),
-        (Some("dev.drover.fast"), Some("missing"))
+        (Some("dev.drover.service"), Some("missing"))
     );
 
-    std::fs::remove_file(job(&c, "dev.drover.fast")).unwrap();
+    std::fs::remove_file(job(&c, "dev.drover.service")).unwrap();
     let r = host(Fake::default()).reply(PROBE, "").reply("git -C", "");
     for _ in 0..2 {
         assert_eq!(run(&c, &r, &["tick"]).0, 0);
@@ -701,4 +694,65 @@ fn check_bootstraps_an_unloaded_serve_job_once() {
         .filter(|e| e.kind == "serve-revived")
         .count();
     assert_eq!(revived, 1);
+}
+
+#[test]
+fn install_loads_the_service_in_place_of_the_fast_job() {
+    let c = ctx(&tmpdir("timer-service"), CONFIG);
+    let _sh = FakeShed::attached(&c);
+    for (p, t) in drover::timer::files(&c, "dev.drover.fast", &["/x/drover", "drive"], "", 60, MAC) {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, t).unwrap();
+    }
+    let r = host(Fake::default()).reply(LOAD, "");
+    let (code, out) = run(&c, &r, &["timer", "install"]);
+    assert_eq!(code, 0, "{out}");
+    let unit = std::fs::read_to_string(job(&c, "dev.drover.service")).unwrap();
+    assert!(unit.contains("service") && !unit.contains("drive"), "{unit}");
+    let calls = r.calls.borrow().join("\n");
+    let ran = |a: &str, b: &str| calls.lines().any(|l| l.contains(a) && l.contains(b));
+    assert!(ran(LOAD, "dev.drover.service"), "{calls}");
+    let off = if MAC {
+        "launchctl bootout"
+    } else {
+        "systemctl --user disable --now"
+    };
+    assert!(ran(off, "dev.drover.fast"), "{calls}");
+    assert!(!job(&c, "dev.drover.fast").exists(), "{out}");
+    assert!(out.ends_with("✓ removed dev.drover.fast\n"), "{out}");
+    assert!(!run(&c, &r, &["timer", "install"]).1.contains("dev.drover.fast"));
+}
+
+#[test]
+fn doctor_shows_the_service_missing_then_running() {
+    let c = ctx(&tmpdir("svc-doc"), CONFIG);
+    let _sh = FakeShed::attached(&c);
+    let r = host(Fake::default()).reply(LOAD, "");
+    let line = |out: &str| {
+        out.lines()
+            .find(|l| l.contains(" service — "))
+            .unwrap_or_default()
+            .to_string()
+    };
+    let (_, out) = run(&c, &r, &["doctor"]);
+    assert!(
+        line(&out).starts_with("✗ service — not running → drover timer install"),
+        "{out}"
+    );
+    assert_eq!(run(&c, &r, &["timer", "install"]).0, 0);
+    let (_, out) = run(&c, &r, &["doctor"]);
+    assert!(
+        line(&out).starts_with("✗ service — not running"),
+        "a dead socket: {out}"
+    );
+    fake_service(&c, 4242);
+    let (_, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(line(&out), "✓ service — running (pid 4242)", "{out}");
+    assert!(!out.contains("fast job"), "{out}");
+    for (p, t) in drover::timer::files(&c, "dev.drover.fast", &["/x/drover", "drive"], "", 60, MAC) {
+        std::fs::write(p, t).unwrap();
+    }
+    let (_, out) = run(&c, &r, &["doctor"]);
+    let fast = "✗ fast job — replaced by the service → drover timer install";
+    assert!(out.lines().any(|l| l.starts_with(fast)), "{out}");
 }

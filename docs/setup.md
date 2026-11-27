@@ -37,7 +37,7 @@ Self-update installs CI's signed release build of the `[self_update] branch` hea
 
 | Command | What it does |
 |---|---|
-| `drive` / `timer` / `tick` | one pass; the job that runs it; check, then drive |
+| `drive` / `timer` / `tick` | one pass; the job that runs it; drive only (`housekeep` runs check and the chores) |
 | `queue` / `next` / `pause` / `resume` | the ordered queue; the first ready issue; hold a fleet |
 | `spawn` / `adopt` / `turn` | start a lane; record a running one; a lane's end of turn |
 | `verdict` / `merge` / `cap` | a verdict pinned to the head sha; merge if every gate passes; the line cap |
