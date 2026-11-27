@@ -140,3 +140,26 @@ fn unlisted_fleets_take_a_free_slot_oldest_queue_entry_first() {
         "{out}"
     );
 }
+
+#[test]
+fn a_paused_fleets_prs_leave_the_total_until_it_resumes() {
+    let c = setup("total-paused", "max_in_flight_total = 2");
+    building(&c, "b", &[1, 2]);
+    queue(&c, "a", "5");
+    queue(&c, "a", "6");
+    assert_eq!(run(&c, &Fake::default(), &["pause", "b"]).0, 0);
+    let waiting = run(&c, &fake(), &["waiting"]).1;
+    assert_eq!(waiting.matches("in flight 0/2\n").count(), 1, "{waiting}");
+    let (code, out) = run(&c, &fake(), &["spawn", "a", "5", "impl"]);
+    assert_eq!((code, state_of(&c, "a", 5)), (0, "impl".into()), "{out}");
+
+    assert_eq!(run(&c, &Fake::default(), &["resume", "b"]).0, 0);
+    let (code, out) = run(&c, &fake(), &["spawn", "a", "6", "impl"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        out.contains("REFUSED IN_FLIGHT_CAP: 3/2 PRs in flight across fleets (a: #5; b: #1, #2)"),
+        "{out}"
+    );
+    let waiting = run(&c, &fake(), &["waiting"]).1;
+    assert_eq!(waiting.matches("in flight 3/2\n").count(), 1, "{waiting}");
+}
