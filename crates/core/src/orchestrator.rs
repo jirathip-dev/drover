@@ -1453,7 +1453,7 @@ pub fn silence(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], agents
                 )
             });
             let sent = deliver(ctx, cfg, r, t, &line).is_ok();
-            if sent {
+            if sent && kept.is_some() {
                 log(ctx, cfg, t, "system", ("your kept message is sent", &[]))?;
             }
             let d = json!({"thread": id, "held": h.seq, "sent": sent});
