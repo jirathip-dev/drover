@@ -446,10 +446,10 @@ fn a_remote_fetch_racing_another_on_staging_is_retried_and_the_spawn_starts() {
 fn premerge_twice_in_one_fleet_reuses_its_worktree() {
     let r = repos("premerge-reuse");
     let _sh = FakeShed::attached(&r.c);
-    premerge(&r.local);
+    premerge(&r.c);
     ready(&r.c, &r.head);
     let mut first = merger(&r.local, &r.head);
-    first.0 = std::mem::take(&mut first.0).once("sh -c", 1, "src lines (formatted): 14885 / cap 14700\n");
+    first.0 = std::mem::take(&mut first.0).once("sh -c", 1, "lint failed\n");
     let (code, out) = run(&r.c, &first, &["merge", "sendmeter", "3"]);
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("STAGING_WOULD_BREAK"), "{out}");
