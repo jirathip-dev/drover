@@ -258,7 +258,7 @@ fn heal(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, h: &Heal) 
         }
         Heal::Recount(fleet, n) => {
             let was = crate::check::worktree_gb(ctx).unwrap_or_default();
-            if let Err(e) = crate::check::budget(ctx, cfg, r, out) {
+            if let Err(e) = crate::check::recount(ctx, cfg) {
                 return format!("recount failed: {e:#}");
             }
             let now = crate::check::worktree_gb(ctx).unwrap_or_default();

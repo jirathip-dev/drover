@@ -376,6 +376,8 @@ fn worktrees_sharing_files_count_once_and_hold_no_spawn() {
     std::fs::write(a.join("target.bin"), vec![7u8; 1 << 20]).unwrap();
     std::fs::hard_link(a.join("target.bin"), b.join("target.bin")).unwrap();
     assert_eq!(run(&s.c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
+    let (code, o) = run(&s.at(), &*s.w, &["housekeep", "--only", "budget"]);
+    assert_eq!(code, 0, "{o}");
     s.minutes(10, |_| {});
     let du = std::fs::read_to_string(s.c.state.with_file_name("worktrees.du")).unwrap();
     let total: u64 = du.split_whitespace().next().unwrap().parse().unwrap();

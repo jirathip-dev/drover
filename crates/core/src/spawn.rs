@@ -1,4 +1,5 @@
 use crate::access;
+pub use crate::acp::start::acp_cmd;
 use crate::clone::refspec;
 use crate::config::{expand, Config, Fleet, Role};
 use crate::events::{emit, fold, last_spawn, plain, working, Event, Json};
@@ -65,8 +66,8 @@ pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) 
     let all = profiles(cfg);
     for (_, f, role, r, profile) in &all {
         access::mcp_servers(cfg, f, r)?;
-        for h in providers::known() {
-            providers::get(h).sync(ctx, f.family(role), prompt_kind(f, role), profile, usage, out)?;
+        for h in providers::lanes() {
+            h.sync(ctx, f.family(role), prompt_kind(f, role), profile, usage, out)?;
         }
     }
     let root = providers::profiles_root(ctx);
@@ -183,6 +184,25 @@ impl Plan {
         }
         c.extend(self.qos().map(|_| BACKGROUND.to_string()));
         c
+    }
+
+    /// What a judged lane's judge and agent share: `DROVER_LANE`, `DROVER_PORT` and the plain `env`, no secret.
+    pub fn judge_env(&self) -> Vec<(String, String)> {
+        let port = self.port.to_string();
+        let plain = self.env.iter().filter(|(_, x)| !x.starts_with("secret:"));
+        let plain = plain.map(|(k, x)| {
+            (
+                k.clone(),
+                expand(x).display().to_string().replace("$DROVER_PORT", &port),
+            )
+        });
+        [
+            ("DROVER_LANE".to_string(), self.lane.clone()),
+            ("DROVER_PORT".into(), port.clone()),
+        ]
+        .into_iter()
+        .chain(plain)
+        .collect()
     }
 
     /// Its start sources the secrets file `deliver` writes and removes once the lane runs.
@@ -562,42 +582,6 @@ pub fn unguarded(ctx: &Ctx, (profile, family, h): (&str, &str, &str), id: &str) 
     } else {
         String::new()
     }
-}
-
-/// file, signed in with the host's own login, its profile's settings and role as the
-pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&str>) -> Result<term::Acp> {
-    let dir = providers::profiles_root(ctx).join(&p.profile);
-    let home = |a: Vec<String>| crate::hosts::rehome(a, remote);
-    let why = unguarded(ctx, (&p.profile, p.family, &p.harness), id);
-    if !why.is_empty() {
-        return refused("ACP_UNGUARDED", format!("{why}; the lane does not start"));
-    }
-    if !shed_meta(r) {
-        return refused("SHED_OLD", format!("{SHED_OLD}; the lane does not start"));
-    }
-    let cmd = crate::shed::adapter(r, id)?
-        .with_context(|| format!("ACP agent {id} is not installed; `shed agents add {id}`"))?;
-    let mut words = home(p.lane_cmd("").get(3..).unwrap_or_default().to_vec());
-    let at = words.iter().position(|w| w.starts_with("&&")).unwrap_or(words.len());
-    let q = |v: &str| format!("'{}'", v.replace('\'', r"'\''"));
-    let dir = PathBuf::from(home(vec![dir.display().to_string()]).remove(0));
-    let env = providers::get(&p.harness).acp_env(p.model.as_deref(), p.effort.as_deref());
-    let own: Vec<String> = env.iter().map(|(k, v)| format!("{k}={}", q(v))).collect();
-    words.splice(at..at, own);
-    let (set, role) = (dir.join("settings.json"), dir.join("role.md"));
-    let (set, role) = (q(&set.to_string_lossy()), q(&role.to_string_lossy()));
-    let profile = providers::get(&p.harness).acp_profile(&set, &role);
-    let run = p.qos().map_or("exec \"$@\"", |_| BACKGROUND_EXEC);
-    let line = words.join(" ") + &profile + " && unset SHED BERTH && " + run;
-    let meta = providers::get(&p.harness).acp_meta();
-    let meta = meta.map(|m| serde_json::from_str(&home(vec![m.to_string()]).remove(0)).unwrap_or(m));
-    Ok(term::Acp {
-        cmd: [argv(&["sh", "-c", &line, "sh"]), cmd].concat(),
-        mcp: (meta.is_some() || !p.mcp.is_empty()).then(|| p.mcp_file.clone()),
-        meta,
-        awake: p.sources_secrets(),
-        account: p.account.clone(),
-    })
 }
 
 /// What `shed_meta` lacking means, for doctor's row and spawn's refusal.
@@ -1153,10 +1137,9 @@ fn start(
         )?;
     }
     p.account = on.machine.is_none().then(|| cfg.account(fleet, role));
-    let acp = acp_cmd(ctx, r, &p, &acp_id, hm.filter(|_| on.machine.is_some()))?;
-    if let Some(a) = p.account.as_ref().filter(|_| !o.dry_run) {
-        crate::accounts::admit(cfg, &on, &p.harness, a)?;
-    }
+    let remote = hm.filter(|_| on.machine.is_some());
+    let at = (fleet, role, acp_id.as_str(), bt.0.policy.as_str());
+    let (acp, agent, guard) = crate::acp::start::of(ctx, cfg, r, &mut p, at, (remote, o.dry_run))?;
     let mut pj = plan_json(&p, &on, (&local, reopen), (&bt, &labels, &acp));
     if o.dry_run {
         pj.put("dry_run", json!(true));
@@ -1528,7 +1511,10 @@ fn start(
         let res = (|| -> Result<bool> {
             let kicked = bt.kick_acp(r, &pane, &brief_text);
             let mut d = lane_data(&p, &pane);
-            d.put("runtime", json!("shed-acp"));
+            d.put("runtime", json!("shed-acp"))
+                .put("acp", json!(agent.id))
+                .put("guard", json!(guard.word()))
+                .put("version", json!(agent.installed.as_ref().map(|i| &i.version)));
             let confirmed = kicked.as_ref().is_ok_and(|c| *c);
             d.put("confirmed", json!(confirmed))
                 .put("error", json!(kicked.as_ref().err().map(|e| format!("{e:#}"))))

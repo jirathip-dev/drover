@@ -27,11 +27,15 @@ only when named. A lane's or a thread's ACP start on the main host carries it (`
 
 On the main host drover reads `account.ls`, never a lane's banner. A start whose account is signed out, limited or
 missing (for `auto`: no named account ready) is refused `LOGIN_NEEDED`, and goes through again by itself once
-shed lists the account ready. An account whose folder holds a setup is refused `ACP_UNGUARDED`: its run would not
+shed lists the account ready. For `auto` the refusal names each named account it skipped and why (a setup and
+its folders, signed out, drifted, limited until), each with its fix; with no named account at all it says
+`shed account add <agent> work`. An account whose folder holds a setup is refused `ACP_UNGUARDED`: its run would not
 load drover's profile. `drover check` raises one alert per account and episode (`signed-out` or `usage-limit`). An
 orchestrator thread gets one row: for a limit, `<agent> account <name> hit its usage limit until <reset>; your
-message is kept. New threads will fail too until then.` (and one `continue` at the reset); for a sign-out, a card
-whose [sign in] starts shed's `account.login` in the sign-in sheet. When shed moves a live orchestrator to another
+message is kept. New threads will fail too until then.`; for a sign-out or a missing account, the hold line and
+`your message is kept`, a card whose [sign in] starts shed's `account.login` in the sign-in sheet. The kept message
+is sent once, by itself, on the first `check` where an account is ready (or at the reset), with one row `your kept
+message is sent`. When shed moves a live orchestrator to another
 account, its thread shows `<was> hit its limit; now on <now>` (or `switched to <now>`).
 
 ## A lane on another host: a usage limit or a sign-out holds the host

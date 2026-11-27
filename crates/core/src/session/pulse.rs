@@ -19,6 +19,16 @@ pub struct Pulse {
     pub open_tools: BTreeMap<String, String>,
     #[serde(rename = "cpu", skip_serializing_if = "Option::is_none")]
     pub cpu_pct: Option<u64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub asked: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ask: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub refused: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub told: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unasked: Option<u32>,
 }
 
 fn path(ctx: &Ctx) -> std::path::PathBuf {

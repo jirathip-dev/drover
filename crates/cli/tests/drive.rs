@@ -404,11 +404,14 @@ fn clean_reclaims_merged_lanes() {
         .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
         .reply("git -C", "");
     let (out, steps) = drive(&c, &r);
-    assert_eq!(steps, ["clean"], "{out}");
+    assert!(steps.is_empty(), "a drive pass cleans nothing (#1805): {out}");
     let rm = format!(
         "git -C /tmp/does-not-matter/sendmeter worktree remove --force {}",
         wt.display()
     );
+    assert!(!r.called(&rm), "{:?}", r.calls.borrow());
+    let (code, out) = run(&c, &r, &["housekeep", "--only", "clean"]);
+    assert_eq!(code, 0, "{out}");
     assert!(r.called(&rm), "{:?}", r.calls.borrow());
     std::fs::remove_dir_all(&wt).unwrap();
     idle(&c, &r);
@@ -433,11 +436,16 @@ fn idle_lane(name: &str, merged: bool, status: &str) -> (drover::Ctx, PathBuf, i
     (c, wt, r)
 }
 
-struct Stamped(Fake, std::sync::Mutex<Vec<(String, usize)>>);
+struct Stamped(
+    Fake,
+    std::sync::Mutex<Vec<(String, usize)>>,
+    std::sync::Arc<std::sync::Mutex<common::fake_shed::State>>,
+);
 impl drover::runner::Runner for Stamped {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         let line = format!("{prog} {}", args.join(" "));
-        self.1.lock().unwrap().push((line, sh().methods().len()));
+        let seen = self.2.lock().unwrap().seen.len();
+        self.1.lock().unwrap().push((line, seen));
         self.0.run(prog, args)
     }
     fn sleep(&self, secs: u64) {
@@ -462,15 +470,15 @@ fn at(c: &drover::Ctx, s: u64) -> drover::Ctx {
 fn a_merged_issues_idle_lane_pane_closes_after_the_limit_with_its_work_on_wip() {
     let (c, wt, r) = idle_lane("drive-merged-idle", true, "idle");
     let r0 = r(0);
-    let (code, out) = run(&c, &r0, &["drive"]);
+    let (code, out) = run(&c, &r0, &["housekeep", "--only", "clean"]);
     assert_eq!(code, 0, "{out}");
     assert!(
         sh().all("kill").is_empty(),
         "idle under idle_merged_minutes (15): {out}"
     );
     assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "lane-closed"));
-    let r1 = Stamped(r(900), std::sync::Mutex::default());
-    let (code, out) = run(&at(&c, 900), &r1, &["drive"]);
+    let r1 = Stamped(r(900), std::sync::Mutex::default(), sh().state.clone());
+    let (code, out) = run(&at(&c, 900), &r1, &["housekeep", "--only", "clean"]);
     assert_eq!(code, 0, "{out}");
     let w = wt.display();
     let push = format!("git -C {w} push origin HEAD:refs/heads/wip/sendmeter-impl-12-20261107-120000-");
@@ -497,7 +505,7 @@ fn a_working_lane_of_a_merged_issue_is_never_closed() {
     let (c, _, r) = idle_lane("drive-merged-working", true, "working");
     for s in [0, 900, 3600] {
         let r = r(s);
-        let (code, out) = run(&at(&c, s), &r, &["drive"]);
+        let (code, out) = run(&at(&c, s), &r, &["housekeep", "--only", "clean"]);
         assert_eq!(code, 0, "{out}");
         assert!(
             sh().all("kill").is_empty() && !r.called("git -C /tmp/does-not-matter/sendmeter worktree remove"),
@@ -512,7 +520,7 @@ fn an_open_issues_idle_lane_is_kept() {
     let (c, _, r) = idle_lane("drive-open-idle", false, "idle");
     for s in [0, 900, 1500] {
         let r = r(s);
-        let (code, out) = run(&at(&c, s), &r, &["drive"]);
+        let (code, out) = run(&at(&c, s), &r, &["housekeep", "--only", "clean"]);
         assert_eq!(code, 0, "{out}");
         assert!(!sh().called("kill", "sendmeter-impl-12"), "{:?}", r.calls.borrow());
     }
@@ -535,7 +543,7 @@ fn a_secret_in_a_merged_lanes_wip_keeps_its_pane_reported_once_and_clean_dry_run
             )
             .reply("git -C", "")
     };
-    run(&c, &r(), &["drive"]);
+    run(&c, &r(), &["housekeep", "--only", "clean"]);
     let (code, dry) = run(&at(&c, 900), &r(), &["clean", "sendmeter"]);
     assert_eq!(code, 0, "{dry}");
     assert!(
@@ -544,7 +552,7 @@ fn a_secret_in_a_merged_lanes_wip_keeps_its_pane_reported_once_and_clean_dry_run
     );
     for s in [900, 1200] {
         let r = r();
-        let (code, out) = run(&at(&c, s), &r, &["drive"]);
+        let (code, out) = run(&at(&c, s), &r, &["housekeep", "--only", "clean"]);
         assert_eq!(code, 0, "{out}");
         assert!(
             sh().all("kill").is_empty() && !r.called(&format!("git -C {w} push")),
@@ -598,7 +606,9 @@ fn a_pr_merged_outside_drover_is_logged_merged_and_its_lanes_cleaned() {
     assert_eq!(m.str("merged_at"), Some("2026-11-03T06:37:00Z"));
     assert_eq!(state(&c), "merged");
     assert!(!r.called("gh pr merge") && !r.called("gh issue comment") && !r.called("gh issue close"));
-    assert_eq!(steps, ["clean"], "{out}");
+    assert!(steps.is_empty(), "{out}");
+    let (code, out) = run(&c, &r, &["housekeep", "--only", "clean"]);
+    assert_eq!(code, 0, "{out}");
     let rm = format!(
         "git -C /tmp/does-not-matter/sendmeter worktree remove --force {}",
         wt.display()

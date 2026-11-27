@@ -360,8 +360,11 @@ impl<'a> Pass<'a> {
     }
     pub fn step(&self, s: &str) {
         debug_assert!(
-            crate::timer::TICK_STEPS.iter().any(|t| t.0 == s),
-            "{s} is not in TICK_STEPS"
+            crate::timer::TICK_STEPS
+                .iter()
+                .chain(&crate::housekeep::CHORES)
+                .any(|t| t.0 == s),
+            "{s} is not in TICK_STEPS or CHORES"
         );
         let ran = self.slowest();
         let mut slowest = lock(&self.slowest);

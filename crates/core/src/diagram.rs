@@ -64,11 +64,16 @@ pub fn charts(limits: &Limits, counts: Option<&BTreeMap<&str, usize>>) -> [Chart
         } else {
             "fast_secs"
         };
-        let first = if i == 0 { "t0" } else { "d0" };
+        let first = match args.first().copied() {
+            Some("tick") => "t0",
+            Some("housekeep") => "h0",
+            _ => "d0",
+        };
         writeln!(p, "    j{i}[\"{job}: drover {}\"] --> {first}", args.join(" ")).ok();
         links.push((format!("j{i}"), every));
     }
-    for (pre, steps) in [("t", &timer::TICK_STEPS[..]), ("d", &drive::STEPS[..])] {
+    let chores = &crate::housekeep::CHORES[..];
+    for (pre, steps) in [("t", &timer::TICK_STEPS[..]), ("h", chores), ("d", &drive::STEPS[..])] {
         for (i, (step, keys)) in steps.iter().enumerate() {
             let next = (i + 1 < steps.len()).then(|| format!(" --> {pre}{}", i + 1));
             writeln!(p, "    {pre}{i}[\"{step}\"]{}", next.unwrap_or_default()).ok();

@@ -803,7 +803,7 @@ pub fn teardown(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fl
         r,
         out,
         Some(fleet),
-        (Some(issue), None, false, false, false, false),
+        (Some(issue), None, false, false, false),
         true,
     )
     .map(drop)
@@ -816,7 +816,7 @@ pub fn clean_all(
     r: &dyn Runner,
     out: &mut dyn Write,
     fleet: Option<&str>,
-    (issue, lane, sched, all, orphans, verbose): (Option<u64>, Option<&str>, bool, bool, bool, bool),
+    (issue, lane, all, orphans, verbose): (Option<u64>, Option<&str>, bool, bool, bool),
     yes: bool,
 ) -> Result<usize> {
     let events = working(&ctx.state)?;
@@ -827,7 +827,7 @@ pub fn clean_all(
         .context("cannot list the live agents; refusing to clean blind")?;
     let off = if all { disabled(ctx, cfg, r) } else { vec![] };
     let mut seen = std::collections::BTreeSet::new();
-    let (mut freed, mut removed, mut tallies) = (0, 0, (0, 0));
+    let (mut freed, mut tallies) = (0, (0, 0));
     let mut closed = BTreeMap::new();
     let mut idle: BTreeMap<String, u64> = crate::db::get(&ctx.state, IDLE).map(|v| v.1).unwrap_or_default();
     let mut fresh = std::collections::BTreeSet::new();
@@ -891,16 +891,6 @@ pub fn clean_all(
         } else {
             continue;
         };
-        let stale = states
-            .get(&(e.fleet.clone(), n))
-            .is_some_and(|s| ctx.now >= s.last_ts + 3 * 86_400);
-        if sched && !stale {
-            continue;
-        }
-        if sched && removed == 10 {
-            writeln!(out, "stop: 10 removed this run; the rest go next run")?;
-            break;
-        }
         seen.insert(wt);
         let pane = e.str("pane").unwrap_or_default();
         let shown = away.map_or(wt.into(), |h| format!("{h}:{wt}"));
@@ -1014,7 +1004,6 @@ pub fn clean_all(
             }
         }
         drop_log(ctx, e.str("agent"));
-        removed += 1;
         writeln!(out, "removed {shown} ({}#{n} {why})", e.fleet)?;
         emit(&ctx.state, cfg, Event::new(ctx.now, &e.fleet, Some(n), "clean", d))?;
     }
@@ -1096,7 +1085,7 @@ pub fn kept_row(ctx: &Ctx) -> Option<String> {
 }
 
 pub fn scheduled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let res = clean_all(ctx, cfg, r, out, None, (None, None, true, false, false, false), true);
+    let res = clean_all(ctx, cfg, r, out, None, (None, None, false, false, false), true);
     let res = res.and_then(|n| Ok(std::fs::write(ctx.state.with_file_name("clean.kept"), n.to_string())?));
     let mark = ctx.state.with_file_name("clean.failed");
     let Err(e) = res else {
@@ -1301,6 +1290,11 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
     sweep(ctx, cfg, &On::new(r, None), "local", out, Sweep::Tick)?;
     trim_builds(ctx, cfg, cfg.limits.build_budget_gb, &live, out, false)?;
     stamp(ctx, &if total == usage.total { usage } else { measure(ctx, cfg) })
+}
+
+/// Measure this host's worktrees again and stamp the count; frees nothing (housekeeping's `budget` does).
+pub fn recount(ctx: &Ctx, cfg: &Config) -> Result<()> {
+    stamp(ctx, &measure(ctx, cfg))
 }
 
 /// This host's worktrees (build folders aside) by one walk: a hard link or clone counts once across all roots.

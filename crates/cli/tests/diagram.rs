@@ -39,11 +39,19 @@ fn the_diagram_is_docs_workflow_md_with_every_state_and_timing_limit() {
     assert!(STATES.iter().all(|(s, _)| out.contains(&format!("state \"{s}\" as "))));
     let l = serde_json::to_value(Limits::default()).unwrap();
     let timed = LIMIT_DOCS.iter().filter(|(k, _)| TIMING.iter().any(|t| k.ends_with(t)));
-    let stepped = (drover::drive::STEPS.iter().chain(&drover::timer::TICK_STEPS)).flat_map(|s| s.1.iter());
+    let stepped = (drover::drive::STEPS
+        .iter()
+        .chain(&drover::timer::TICK_STEPS)
+        .chain(&drover::housekeep::CHORES))
+    .flat_map(|s| s.1.iter());
     for k in timed.map(|d| d.0).chain(stepped.copied()) {
         assert!(limit_line(&out, k, &l[k].to_string()), "{k} missing");
     }
-    for (step, _) in drover::drive::STEPS.iter().chain(&drover::timer::TICK_STEPS) {
+    for (step, _) in drover::drive::STEPS
+        .iter()
+        .chain(&drover::timer::TICK_STEPS)
+        .chain(&drover::housekeep::CHORES)
+    {
         assert!(out.contains(&format!("[\"{step}\"]")), "{step} missing");
     }
 }

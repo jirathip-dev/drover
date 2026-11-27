@@ -174,10 +174,79 @@ fn a_live_orchestrator_moved_to_another_account_shows_one_row() {
         ev(2, "personal", Some("work"), "limit"),
         ev(3, "work", Some("personal"), "owner"),
     ] {
-        drover::session::stamp::on_event(&c, &cfg, &Wire::Socket(b.sock.clone()), &e).unwrap();
+        drover::session::stamp::on_event(&c, &cfg, &drover::runner::Real, &Wire::Socket(b.sock.clone()), &e).unwrap();
     }
     assert_eq!(
         rows(&c, "t1"),
         ["work hit its limit; now on personal", "switched to work"]
     );
+}
+
+#[test]
+fn auto_names_each_account_it_skipped_and_why() {
+    let b = FakeShed::new();
+    let mut guy = acct("guyjrt", "ready");
+    guy["setup"] = json!(["skills/synced", "plugins/store"]);
+    let mut work = acct("work", "ready");
+    work["setup"] = json!(["plugins/synced"]);
+    b.lock().accounts = vec![guy, work];
+    let c = acp_ctx("acct-auto-setup", &acp_config(&b.sock, "claude"));
+    let f = acp_fake(&["echo", "claude-agent-acp"]);
+    let (code, out) = run(&c, &b.cli(&f), &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("REFUSED LOGIN_NEEDED"), "{out}");
+    assert!(
+        out.contains("claude account guyjrt holds a setup (skills/synced, plugins/store)"),
+        "{out}"
+    );
+    assert!(
+        out.contains("claude account work holds a setup (plugins/synced)"),
+        "{out}"
+    );
+    assert!(!out.contains("<name>") && !out.contains("shed account add"), "{out}");
+}
+
+#[test]
+fn auto_with_no_named_account_gives_a_real_example_name() {
+    let b = FakeShed::new();
+    b.lock().accounts = vec![acct("default", "ready")];
+    let c = acp_ctx("acct-auto-none", &acp_config(&b.sock, "claude"));
+    let f = acp_fake(&["echo", "claude-agent-acp"]);
+    let (code, out) = run(&c, &b.cli(&f), &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("→ shed account add claude work"), "{out}");
+    assert!(!out.contains("<name>"), "{out}");
+}
+
+#[test]
+fn a_message_held_for_a_sign_in_is_delivered_once_when_an_account_is_ready() {
+    let b = FakeShed::new();
+    b.lock().accounts = vec![acct("work", "signed-out")];
+    let c = acp_ctx("acct-out-kept", &acp_config(&b.sock, "claude"));
+    assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "One"]).0, 0);
+    let f = acp_fake(&["echo", "claude-agent-acp"]);
+    let (_, out) = run(&c, &b.cli(&f), &["thread", "say", "t1", "ship the fix"]);
+    assert!(out.contains("REFUSED LOGIN_NEEDED"), "{out}");
+    assert!(!out.contains("the orchestrator waits"), "{out}");
+    let row = "claude account work is signed out → sign in (shed account login claude work); your message is kept";
+    assert_eq!(rows(&c, "t1"), [row]);
+    assert!(shed_run(&f).is_none());
+    assert_eq!(run(&c, &b.cli(&f), &["check"]).0, 0);
+    assert!(shed_run(&f).is_none(), "still signed out: {:?}", f.calls.borrow());
+
+    b.lock().accounts = vec![acct("work", "ready")];
+    let typed = |f: &Fake| {
+        let calls = f.calls.borrow();
+        let sends = calls
+            .iter()
+            .filter(|c| c.starts_with("shed send") && c.contains("ship the fix"));
+        sends.count()
+    };
+    let f = acp_fake(&["echo", "claude-agent-acp"]);
+    assert_eq!(run(&c, &b.cli(&f), &["check"]).0, 0);
+    assert_eq!(typed(&f), 1, "delivered once: {:?}", f.calls.borrow());
+    let f = acp_fake(&["echo", "claude-agent-acp"]);
+    assert_eq!(run(&c, &b.cli(&f), &["check"]).0, 0);
+    assert_eq!(typed(&f), 0, "not again: {:?}", f.calls.borrow());
+    assert_eq!(rows(&c, "t1").len(), 2, "one row when it is sent: {:?}", rows(&c, "t1"));
 }

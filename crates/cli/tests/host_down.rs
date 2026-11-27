@@ -144,7 +144,7 @@ fn a_disabled_host_with_old_lanes_gets_no_ssh_from_kick_tick_drive_waiting_or_st
 }
 
 #[test]
-fn tick_ends_a_kick_past_its_limit_logs_it_and_still_runs_every_fleet() {
+fn housekeeping_ends_a_kick_past_its_limit_logs_it_and_the_tick_still_runs_every_fleet() {
     let (c, _sh) = setup("down-kick-limit", "enabled = false\n");
     let (code, show) = run(&c, &Fake::default(), &["config", "show"]);
     assert_eq!(code, 0, "{show}");
@@ -155,6 +155,8 @@ fn tick_ends_a_kick_past_its_limit_logs_it_and_still_runs_every_fleet() {
         f: r.f.reply("kill -0 4242", "").reply("ps -o etime= -p 4242", "15:00\n"),
         ..r
     };
+    let (code, out) = run(&c, &r, &["housekeep", "--only", "check"]);
+    assert_eq!(code, 0, "{out}");
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert!(r.f.count("kill -TERM -4242") == 1, "{:#?}", r.f.calls.borrow());

@@ -214,6 +214,7 @@ fn drive_refuses_starts_over_budget() {
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git -C", "")
         .reply("gh issue view", r#"{"title":"t","body":"b"}"#);
+    assert_eq!(run(&c, &r, &["housekeep", "--only", "budget"]).0, 0);
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert!(
@@ -224,7 +225,7 @@ fn drive_refuses_starts_over_budget() {
 }
 
 #[test]
-fn the_hourly_sweep_runs_once_per_hour() {
+fn each_housekeeping_run_sweeps_merged_lanes_and_the_tick_none() {
     let cfg = CONFIG.replace("integration = \"staging\"", "integration = \"staging\"\npaused = true");
     let mut c = ctx(&tmpdir("disk-hourly"), &cfg);
     let _sh = FakeShed::attached(&c);
@@ -254,21 +255,21 @@ fn the_hourly_sweep_runs_once_per_hour() {
             .filter(|l| l.starts_with("git -C") && l.contains(" worktree remove "))
             .count()
     };
-    let tick = |c: &drover::Ctx| {
+    let tick = |c: &drover::Ctx, args: &[&str]| {
         let r = r();
-        let (code, out) = run(c, &r, &["tick"]);
+        let (code, out) = run(c, &r, args);
         assert_eq!(code, 0, "{out}");
         (removes(&r), out)
     };
-    let (n, out) = tick(&c);
+    let (n, out) = tick(&c, &["tick"]);
+    assert_eq!(n, 0, "the tick sweeps nothing: {out}");
+    let (n, out) = tick(&c, &["housekeep"]);
     assert_eq!(n, 1, "{out}");
     std::fs::remove_dir_all(first).unwrap();
     lane(&c, 60, 13, "impl", "issue-13");
     merged(&c, 13);
-    c.now = NOW + 3599;
-    assert_eq!(tick(&c).0, 0, "within the hour: no sweep");
-    c.now = NOW + 3600;
-    assert_eq!(tick(&c).0, 1, "an hour on: swept");
+    c.now = NOW + 300;
+    assert_eq!(tick(&c, &["housekeep"]).0, 1, "the next run sweeps the next one");
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {
