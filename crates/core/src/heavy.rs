@@ -60,12 +60,22 @@ struct Part {
 }
 
 impl Part {
-    fn plain(&self) -> String {
-        let w: Vec<&String> = self.plain.iter().filter(|w| !w.is_empty()).collect();
+    fn args(&self) -> Vec<&str> {
+        let mut w: Vec<&str> = (self.plain.iter()).map(String::as_str).filter(|w| !w.is_empty()).collect();
         let at = w.iter().position(|w| !w.contains('=') || w.starts_with('-'));
-        at.and_then(|i| w.get(i..)).map_or(String::new(), |t| {
-            t.iter().map(|w| w.as_str()).collect::<Vec<_>>().join(" ")
-        })
+        w.split_off(at.unwrap_or(w.len()))
+    }
+
+    fn plain(&self) -> String {
+        self.args().join(" ")
+    }
+
+    fn dirs(&self) -> Vec<&str> {
+        let a = self.args();
+        let cd = matches!(a.first(), Some(&("cd" | "pushd"))).then(|| a.get(1).copied().unwrap_or("~"));
+        let flag = |(f, v): (&&str, &&str)| matches!(*f, "-C" | "--manifest-path").then_some(*v);
+        let joined = a.iter().filter_map(|w| w.strip_prefix("--manifest-path="));
+        cd.into_iter().chain(a.iter().zip(a.iter().skip(1)).filter_map(flag)).chain(joined).collect()
     }
 
     fn text(&self) -> String {
@@ -254,6 +264,22 @@ impl Line {
     }
 }
 
+fn inside(dir: &str, to: &str) -> bool {
+    use std::path::Component;
+    if to == "-" || to.contains(['$', '~', '`']) {
+        return false;
+    }
+    let mut n = std::path::PathBuf::new();
+    for c in Path::new(dir).join(to).components() {
+        match c {
+            Component::ParentDir if !n.pop() => return false,
+            Component::ParentDir | Component::CurDir => {}
+            c => n.push(c),
+        }
+    }
+    n.starts_with(dir)
+}
+
 /// Whether shell pattern `p` (`*` any text) matches `s`.
 pub fn hits(p: &str, s: &str) -> bool {
     crate::config::glob(p.replace('*', "**").as_bytes(), s.as_bytes())
@@ -352,7 +378,9 @@ impl Heavy {
         if !routed.contains(&true) {
             return here;
         }
-        if let Some(why) = line.unsplit.or(piped.then_some("a pipe")) {
+        let away = line.parts.iter().flat_map(Part::dirs).any(|to| !inside(dir, to));
+        let why = line.unsplit.or(piped.then_some("a pipe"));
+        if let Some(why) = why.or(away.then_some("another checkout")) {
             return format!("echo 'heavy: {why} in the line, running here' >&2; {here}");
         }
         if !split && !line.parts.iter().any(never) {
