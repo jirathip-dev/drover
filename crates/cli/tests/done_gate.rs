@@ -425,9 +425,40 @@ fn gatekept(name: &str, code: i32) -> (Repo, drover::Ctx, FakeShed, PathBuf) {
     (repo, c, sh, bin)
 }
 
+fn set_checks(c: &drover::Ctx, checks: &str) {
+    let cfg = std::fs::read_to_string(&c.config).unwrap().replace(
+        "integration = \"staging\"",
+        &format!("integration = \"staging\"\n{checks}"),
+    );
+    std::fs::write(&c.config, cfg).unwrap();
+}
+
+const FULL: &str = "done_checks = [\"./.gatekeeper/run check\"]";
+
 #[test]
-fn a_gatekeeper_wrapper_replaces_the_default_checks() {
+fn a_gatekeeper_repo_with_no_done_checks_runs_only_the_light_checks() {
+    let (repo, c, _sh, bin) = gatekept("done-gk-light", 1);
+    let f = fake(&repo.head);
+    let (code, out) = run(&c, &ui(Git::new(&f), &bin, false), &["turn", "done"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        !repo.wt.join(".gatekeeper/ran.log").exists(),
+        "the full gatekeeper check never runs at done"
+    );
+    let wt = repo.wt.canonicalize().unwrap();
+    let ran = std::fs::read_to_string(bin.join("ran.log")).unwrap();
+    let want = format!(
+        "drover arch-check {}\ncargo fmt --check {}\n",
+        wt.display(),
+        wt.display()
+    );
+    assert_eq!(ran, want);
+}
+
+#[test]
+fn a_fleets_explicit_gatekeeper_check_still_runs_the_full_set() {
     let (repo, c, _sh, bin) = gatekept("done-gk-clean", 0);
+    set_checks(&c, FULL);
     let f = fake(&repo.head);
     let (code, out) = run(&c, &ui(Git::new(&f), &bin, false), &["turn", "done"]);
     assert_eq!(code, 0, "{out}");
@@ -495,7 +526,7 @@ fn a_remote_lane_with_no_fleet_config_passes_done_with_the_names_on_stdin_only()
     let (c, _sh) = lane(&repo);
     let cfg = std::fs::read_to_string(&c.config).unwrap().replace(
         "integration = \"staging\"",
-        "integration = \"staging\"\nprivate_names = [\"quillmoor\", \"north-pier\"]",
+        "integration = \"staging\"\nprivate_names = [\"quillmoor\", \"north-pier\"]\ndone_checks = [\"./.gatekeeper/run check\"]",
     );
     std::fs::write(&c.config, cfg).unwrap();
     let sp = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12",
@@ -553,6 +584,7 @@ fn a_remote_lane_with_no_fleet_config_passes_done_with_the_names_on_stdin_only()
 #[test]
 fn a_failing_gatekeeper_run_is_refused_with_its_failing_gates() {
     let (repo, c, _sh, bin) = gatekept("done-gk-fail", 1);
+    set_checks(&c, FULL);
     let f = fake(&repo.head);
     let (out, _) = refused(&c, &ui(Git::new(&f), &bin, false), "DONE_CHECK");
     assert!(out.contains("`./.gatekeeper/run check` failed (exit 1):"), "{out}");
@@ -813,7 +845,7 @@ fn a_routed_fleets_done_checks_route_the_same_way_but_never_routed_ones() {
 #[test]
 fn a_routed_fleets_gatekeeper_done_check_runs_in_the_lanes_git_tree() {
     for (code, name) in [(0, "done-gk-here"), (2, "done-gk-here-fail")] {
-        let (repo, c, f, bin) = routed_done(name, 0, "");
+        let (repo, c, f, bin) = routed_done(name, 0, FULL);
         tool(&repo.wt.join(".gatekeeper"), "run", code, "FAIL gate-3: needs git");
         let r = ui(Git::new(&f), &bin, false);
         if code == 0 {
