@@ -1173,7 +1173,6 @@ fn merged(
     Ok(())
 }
 
-/// Each `follow-up` line of the PASS verdicts at `head` filed as its own issue and queued last, once per finding and head (`follow-up-filed`).
 fn follow_up(
     ctx: &Ctx,
     cfg: &Config,

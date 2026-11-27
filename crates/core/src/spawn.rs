@@ -1612,7 +1612,6 @@ pub(crate) fn lane_admit(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "override", d))
 }
 
-/// Stuck (#1809): the PR conflicts again after 2 update rounds in a row, each with its PASS, and no update extend since the last.
 fn update_guard(ctx: &Ctx, cfg: &Config, events: &[Event], (fleet, issue): (&str, u64)) -> Result<()> {
     let (mut run, mut updating, mut extended) = (0, false, false);
     for e in crate::events::of_issue(events, fleet, issue) {
