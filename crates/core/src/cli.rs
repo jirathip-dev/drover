@@ -367,6 +367,10 @@ enum Cmd {
         about = "#1756: the fleet's scheduled jobs (every, last, next, open issue); with a name, run it now (orchestrators and the owner)"
     )]
     Job(crate::jobs::Args),
+    #[command(
+        about = "#1785: the `integration` job's check, in a checkout of the integration head: the premerge gate once per head; green closes the job's open issue, red exits 1"
+    )]
+    Integration { fleet: String },
     #[command(about = "#1648: the nightly soak on `[fleet.<n>.soak]` hosts; an issue per missed target")]
     Soak(crate::soak::Args),
     #[command(about = "Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)")]
@@ -2003,6 +2007,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 }
                 Cmd::Triage(a) => return crate::triage::cli(ctx, &cfg, r, out, a),
                 Cmd::Job(a) => return crate::jobs::cli(ctx, &cfg, r, out, &a),
+                Cmd::Integration { fleet } => return crate::integration::check(ctx, &cfg, r, out, &fleet),
                 Cmd::Soak(a) => return crate::soak::run(ctx, &cfg, r, out, &a.fleet),
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;

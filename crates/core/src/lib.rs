@@ -39,6 +39,7 @@ pub mod hosts;
 pub mod hotspots;
 pub mod housekeep;
 pub mod hygiene;
+pub mod integration;
 pub mod jobs;
 pub mod land;
 pub mod lanes;
