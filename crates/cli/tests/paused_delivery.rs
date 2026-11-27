@@ -59,7 +59,16 @@ fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answer
     std::env::set_current_dir(&wt).unwrap();
     set_env("DROVER_LANE", "sendmeter:12:impl");
     set_env("DROVER_OUTBOX", "1");
-    let ask = ["ask", "sendmeter", "12", "Which way?", "--option", "a", "--option", "b"];
+    let ask = [
+        "ask",
+        "sendmeter",
+        "12",
+        "Which way to main?",
+        "--option",
+        "a",
+        "--option",
+        "b",
+    ];
     assert_eq!(run(&lane, &Fake::default(), &ask).0, 0);
     assert_eq!(run(&lane, &Fake::default(), &["turn", "need-input"]).0, 0);
     let ob = wt.join(".drover/outbox.jsonl");
@@ -90,7 +99,10 @@ fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answer
         "a line stays on the host until it is acked; the log's id drops it"
     );
     let (_, asked) = run(&main, &r, &["asks", "sendmeter"]);
-    assert!(asked.contains("q1 #12") && asked.contains("Which way?"), "{asked}");
+    assert!(
+        asked.contains("q1 #12") && asked.contains("Which way to main?"),
+        "{asked}"
+    );
 
     assert_eq!(run(&main, &Fake::default(), &["answer", "sendmeter", "q1", "1"]).0, 0);
     assert_eq!(ev_count(&main, "answer-undelivered"), 1);
