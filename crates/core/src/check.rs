@@ -895,9 +895,9 @@ pub fn clean_all(
         .filter(|e| e.issue.is_some_and(|n| issue.is_none_or(|i| i == n)))
         .filter(|e| lane.is_none_or(|a| e.str("agent") == Some(a)))
         .filter(|e| {
-            !e.str("worktree")
+            e.str("worktree")
                 .and_then(|w| cleaned.get(w))
-                .is_some_and(|t| *t >= e.ts)
+                .is_none_or(|t| *t < e.ts)
         });
     let spawns = unset::unconfigured(cfg, out, &events, lane, spawns)?;
     let held = |e: &Event| {

@@ -18,7 +18,7 @@ pub(super) fn disabled<'c>(ctx: &Ctx, cfg: &'c Config, r: &dyn Runner) -> Off<'c
     let hosts = cfg.hosts.iter().filter(|h| !h.1.enabled);
     let hosts = hosts.filter_map(|(n, h)| Some((n.as_str(), h.machine.as_deref()?)));
     hosts
-        .filter(|(n, _)| !down.get(*n).is_some_and(|s| !s.up))
+        .filter(|(n, _)| down.get(*n).is_none_or(|s| s.up))
         .map(|(n, m)| (n, m, crate::session::live_on(&On::new(r, Some(m))).ok()))
         .collect()
 }
