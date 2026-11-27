@@ -71,6 +71,8 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `notify_secs` | `15` | a notifier command or web push send is killed after this long |
 | `gate_check_minutes` | `30` | a premerge or gate check (a build or test run) is killed after this long |
 | `shed_read_millis` | `300` | how long drive's intake waits for shed's state changes |
+| `acp_judge_secs` | `30` | shed's judge denies a judged lane's tool call when `drover hook --acp` takes longer |
+| `acp_probe_seconds` | `120` | an agent's test run under shed's judge (before its first judged lane) gives up after this long |
 | `service_call_secs` | `2` | a call to the running service's socket times out after this long |
 | `disk_probe_secs` | `2` | a folder listing slower than this on a host over `min_cpu_idle` marks its disk as not answering |
 | `disk_hung_secs` | `6` | under `min_cpu_idle` a call waits this long for a slow folder listing, then the disk is not answering |

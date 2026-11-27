@@ -24,7 +24,7 @@ pub fn all(cfg: &Config) -> Vec<(String, String)> {
     let logins = crate::providers::lanes()
         .filter_map(login)
         .chain([("gh", "gh auth login")]);
-    for (n, c) in logins.chain(crate::providers::acp_only().filter_map(login)) {
+    for (n, c) in logins {
         if !v.iter().any(|x| x.0 == n) {
             v.push((n.into(), c.into()));
         }

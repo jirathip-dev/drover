@@ -13,7 +13,7 @@ macro_rules! registry { ($($(#[$m:meta])* $n:ident),* $(,)?) => {
     $($(#[$m])* mod $n;)*
     static ALL: &[Entry] = &[$($(#[$m])* Entry { name: stringify!($n), provider: &$n::PROVIDER }),*];
 } }
-registry! { claude, codex, gemini, #[cfg(test)] fake }
+registry! { claude, #[cfg(test)] fake }
 
 /// A registry entry: its name (the registry's ident) and the provider it derefs to.
 #[derive(Clone, Copy)]
@@ -29,31 +29,14 @@ impl Deref for Entry {
     }
 }
 
-/// How a provider is reached.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Surface {
-    Terminal,
-    Acp,
-    Listed,
-}
-
 /// Every provider, in registry order.
 pub fn all() -> impl Iterator<Item = Entry> {
     ALL.iter().copied()
 }
 
-fn on(s: Surface) -> impl Iterator<Item = Entry> {
-    all().filter(move |p| p.surface() == s)
-}
-
 /// The lane providers a role's `harness` may name.
 pub fn lanes() -> impl Iterator<Item = Entry> {
-    on(Surface::Terminal)
-}
-
-/// Providers a role reaches only through its ACP `agent` (no terminal lane, not offered as a `harness`).
-pub fn acp_only() -> impl Iterator<Item = Entry> {
-    on(Surface::Acp)
+    all()
 }
 
 /// The names a role's `harness` may take.
@@ -61,19 +44,14 @@ pub fn lane_names() -> Vec<&'static str> {
     lanes().map(|p| p.name).collect()
 }
 
-/// Every provider name `get` knows, the lanes then the ACP-only ones.
-pub fn known() -> impl Iterator<Item = &'static str> {
-    lanes().chain(acp_only()).map(|p| p.name)
-}
-
-/// ACP agent `id`'s model vendor, if known; a fleet's `rev` runs on another vendor than its `impl`.
-pub fn vendor_of_agent(id: &str) -> Option<&'static str> {
-    all().find(|p| p.acp() == Some(id)).and_then(|p| p.vendor())
-}
-
 /// The provider whose adapter ACP agent `id` is (the one that guards it).
 pub fn of_agent(id: &str) -> Option<&'static str> {
-    known().find(|h| get(h).acp() == Some(id))
+    lanes().find(|h| h.acp() == Some(id)).map(|h| h.name)
+}
+
+/// The module ACP agent `id` has, else the empty default.
+pub fn of(id: &str) -> &'static dyn Provider {
+    of_agent(id).map_or(&Generic, get)
 }
 
 /// The names an AI co-author trailer carries.
@@ -116,13 +94,10 @@ pub struct Dialect {
 
 /// The hook dialects of every harness that has one, in `known` order.
 pub fn dialects() -> impl Iterator<Item = &'static Dialect> {
-    known().filter_map(|h| get(h).hook_dialect())
+    lanes().filter_map(|h| h.hook_dialect())
 }
 
 pub trait Provider: Sync {
-    fn surface(&self) -> Surface {
-        Surface::Terminal
-    }
     fn vendor(&self) -> Option<&'static str> {
         None
     }
@@ -131,9 +106,6 @@ pub trait Provider: Sync {
     }
     fn efforts(&self) -> &'static [&'static str] {
         EFFORTS
-    }
-    fn model_default(&self) -> Option<&'static str> {
-        None
     }
     fn sessions(&self) -> Option<&'static str> {
         None
@@ -205,9 +177,6 @@ pub trait Provider: Sync {
     fn login(&self) -> Option<&'static str> {
         None
     }
-    fn install(&self) -> Option<&'static str> {
-        None
-    }
     fn hook_dialect(&self) -> Option<&'static Dialect> {
         None
     }
@@ -225,11 +194,9 @@ pub trait Provider: Sync {
 struct Generic;
 impl Provider for Generic {}
 
-/// The provider a role's `harness` names; an unknown or listed-only one gets the generic fallbacks.
+/// The provider a role's `harness` names; an unknown one gets the generic fallbacks.
 pub fn get(name: &str) -> &'static dyn Provider {
-    all()
-        .find(|p| p.name == name && p.surface() != Surface::Listed)
-        .map_or(&Generic, |p| p.provider)
+    all().find(|p| p.name == name).map_or(&Generic, |p| p.provider)
 }
 
 /// A `shed-acp` runtime's default adapter: the first lane provider's that runs its hooks.
