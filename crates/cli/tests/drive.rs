@@ -352,23 +352,23 @@ fn a_fail_starts_a_fix_round_with_the_findings_verbatim() {
 }
 
 #[test]
-fn the_third_fail_stops_at_needs_human_with_the_findings() {
+fn the_same_blocker_in_a_third_fail_stops_at_a_stuck_card_with_the_findings() {
     let c = setup("drive-limit");
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     ev(
         &c,
         11,
         "verdict",
-        json!({"verdict": "FAIL", "sha": sha("1"), "body": "FAIL"}),
+        json!({"verdict": "FAIL", "sha": sha("1"), "stage": "rev", "body": STILL}),
     );
     ev(
         &c,
         12,
         "verdict",
-        json!({"verdict": "FAIL", "sha": sha("2"), "body": "FAIL"}),
+        json!({"verdict": "FAIL", "sha": sha("2"), "stage": "rev", "body": STILL}),
     );
     let rev = lane(&c, 20, "rev", "sendmeter-rev-12-r3", "rev-12-r3");
-    std::fs::write(rev.join("verdict.md"), "FAIL\nsrc/y.rs:9 still wrong\n").unwrap();
+    std::fs::write(rev.join("verdict.md"), STILL).unwrap();
     let head = sha("3");
     let r = fake(NONE)
         .reply("gh pr view issue-12", &pr(&head, "green"))
@@ -383,10 +383,13 @@ fn the_third_fail_stops_at_needs_human_with_the_findings() {
     assert_eq!(state(&c), "needs-human");
     let all = read(&c.state).unwrap();
     let nh = all.iter().find(|e| e.kind == "needs-human").unwrap();
-    assert!(nh.str("findings").unwrap().contains("src/y.rs:9 still wrong"));
+    assert!(nh.str("findings").unwrap().contains("src/y.rs:9: still wrong"));
     idle(&c, &r);
-    assert!(started("").is_empty(), "no fix lane after the limit");
+    assert_eq!(nh.str("code"), Some("STUCK"));
+    assert!(started("").is_empty(), "no fix lane once stuck");
 }
+
+const STILL: &str = "FAIL\n- blocking [ac] src/y.rs:9: still wrong\n  Proof: spec\n  > AC 1\n  src/y.rs:9\n";
 
 #[test]
 fn clean_reclaims_merged_lanes() {
@@ -895,7 +898,7 @@ fn stale_pr(head: &str, mergeable: &str, status: &str) -> String {
 }
 
 #[test]
-fn a_conflicting_pr_after_pass_gets_update_rounds_then_needs_human() {
+fn a_conflicting_pr_after_pass_gets_update_rounds_then_a_stuck_card() {
     let c = setup("drive-conflict");
     let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     for (i, (v, p)) in [("FAIL", "a1"), ("FAIL", "b2")].into_iter().enumerate() {
@@ -906,7 +909,7 @@ fn a_conflicting_pr_after_pass_gets_update_rounds_then_needs_human() {
             json!({"verdict": v, "sha": sha(p), "body": v}),
         );
     }
-    for (k, p) in [(1, "c3"), (2, "d4"), (3, "e5"), (4, "f6")] {
+    for (k, p) in [(1, "c3"), (2, "d4"), (3, "e5")] {
         ev(
             &c,
             20 + k,
@@ -931,7 +934,7 @@ fn a_conflicting_pr_after_pass_gets_update_rounds_then_needs_human() {
         );
         let (out, steps) = drive(&c, &r);
         assert_eq!(steps, ["conflict"], "{out}");
-        if k < 4 {
+        if k < 3 {
             assert_eq!(state(&c), format!("fix(3)+u{k}"));
             let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
             assert!(brief.contains("Merge `origin/staging` into this branch"), "{brief}");
@@ -939,9 +942,15 @@ fn a_conflicting_pr_after_pass_gets_update_rounds_then_needs_human() {
             lane(&c, 30 + k, "rev", "sendmeter-rev-12", "issue-12-rev");
             assert_eq!(state(&c), format!("review(3)+u{k}"));
         } else {
-            assert!(out.contains("REFUSED UPDATE_LIMIT"), "{out}");
+            assert!(
+                out.contains("REFUSED STUCK: PR still conflicts after 2 update rounds in a row"),
+                "{out}"
+            );
             assert_eq!(state(&c), "needs-human");
-            assert_eq!(started("").len(), runs, "no fourth update lane");
+            let all = read(&c.state).unwrap();
+            let card = all.iter().rfind(|e| e.kind == "needs-human").unwrap();
+            assert_eq!((card.str("code"), card.val("update")), (Some("STUCK"), &json!(true)));
+            assert_eq!(started("").len(), runs, "no third update lane");
             idle(&c, &r);
         }
     }
@@ -1918,7 +1927,7 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
             json!({"verdict": "FAIL", "sha": sha(p), "body": "FAIL"}),
         );
     }
-    ev(&c, 14, "needs-human", json!({"code": "ROUND_LIMIT"}));
+    ev(&c, 14, "needs-human", json!({"code": "STUCK"}));
     let base = || {
         fake(NONE)
             .reply("gh pr view issue-12", &pr(&sha("3"), "green"))
@@ -1951,7 +1960,7 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
 fn an_extend_no_spawn_is_never_a_due_fix_over_a_live_lane() {
     let c = setup("drive-extend-no-spawn");
     let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
-    ev(&c, 14, "needs-human", json!({"code": "UPDATE_LIMIT"}));
+    ev(&c, 14, "needs-human", json!({"code": "STUCK"}));
     let live = [("sendmeter-impl-12", "idle", wt.to_string_lossy())];
     let r = fake(&live)
         .reply("gh pr view issue-12", &pr(&sha("3"), "green"))
@@ -2369,8 +2378,8 @@ fn a_spawn_whose_prompt_never_landed_is_retried_by_the_next_pass() {
     assert!(done.iter().all(|e| e.str("reason") != Some("done")), "{done:?}");
 }
 
-const PROOFLESS: &str = "FAIL\n\n- blocking [code] src/x.rs:9: off by one\n";
-const PROVEN: &str = "FAIL\n\n- blocking [code] src/x.rs:9: off by one\n  Proof: spec\n  > AC 1: totals add up\n";
+const PROOFLESS: &str = "FAIL\n\n- blocking [ac] src/x.rs:9: off by one\n";
+const PROVEN: &str = "FAIL\n\n- blocking [ac] src/x.rs:9: off by one\n  Proof: spec\n  > AC 1: totals add up\n";
 
 fn proofless(name: &str, body: &str, live: bool) -> (drover::Ctx, PathBuf, Fake) {
     let c = setup(name);

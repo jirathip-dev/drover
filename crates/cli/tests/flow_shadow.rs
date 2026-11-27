@@ -204,7 +204,7 @@ fn every_classed_refusal_code_is_a_known_code_in_one_class() {
     once.sort();
     once.dedup();
     assert_eq!(once.len(), all.len(), "a code in two classes");
-    let classes = ["SERIAL_BUSY", "HOST_BUSY", "ROUND_LIMIT", "EXIT", "NO_REPRO"].map(|c| o.class(c));
+    let classes = ["SERIAL_BUSY", "HOST_BUSY", "STUCK", "EXIT", "NO_REPRO"].map(|c| o.class(c));
     assert_eq!(classes, ["queued", "held", "final", "failed", "failed"]);
 }
 

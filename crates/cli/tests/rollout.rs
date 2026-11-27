@@ -183,7 +183,7 @@ fn a_config_card_naming_the_rollout_closes_it_on_apply() {
 
     let file = c.config.with_file_name("proposed.toml");
     let old = std::fs::read_to_string(&c.config).unwrap();
-    std::fs::write(&file, old.replacen("review_rounds = 3", "review_rounds = 4", 1)).unwrap();
+    std::fs::write(&file, old.replacen("stall_minutes = 30", "stall_minutes = 31", 1)).unwrap();
     let f = file.to_str().unwrap();
     let propose = |n: &str| run(&c, &Fake::default(), &["config", "propose", "t1", f, "--rollout", n]);
     let (code, out) = propose("99");

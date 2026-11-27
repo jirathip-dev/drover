@@ -37,7 +37,7 @@ fn setup(name: &str) -> (drover::Ctx, FakeShed) {
             json!({"verdict": "FAIL", "sha": sha(p), "body": "FAIL"}),
         );
     }
-    let nh = json!({"code": "ROUND_LIMIT", "reason": "out of rounds"});
+    let nh = json!({"code": "STUCK", "reason": "out of rounds"});
     ev(&c, 14, "needs-human", nh);
     (c, sh)
 }
