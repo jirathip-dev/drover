@@ -61,7 +61,10 @@ struct Part {
 
 impl Part {
     fn args(&self) -> Vec<&str> {
-        let mut w: Vec<&str> = (self.plain.iter()).map(String::as_str).filter(|w| !w.is_empty()).collect();
+        let mut w: Vec<&str> = (self.plain.iter())
+            .map(String::as_str)
+            .filter(|w| !w.is_empty())
+            .collect();
         let at = w.iter().position(|w| !w.contains('=') || w.starts_with('-'));
         w.split_off(at.unwrap_or(w.len()))
     }
@@ -73,9 +76,12 @@ impl Part {
     fn dirs(&self) -> Vec<&str> {
         let a = self.args();
         let cd = matches!(a.first(), Some(&("cd" | "pushd"))).then(|| a.get(1).copied().unwrap_or("~"));
-        let flag = |(f, v): (&&str, &&str)| matches!(*f, "-C" | "--manifest-path").then_some(*v);
+        let pairs = a.iter().zip(a.iter().skip(1));
+        let flags = pairs
+            .filter(|(f, _)| matches!(**f, "-C" | "--manifest-path"))
+            .map(|(_, v)| *v);
         let joined = a.iter().filter_map(|w| w.strip_prefix("--manifest-path="));
-        cd.into_iter().chain(a.iter().zip(a.iter().skip(1)).filter_map(flag)).chain(joined).collect()
+        cd.into_iter().chain(flags).chain(joined).collect()
     }
 
     fn text(&self) -> String {
