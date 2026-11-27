@@ -26,7 +26,6 @@ fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let sh = FakeShed::new();
     sh.attach(&c);
-    remote::proxied(&c);
     (c, sh)
 }
 

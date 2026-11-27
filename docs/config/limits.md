@@ -39,6 +39,8 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `import_max_age_hours` | `24` | a remote host's asks older than this are never imported |
 | `max_pushes_per_pass` | `3` | push alerts `check` sends a pass before a summary |
 | `max_parallel_spawns` | `6` | concurrent detached spawn kicks on the main host (0: in the pass) |
+| `max_in_flight_total` | `6` | PRs in flight across every fleet before a first start is refused `IN_FLIGHT_CAP` (0: off) |
+| `fleet_priority` | `[]` | fleets in the order a freed `max_in_flight_total` slot goes to, oldest queue entry first; unlisted fleets after |
 | `start_max` | `2` | lanes starting at once on a remote host that sets no `start_max` |
 | `start_release` | `"started"` | a start frees its slot once its harness is up (`started`) or its prompt is confirmed (`confirmed`) |
 | `spawn_pending_max_secs` | `300` | a spawn marker older than this is stale |
@@ -71,8 +73,6 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `notify_secs` | `15` | a notifier command or web push send is killed after this long |
 | `gate_check_minutes` | `30` | a premerge or gate check (a build or test run) is killed after this long |
 | `shed_read_millis` | `300` | how long drive's intake waits for shed's state changes |
-| `proxy_connect_secs` | `1` | the token proxy's liveness connect timeout |
-| `proxy_retry_secs` | `300` | a proxy lane's sign-out holds its host only if no call gets through the token proxy this long after it |
 | `service_call_secs` | `2` | a call to the running service's socket times out after this long |
 | `disk_probe_secs` | `2` | a folder listing slower than this on a host over `min_cpu_idle` marks its disk as not answering |
 | `disk_hung_secs` | `6` | under `min_cpu_idle` a call waits this long for a slow folder listing, then the disk is not answering |

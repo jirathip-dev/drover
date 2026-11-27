@@ -131,10 +131,6 @@ profile = "lane-design"
 
 # #1576: an ACP lane or thread on the main host runs on a shed account (`shed account add claude work` first;
 # docs/accounts.md): `account = "work"`, or "auto" (no key), on a fleet, a role or [fleet.<n>.role.orchestrator].
-# Remote shed-acp hosts sign in through the main host's token proxy, which signs with one `claude setup-token`
-# token (a 0600 file).
-# [proxy]
-# token-file = "~/.config/drover/tokens/proxy"
 # The DeepSeek balance row; the key is read from a 0600 env file or the environment, never from here.
 # [providers.deepseek]
 # key_env = "DEEPSEEK_API_KEY"
@@ -160,4 +156,4 @@ on = ["stall", "lane-dead", "ready-unmerged", "blocked", "merged", "needs-human"
 # acp = "claude-acp"   # the ACP agent lanes run (default: the role's harness's)
 # #565: or one fleet's own, e.g. to pilot ACP lanes (cooee's Workflow list) on it:
 # [fleet.drover.runtime]
-# kind = "shed-acp"   # each lane a claude-acp session, guarded by the profile's hook; remote ones need [proxy] token-file
+# kind = "shed-acp"   # each lane a claude-acp session, guarded by the profile's hook

@@ -272,7 +272,6 @@ fn a_hung_shed_connect_on_one_remote_host_costs_one_deadline_and_another_remote_
         let add = ["queue", "sendmeter", "add", "12", "--needs", "docker"];
         assert_eq!(run(&c, &Fake::default(), &add).0, 0);
         let _main = FakeShed::attached(&c);
-        remote::proxied(&c);
         let r = Two {
             f: boat2_side(),
             ssh: hung_connect(&dir, child),

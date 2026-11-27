@@ -39,6 +39,7 @@ stall_minutes = 30
 max_parallel_spawns = 0   # spawns in the pass; tests/drive_kicks.rs runs them as kicks (#318)
 build_root = ""           # #630: retired (builds go under the worktree root); a stale key is ignored
 stray_roots = []          # #536: never clean the real /tmp or $TMPDIR
+max_in_flight_total = 0   # #1801: tests/in_flight_total.rs turns it on
 "#;
 
 /// `RefCell`'s API over an `RwLock`: runners are `Sync` (serve's watcher has its own thread).
