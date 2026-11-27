@@ -167,6 +167,19 @@ fn no_verdict(events: &[Event], s: &IssueState, path: &str, gone: bool, w: &mut 
     w.next_cmd = Some(format!("drover spawn {f} {n} {c} --supersede"));
 }
 
+fn away(ctx: &Ctx, cfg: &Config, events: &[Event], s: &IssueState) -> Option<(&'static str, String)> {
+    let sp = last_spawn(events, s.active_lane()?.1)?;
+    let h = crate::hosts::offline(ctx, Some(cfg), Some(sp))?;
+    let removed = sp.str("machine").is_some_and(|m| !crate::hosts::configured(cfg, m));
+    Some(match sp.str("agent").filter(|_| removed) {
+        Some(a) => (
+            "owner",
+            format!("{h}: lane {a} is on a host no longer in [hosts]; needs you"),
+        ),
+        None => ("none", h),
+    })
+}
+
 fn rev_exited(ctx: &Ctx, cfg: &Config, events: &[Event], lane: &str, agents: &[Session]) -> bool {
     let sp = last_spawn(events, lane);
     !agents.iter().any(|a| a.name == lane)
@@ -916,18 +929,7 @@ pub fn scan_where(
             (w.who, w.next_cmd, w.promise) = ("none", None, None);
             w.what = format!("lane unknown: {m}'s shed listing unreadable");
         }
-        let active = s.active_lane().and_then(|(_, a)| last_spawn(mine, a));
-        if let Some(h) = crate::hosts::offline(ctx, Some(cfg), active) {
-            let removed = active
-                .and_then(|e| e.str("machine"))
-                .is_some_and(|m| !crate::hosts::configured(cfg, m));
-            let (who, what) = match active.and_then(|e| e.str("agent")).filter(|_| removed) {
-                Some(a) => (
-                    "owner",
-                    format!("{h}: lane {a} is on a host no longer in [hosts]; needs you"),
-                ),
-                None => ("none", h),
-            };
+        if let Some((who, what)) = away(ctx, cfg, mine, &s) {
             (w.who, w.what, w.next_cmd, w.promise) = (who, what, None, None);
         }
         let stuck = ["idle without pushing", "rev idle without", "reviewer exited"]
