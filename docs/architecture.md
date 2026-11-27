@@ -173,7 +173,8 @@ TS: it imports them from `assets/types/api.d.ts`.
   processes in `runner.rs`, the environment in `config.rs` and the clock and sleeps in `clock.rs`. gatekeeper's rust/bans
   and ts/oxlint hold each ban's fixture (#1587).
 - **Size (#1812):** no repo-wide line cap: `.drover/arch.toml`'s per-file `[[size]]` rules and the weekly hotspots
-  issue watch size; each PR body states its `src/ net`.
+  issue watch size; each PR body states its `src/ net`. An old `cap_script`, `line_cap` or cap-script `premerge`
+  entry still loads, and drover never reads it.
 - **Rules file and PR body (#1484):** `drover lesson-check` fails a `.drover/rules.md` line that names no enforcer
   and a file over 30 lines. `drover pr-body --file <body> --head <sha> [--base staging]`
   applies `turn done`'s `PR_BODY` rule to a file and exits 1 with the reason; neither needs a fleet config.
