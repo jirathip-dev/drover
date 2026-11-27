@@ -3,7 +3,7 @@
 types:
     cargo test -p drover-server --features ts export_bindings
 
-# Every gate CI runs (the core, rust and ts packs and .gatekeeper/gates/), the same as `drover turn done` (#1587).
+# Every gate CI runs (the core, rust and ts packs and .gatekeeper/gates/), as CI runs them; `drover turn done` runs only the light checks (#1863).
 check:
     ./.gatekeeper/run check
 
