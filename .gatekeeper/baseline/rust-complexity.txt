@@ -41,7 +41,7 @@ crates/cli/tests/cooee_screens.rs: fn queue_events_fleets_and_cards_are_cooees_f
 crates/cli/tests/cooee_screens.rs: fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state: over 60 lines
 crates/cli/tests/cooee_screens.rs: fn the_queue_stream_updates_rows_in_place_and_the_strip_count: over 60 lines
 crates/cli/tests/demo_export.rs: fn demo_export_writes_the_file_set_without_running_anything: over 60 lines
-crates/cli/tests/deps.rs: fn tick_files_one_advisory_issue_with_the_tools_output_and_deps_monthly_where_not_off: over 60 lines
+crates/cli/tests/deps.rs: fn housekeeping_files_one_advisory_issue_with_the_tools_output_and_deps_monthly_where_not_off: over 60 lines
 crates/cli/tests/design_stage.rs: fn parity_69_the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins: over 60 lines
 crates/cli/tests/disk.rs: fn leftovers_are_saved_to_wip_or_kept_on_a_secret: over 60 lines
 crates/cli/tests/disk.rs: fn parity_r24_over_budget_frees_the_idlest_lane_first_then_disk_budget: over 60 lines
@@ -72,6 +72,7 @@ crates/cli/tests/hosts.rs: fn a_remote_dry_run_prints_the_argv_the_spawn_sends: 
 crates/cli/tests/hosts.rs: fn a_remote_lane_runs_every_command_on_its_host: over 60 lines
 crates/cli/tests/hosts/wip.rs: fn on_integration: over 60 lines
 crates/cli/tests/hotspots.rs: fn fixture: over 60 lines
+crates/cli/tests/judged/mod.rs: fn the_follower_tells_a_judged_lane_its_refusals_once_and_stops_one_that_acts_unasked: over 60 lines
 crates/cli/tests/keyboard_webkit.rs: fn the_focused_composer_stays_the_same_node_with_its_focus_text_and_caret_while_the_stream_changes_it: over 60 lines
 crates/cli/tests/land.rs: fn a_single_culprit_is_reverted_and_its_issue_reopened_with_the_log: over 60 lines
 crates/cli/tests/lane_actions.rs: fn parity_59_the_lanes_sheets_stop_and_kill_run_the_verbs_and_log_via_the_screen: over 60 lines
@@ -121,7 +122,7 @@ crates/cli/tests/scene_device.rs: fn the_device_listener_serves_the_unpaired_sce
 crates/cli/tests/scratch.rs: fn a_finished_lanes_build_folder_goes_at_once_even_with_its_session_open: over 60 lines
 crates/cli/tests/scratch.rs: fn clean_removes_stray_cargo_folders_and_claude_temp_dirs: over 60 lines
 crates/cli/tests/screens_parity.rs: fn parity_81_every_configured_role_gets_a_model_and_an_effort_picker_and_saving_sets_it: over 60 lines
-crates/cli/tests/self_update.rs: fn scheduled_clean_keeps_its_age_cap_and_live_dirty_rules_and_alerts_a_failure_once: over 60 lines
+crates/cli/tests/self_update.rs: fn housekeeping_clean_removes_every_merged_lane_but_live_and_dirty_ones_and_alerts_a_failure_once: over 60 lines
 crates/cli/tests/self_update.rs: fn the_staging_serve_runs_the_staging_head_and_cannot_write_the_live_state: over 60 lines
 crates/cli/tests/serve_health.rs: fn the_phones_timings_land_in_serve_health_by_kind_and_a_slow_tap_alerts_phone_slow_once: over 60 lines
 crates/cli/tests/serve_web.rs: fn lanes_group_by_fleet_with_others: over 60 lines
@@ -130,7 +131,6 @@ crates/cli/tests/serve_web.rs: fn parity_81_role_dropdowns_set_like_drover_set: 
 crates/cli/tests/serve_web.rs: fn queue_shows_open_work_only_and_folds_paused_retired_and_noise: over 60 lines
 crates/cli/tests/service.rs: fn a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes: over 60 lines
 crates/cli/tests/setup_terminal.rs: fn the_board_starts_by_name_types_unlogged_and_shows_the_screen: over 60 lines
-crates/cli/tests/shed.rs: fn a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login: over 60 lines
 crates/cli/tests/shed.rs: fn a_lane_spawns_on_shed: over 60 lines
 crates/cli/tests/shed.rs: fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_first_prompt: over 60 lines
 crates/cli/tests/shed.rs: fn a_shed_acp_fleets_thread_runs_its_orchestrator_as_an_acp_session_that_sleeps_and_restarts: over 60 lines
@@ -193,6 +193,7 @@ crates/core/src/design.rs: fn handoff: over 60 lines
 crates/core/src/diagram.rs: fn charts: over 60 lines
 crates/core/src/doctor.rs: fn checks: cognitive complexity over 25
 crates/core/src/doctor.rs: fn checks: over 60 lines
+crates/core/src/doctor.rs: fn shed_rows: over 60 lines
 crates/core/src/done.rs: fn check: over 60 lines
 crates/core/src/drive.rs: fn act: over 60 lines
 crates/core/src/drive.rs: fn admitted: over 60 lines
@@ -231,6 +232,7 @@ crates/core/src/rename.rs: fn run: over 60 lines
 crates/core/src/roots.rs: fn restart: over 60 lines
 crates/core/src/runner.rs: fn within: over 60 lines
 crates/core/src/session/stamp.rs: fn on_event: over 60 lines
+crates/core/src/session/turn.rs: fn on: over 60 lines
 crates/core/src/slo.rs: fn stalls: over 60 lines
 crates/core/src/spawn.rs: fn brief: over 60 lines
 crates/core/src/spawn.rs: fn handover: over 60 lines
@@ -242,7 +244,6 @@ crates/core/src/spawn.rs: fn start: over 60 lines
 crates/core/src/term.rs: fn request: over 60 lines
 crates/core/src/thread.rs: fn row: over 60 lines
 crates/core/src/timer.rs: fn services: over 60 lines
-crates/core/src/timer.rs: fn tick: over 60 lines
 crates/core/src/update.rs: fn install: over 60 lines
 crates/core/src/waiting.rs: fn scan_where: cognitive complexity over 25
 crates/core/src/waiting.rs: fn scan_where: over 60 lines

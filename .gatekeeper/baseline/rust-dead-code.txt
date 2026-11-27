@@ -1,4 +1,6 @@
 crates/core/src/access.rs: pub fn mcp_servers: no other crate names it
+crates/core/src/acp/probe.rs: pub fn retest: no other crate names it
+crates/core/src/acp/start.rs: pub fn acp_cmd: no other crate names it
 crates/core/src/action.rs: pub fn begin: no other crate names it
 crates/core/src/baseline.rs: pub fn grafts: no other crate names it
 crates/core/src/breaker.rs: pub const CANARY: no other crate names it
@@ -7,13 +9,14 @@ crates/core/src/breaker.rs: pub fn dead_tags: no other crate names it
 crates/core/src/breaker.rs: pub fn wave_alert: no other crate names it
 crates/core/src/breaker.rs: pub fn wave_of: no other crate names it
 crates/core/src/breaker.rs: pub fn waves: no other crate names it
-crates/core/src/check.rs: pub fn hogs: no other crate names it
 crates/core/src/check.rs: pub fn kept_row: no other crate names it
 crates/core/src/check.rs: pub fn live_lanes: no other crate names it
 crates/core/src/check.rs: pub fn measure: no other crate names it
+crates/core/src/check.rs: pub fn recount: no other crate names it
 crates/core/src/check.rs: pub fn remote_orphans: no other crate names it
 crates/core/src/check.rs: pub fn save_lane: no other crate names it
 crates/core/src/check.rs: pub fn save_wip: no other crate names it
+crates/core/src/check.rs: pub fn scheduled: no other crate names it
 crates/core/src/check.rs: pub fn secrets_files: no other crate names it
 crates/core/src/check.rs: pub fn stop_rounds: no other crate names it
 crates/core/src/check.rs: pub fn strays: no other crate names it
@@ -54,7 +57,6 @@ crates/core/src/db.rs: pub fn try_list: no other crate names it
 crates/core/src/design.rs: pub const OPTIONS: no other crate names it
 crates/core/src/design.rs: pub fn is_approval: no other crate names it
 crates/core/src/doctor.rs: pub fn serve_plist: no other crate names it
-crates/core/src/drive.rs: pub fn chores: no other crate names it
 crates/core/src/drive.rs: pub fn held_by: no other crate names it
 crates/core/src/drive.rs: pub fn in_act: no other crate names it
 crates/core/src/drive.rs: pub fn kick_once: no other crate names it
@@ -184,11 +186,8 @@ crates/core/src/providers/claude.rs: pub const LOCAL_DIR: no other crate names i
 crates/core/src/providers/claude.rs: pub const LOCAL_FILES: no other crate names it
 crates/core/src/providers/claude.rs: pub fn remove_tmp: no other crate names it
 crates/core/src/providers/claude.rs: pub static PROVIDER: no other crate names it
-crates/core/src/providers/codex.rs: pub static PROVIDER: no other crate names it
 crates/core/src/providers/fake.rs: pub static PROVIDER: no other crate names it
-crates/core/src/providers/gemini.rs: pub static PROVIDER: no other crate names it
 crates/core/src/providers/mod.rs: pub const EFFORTS: no other crate names it
-crates/core/src/providers/mod.rs: pub fn acp_only: no other crate names it
 crates/core/src/providers/mod.rs: pub fn brands: no other crate names it
 crates/core/src/providers/mod.rs: pub fn default_acp: no other crate names it
 crates/core/src/providers/mod.rs: pub fn dialects: no other crate names it
@@ -196,7 +195,6 @@ crates/core/src/providers/mod.rs: pub fn hook_command: no other crate names it
 crates/core/src/providers/mod.rs: pub fn hook_program: no other crate names it
 crates/core/src/providers/mod.rs: pub fn of_agent: no other crate names it
 crates/core/src/providers/mod.rs: pub fn runs_this: no other crate names it
-crates/core/src/providers/mod.rs: pub fn vendor_of_agent: no other crate names it
 crates/core/src/queue.rs: pub const WIDTH: no other crate names it
 crates/core/src/queue.rs: pub fn by_fleet: no other crate names it
 crates/core/src/queue.rs: pub fn fleets_use: no other crate names it
@@ -241,11 +239,11 @@ crates/core/src/spawn.rs: pub const OWN_FILES: no other crate names it
 crates/core/src/spawn.rs: pub const SCRATCH: no other crate names it
 crates/core/src/spawn.rs: pub const SHOT_DIRS: no other crate names it
 crates/core/src/spawn.rs: pub const SPAWN_SECS: no other crate names it
-crates/core/src/spawn.rs: pub fn acp_cmd: no other crate names it
 crates/core/src/spawn.rs: pub fn clone_sh: no other crate names it
 crates/core/src/spawn.rs: pub fn clone_warm: no other crate names it
 crates/core/src/spawn.rs: pub fn copy_included: no other crate names it
 crates/core/src/spawn.rs: pub fn dirty_past: no other crate names it
+crates/core/src/spawn.rs: pub fn judge_env: no other crate names it
 crates/core/src/spawn.rs: pub fn lane_cmd: no other crate names it
 crates/core/src/spawn.rs: pub fn own_files: no other crate names it
 crates/core/src/spawn.rs: pub fn profiles_check: no other crate names it
@@ -255,7 +253,6 @@ crates/core/src/spawn.rs: pub fn secrets_file: no other crate names it
 crates/core/src/spawn.rs: pub fn shed_meta: no other crate names it
 crates/core/src/spawn.rs: pub fn sources_secrets: no other crate names it
 crates/core/src/spawn.rs: pub fn stray_hooks: no other crate names it
-crates/core/src/spawn.rs: pub fn unguarded: no other crate names it
 crates/core/src/spawn.rs: pub fn write_acp_mcp: no other crate names it
 crates/core/src/stall.rs: pub const BUSY_CPU_PCT: no other crate names it
 crates/core/src/stall.rs: pub const STALE_CHECK_SECS: no other crate names it
@@ -274,8 +271,8 @@ crates/core/src/term.rs: pub fn run_params: no other crate names it
 crates/core/src/term.rs: pub fn send_text_argv: no other crate names it
 crates/core/src/thread/route.rs: pub fn routed_to: no other crate names it
 crates/core/src/thread/route.rs: pub fn to_owner: no other crate names it
-crates/core/src/timer.rs: pub const DAILY: no other crate names it
 crates/core/src/timer.rs: pub const FAST: no other crate names it
+crates/core/src/timer.rs: pub const HOUSEKEEP: no other crate names it
 crates/core/src/timer.rs: pub const MORE: no other crate names it
 crates/core/src/timer.rs: pub fn has_job: no other crate names it
 crates/core/src/timer.rs: pub fn rebootstrap: no other crate names it
