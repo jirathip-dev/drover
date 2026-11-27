@@ -574,7 +574,11 @@ fn a_superseded_design_lane_over_a_pushed_design_hands_it_off_once() {
     assert_eq!(state(&c, 12), "design");
     c.now += 1000;
     let r = fake(&c, HEAD);
-    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "design", "--supersede"]);
+    let (code, out) = run(
+        &c,
+        &r,
+        &["spawn", "sendmeter", "12", "design", "--supersede", "--why", "redo"],
+    );
     assert_eq!(code, 0, "{out}");
     assert_eq!(spawned(&c, "design"), 2);
     let out = drive(&c, &r);
