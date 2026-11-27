@@ -519,11 +519,7 @@ fn a_verdict_at_a_head_an_impure_merge_moved_from_still_refuses() {
 
 fn labelled(d: &Path) -> Config {
     let config = CONFIG.replace("/tmp/does-not-matter/sendmeter", d.join("local").to_str().unwrap());
-    Config::parse(&config.replace(
-        "integration = \"staging\"",
-        "integration = \"staging\"\nmerge_label = \"merge-ready\"",
-    ))
-    .unwrap()
+    Config::parse(&config.replace("merge_label = \"off\"", "merge_label = \"merge-ready\"")).unwrap()
 }
 
 fn pr3(head: &str, labels: &[&str]) -> serde_json::Value {
@@ -641,8 +637,7 @@ fn a_verdict_naming_the_current_head_records_there_whatever_the_spawn_head() {
     let (_d, seed, c, _) = repos("named-head");
     let _sh = FakeShed::attached(&c);
     let cfg = std::fs::read_to_string(&c.config).unwrap();
-    let label = "integration = \"staging\"\nmerge_label = \"merge-ready\"";
-    let cfg = cfg.replacen("integration = \"staging\"", label, 1);
+    let cfg = cfg.replacen("merge_label = \"off\"", "merge_label = \"merge-ready\"", 1);
     std::fs::write(&c.config, cfg).unwrap();
     lane(&c, &seed, 3, false);
     let (a, b) = moved(&seed);

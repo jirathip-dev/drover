@@ -14,12 +14,14 @@ fn setup(name: &str, land: bool, verdict: &str) -> (std::path::PathBuf, drover::
     let d = tmpdir(name);
     let text = if land {
         let extra = format!(
-            "merge_label = \"merge-ready\"\n\n[fleet.sendmeter.land]\nmode = \"fast-first\"\nfast = [\"unit\"]\n\
+            "\n[fleet.sendmeter.land]\nmode = \"fast-first\"\nfast = [\"unit\"]\n\
              full_first_paths = [\"db/**\"]\n\n[[fleet.sendmeter.notify]]\ncmd = \"cat >> '{}'\"\non = [\"merged\"]\n\n\
              [fleet.sendmeter.role.impl]",
             d.join("alerts.txt").display()
         );
-        CONFIG.replacen("[fleet.sendmeter.role.impl]", &extra, 1)
+        CONFIG
+            .replacen("merge_label = \"off\"\n", "", 1)
+            .replacen("[fleet.sendmeter.role.impl]", &extra, 1)
     } else {
         CONFIG.to_string()
     };

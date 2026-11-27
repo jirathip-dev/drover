@@ -245,12 +245,27 @@ fn setup_twice_is_all_already_and_tailscale_absent_is_skipped() {
 }
 
 #[test]
-fn setup_makes_a_missing_merge_label_once_then_says_already() {
-    let cfg = CONFIG.replace(
-        "integration = \"staging\"",
-        "integration = \"staging\"\nmerge_label = \"merge-ready\"",
-    );
-    let c = ctx(&tmpdir("timer-label"), &cfg);
+fn merge_label_parses_unset_to_merge_ready_off_to_none_and_a_name_to_itself() {
+    for (i, (line, want)) in [
+        ("", Some("merge-ready")),
+        ("merge_label = \"off\"\n", None),
+        ("merge_label = \"full-ci\"\n", Some("full-ci")),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let c = ctx(
+            &tmpdir(&format!("timer-label-parse-{i}")),
+            &CONFIG.replace("merge_label = \"off\"\n", line),
+        );
+        let cfg = drover::config::Config::load(&c.config).unwrap();
+        assert_eq!(cfg.fleet["sendmeter"].merge_label.as_deref(), want, "{line:?}");
+    }
+}
+
+#[test]
+fn setup_makes_the_default_merge_label_once_then_says_already() {
+    let c = ctx(&tmpdir("timer-label"), &CONFIG.replace("merge_label = \"off\"\n", ""));
     let _sh = FakeShed::attached(&c);
     let list = "gh label list --repo jirathip-dev/sendmeter --search merge-ready --json name --limit 100";
     let create = "gh label create merge-ready --repo jirathip-dev/sendmeter --force";
