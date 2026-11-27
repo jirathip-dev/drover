@@ -38,9 +38,11 @@ pub struct Pending {
 }
 
 impl Pending {
-    /// Its card is back: a hard refusal, or (never an extend's) still not started after `BACK_SECS`.
+    /// Its card is back: a hard refusal, or (never an extend's, nor one waiting for host room) still not started after `BACK_SECS`.
     pub fn back(&self, now: u64) -> bool {
-        self.failed || self.action != "extend" && now >= self.since + BACK_SECS && self.reason.as_deref() != Some(LOAD)
+        let room = |r: &str| r == LOAD || crate::starts::ROOM.contains(&r);
+        self.failed
+            || self.action != "extend" && now >= self.since + BACK_SECS && !self.reason.as_deref().is_some_and(room)
     }
     /// The row's line while it waits: `starting, waiting for host: <reason> · <age>`.
     pub fn line(&self, now: u64) -> Option<String> {
@@ -161,7 +163,7 @@ pub fn refused(ctx: &Ctx, (fleet, n): (&str, u64), code: &str, why: &str) -> Res
     let Some(p) = of(&ev, fleet, n).filter(|p| !p.failed) else {
         return Ok(false);
     };
-    let soft = SOFT.contains(&code);
+    let soft = SOFT.contains(&code) || crate::starts::ROOM.contains(&code);
     let signals = why.split(" (top:").next().unwrap_or_default();
     let load = code == "HOST_BUSY"
         && signals.contains("cpu idle")

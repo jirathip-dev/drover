@@ -23,7 +23,6 @@ pub const LEGACY: &[&str] = &[
     "answer-undelivered",
     "state-write-failed",
     "wip-blocked",
-    "spawn-held",
     "spawn-failing",
     "host-busy",
     "cap-near",

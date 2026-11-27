@@ -968,6 +968,12 @@ pub fn scan_where(
                 None => format!("{} · {h}", w.what),
             };
         }
+        if let Some((_, at)) = spawn
+            .then(|| crate::starts::place(cfg, events, ctx.now, (&s.fleet, s.issue)))
+            .flatten()
+        {
+            w.what += &format!(" · {at}");
+        }
         let pass = w.what.starts_with("PASS · ");
         let at = pass.then(|| gh::cached_at(ctx, &s.fleet, s.issue)).flatten();
         if let Some(t) = at.filter(|t| ctx.now > t + 120) {
