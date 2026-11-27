@@ -62,31 +62,36 @@ stateDiagram-v2
 flowchart TD
     j0["dev.drover.tick: drover tick"] --> t0
     j1["dev.drover.service: drover service --api 127.0.0.1:7779"] --> d0
-    t0["check"] --> t1
-    t1["drive"] --> t2
-    t2["clean"] --> t3
-    t3["trim"] --> t4
-    t4["jobs"] --> t5
-    t5["soak"] --> t6
-    t6["hotspots"] --> t7
-    t7["compact"]
+    j2["dev.drover.housekeep: drover housekeep"] --> h0
+    t0["drive"]
+    h0["check"] --> h1
+    h1["clean"] --> h2
+    h2["budget"] --> h3
+    h3["hogs"] --> h4
+    h4["backlog"] --> h5
+    h5["trim"] --> h6
+    h6["jobs"] --> h7
+    h7["soak"] --> h8
+    h8["hotspots"] --> h9
+    h9["compact"]
     d0["look, repair"] --> d1
     d1["closed issues"] --> d2
     d2["PR reads, gates, steps"] --> d3
     d3["spawns"]
-    t1 --> d0
+    t0 --> d0
     other["other timers: serve, hosts, store"]
     j0 -.- k_slow_secs(["slow_secs = 300"])
     j1 -.- k_fast_secs(["fast_secs = 60"])
-    t0 -.- k_stall_minutes(["stall_minutes = 30"])
-    t0 -.- k_ask_default_minutes(["ask_default_minutes = 30"])
-    t0 -.- k_ask_waiting_minutes(["ask_waiting_minutes = 30"])
-    t0 -.- k_ask_expire_hours(["ask_expire_hours = 24"])
-    t0 -.- k_outbox_stale_minutes(["outbox_stale_minutes = 5"])
-    t0 -.- k_acp_start_minutes(["acp_start_minutes = 3"])
-    t0 -.- k_idle_reap_minutes(["idle_reap_minutes = 10"])
-    t0 -.- k_done_close_minutes(["done_close_minutes = 5"])
-    t0 -.- k_idle_merged_minutes(["idle_merged_minutes = 15"])
+    j2 -.- k_fast_secs(["fast_secs = 60"])
+    h0 -.- k_stall_minutes(["stall_minutes = 30"])
+    h0 -.- k_ask_default_minutes(["ask_default_minutes = 30"])
+    h0 -.- k_ask_waiting_minutes(["ask_waiting_minutes = 30"])
+    h0 -.- k_ask_expire_hours(["ask_expire_hours = 24"])
+    h0 -.- k_outbox_stale_minutes(["outbox_stale_minutes = 5"])
+    h0 -.- k_acp_start_minutes(["acp_start_minutes = 3"])
+    h0 -.- k_idle_reap_minutes(["idle_reap_minutes = 10"])
+    h0 -.- k_done_close_minutes(["done_close_minutes = 5"])
+    h0 -.- k_idle_merged_minutes(["idle_merged_minutes = 15"])
     d0 -.- k_pass_max_secs(["pass_max_secs = 60"])
     d0 -.- k_ssh_quick_secs(["ssh_quick_secs = 5"])
     d0 -.- k_ssh_call_secs(["ssh_call_secs = 20"])

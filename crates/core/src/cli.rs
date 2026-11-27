@@ -466,9 +466,17 @@ enum Cmd {
         no_load: bool,
     },
     #[command(
-        about = "One timer pass: check, then drive; refusals exit 0, a real error logs `tick-failed` (alerts at most hourly)"
+        about = "One timer pass: start each fleet's drive pass; refusals exit 0, a real error logs `tick-failed` (alerts at most hourly)"
     )]
     Tick,
+    #[command(
+        about = "The housekeeping job (#1805): check, clean, reclaim, trim and the daily chores, each under its own `slow_secs` budget; never inside a drive pass"
+    )]
+    Housekeep {
+        #[arg(help = "Run only this chore")]
+        #[arg(long, value_parser = crate::housekeep::CHORES.map(|c| c.0))]
+        only: Option<String>,
+    },
     #[command(
         about = "One supervised process: the board, kicks driven at once, the GitHub poll, API v1 for remote lanes (docs/service.md)"
     )]
@@ -517,9 +525,6 @@ enum Cmd {
         #[arg(help = "List each lane and wip branch, not one summary line per host")]
         #[arg(long)]
         verbose: bool,
-        #[arg(help = "The daily job (#557): merged/closed lanes idle 3+ days, at most 10")]
-        #[arg(long, hide = true, conflicts_with_all = ["fleet", "lane", "yes", "orphans", "verbose"])]
-        scheduled: bool,
     },
     #[command(
         about = "Install the `[self_update] branch` head (default main) once its CI is green: build, sign, doctor-gate, swap, hand serve over (#557, #894)"
@@ -1017,6 +1022,7 @@ pub fn usage_doc() -> String {
         "setup",
         "stats",
         "tick",
+        "housekeep",
         "timer",
         "self-update",
     ];
@@ -1497,6 +1503,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             )?;
         }
         Cmd::Tick => return crate::timer::tick(ctx, r, out),
+        Cmd::Housekeep { only } => return crate::housekeep::run(ctx, r, out, only.as_deref()),
         Cmd::Profiles {
             cmd:
                 ProfilesCmd::Sync {
@@ -1882,12 +1889,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     yes,
                     orphans,
                     verbose,
-                    scheduled,
                 } => {
-                    if scheduled {
-                        return check::scheduled(ctx, &cfg, r, out).map(|()| 0);
-                    }
-                    let what = (None, lane.as_deref(), false, !crate::drive::in_act(), orphans, verbose);
+                    let what = (None, lane.as_deref(), !crate::drive::in_act(), orphans, verbose);
                     check::clean_all(ctx, &cfg, r, out, fleet.as_deref(), what, yes)?;
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
