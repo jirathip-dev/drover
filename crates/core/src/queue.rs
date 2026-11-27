@@ -473,7 +473,7 @@ fn flying(ctx: &crate::Ctx, events: &[Event], st: &States, fleet: &str) -> Vec<u
     st.values().filter(flies).map(|s| s.issue).collect()
 }
 
-/// Every fleet's PRs in flight as (fleet, issue) and `max_in_flight_total`, unless `0` turns it off.
+/// Every unpaused fleet's PRs in flight as (fleet, issue) and `max_in_flight_total`, unless `0` turns it off.
 pub fn total(
     ctx: &crate::Ctx,
     events: &[Event],
@@ -483,8 +483,9 @@ pub fn total(
     let cap = Some(cfg.limits.max_in_flight_total).filter(|&n| n > 0)?;
     let all = cfg
         .fleet
-        .keys()
-        .flat_map(|f| flying(ctx, events, st, f).into_iter().map(|n| (f.clone(), n)));
+        .iter()
+        .filter(|(_, f)| !f.paused)
+        .flat_map(|(f, _)| flying(ctx, events, st, f).into_iter().map(|n| (f.clone(), n)));
     Some((all.collect(), cap))
 }
 

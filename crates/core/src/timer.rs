@@ -14,8 +14,14 @@ pub const FAST: &str = "dev.drover.fast";
 pub const SERVICE: &str = "dev.drover.service";
 /// The housekeeping job: check, clean, reclaim and the chores, beside the drive passes, never inside one.
 pub const HOUSEKEEP: &str = "dev.drover.housekeep";
+/// The service's API address, off the board's and the webhooks' default ports.
+pub const API: &str = "127.0.0.1:7779";
 /// The build's own jobs (label, args); `install` derives each one's interval from its args.
-pub const JOBS: [(&str, &[&str]); 3] = [(TICK, &["tick"]), (SERVICE, &["service"]), (HOUSEKEEP, &["housekeep"])];
+pub const JOBS: [(&str, &[&str]); 3] = [
+    (TICK, &["tick"]),
+    (SERVICE, &["service", "--api", API]),
+    (HOUSEKEEP, &["housekeep"]),
+];
 /// The tick's steps in order (`tick.step` names the running one) and the `[limits]` keys that time them.
 pub const TICK_STEPS: [(&str, &[&str]); 1] = [("drive", &[])];
 /// Drover's own install every 5 min; `setup` and `timer` write it.

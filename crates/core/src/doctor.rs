@@ -399,9 +399,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     }
     let has = |l: &str| crate::timer::has_job(ctx, l);
     let pid = crate::service::up(ctx).filter(|_| has(crate::timer::SERVICE));
-    let line = pid.map_or("service — not running → drover timer install".into(), |p| {
-        format!("service — running (pid {p})")
-    });
+    let line = pid.map_or_else(|| service_down(ctx, cfg, r), |p| format!("service — running (pid {p})"));
     row(rows, pid.is_some(), '✗', &line);
     if has(crate::timer::FAST) && has(crate::timer::SERVICE) {
         rows.push("✗ fast job — replaced by the service → drover timer install".into());
@@ -523,6 +521,24 @@ fn serve_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>, a
         let fix = crate::timer::restart_cmd(ctx, label);
         let line = format!("serve job — pid {held:?} listens on {at}, {label} runs {runs} → {fix}");
         row(rows, held.iter().all(|p| Some(*p) == job), '✗', &line);
+    }
+}
+
+fn service_down(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
+    let api = crate::timer::API;
+    let held = crate::timer::listeners(r, api);
+    if held.is_empty() {
+        return "service — not running → drover timer install".into();
+    }
+    let serve = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
+    let runs = |l: &&str| matches!(crate::timer::job_pid(ctx, r, l), Ok(Some(p)) if held.contains(&p));
+    let pids = held.iter().map(u32::to_string).collect::<Vec<_>>().join(" ");
+    match [serve, crate::timer::STAGING].into_iter().find(runs) {
+        Some(job) => format!(
+            "service — not running: {api} is held by {job} (pid {pids}) → move [serve] hooks_addr off {api}, then {}",
+            crate::timer::restart_cmd(ctx, job)
+        ),
+        None => format!("service — not running: {api} is held by pid {pids} → kill {pids}"),
     }
 }
 

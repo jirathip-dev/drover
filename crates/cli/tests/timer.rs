@@ -533,7 +533,7 @@ fn drift_is_missing_outdated_or_loaded() {
     let (from, to) = if MAC {
         (">service<", ">serve<")
     } else {
-        (" service\n", " serve\n")
+        (" service ", " serve ")
     };
     edit("dev.drover.service", from, to);
     assert_eq!(drift(&up), both("loaded", "outdated (args or interval differ)"));
@@ -762,4 +762,111 @@ fn doctor_shows_the_service_missing_then_running() {
     let (_, out) = run(&c, &r, &["doctor"]);
     let fast = "✗ fast job — replaced by the service → drover timer install";
     assert!(out.lines().any(|l| l.starts_with(fast)), "{out}");
+}
+
+fn serve_job_running(c: &drover::Ctx, pid: u32) -> Fake {
+    use std::os::unix::fs::MetadataExt;
+    for (p, t) in drover::timer::files(
+        c,
+        "dev.drover.serve",
+        &["/x/drover", "serve", "--addr", "127.0.0.1:7777"],
+        "",
+        0,
+        MAC,
+    ) {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, t).unwrap();
+    }
+    let uid = std::fs::metadata(&c.home).unwrap().uid();
+    let (serve, running) = if MAC {
+        (
+            format!("launchctl print gui/{uid}/dev.drover.serve\n"),
+            format!("pid = {pid}\n"),
+        )
+    } else {
+        (
+            "systemctl --user show -p MainPID -p LoadState dev.drover.serve.service".into(),
+            format!("LoadState=loaded\nMainPID={pid}\n"),
+        )
+    };
+    host(Fake::default())
+        .reply(&serve.replace('\n', ""), &running)
+        .reply(PROBE, "")
+        .reply(LOAD, "")
+}
+
+fn arg_after<'a>(unit: &'a str, flag: &str) -> Option<&'a str> {
+    let words: Vec<&str> = unit
+        .split(['<', '>', ' ', '\n'])
+        .filter(|w| !w.is_empty() && !w.ends_with("string"))
+        .collect();
+    let i = words.iter().position(|w| *w == flag)?;
+    words.get(i + 1).copied()
+}
+
+#[test]
+fn install_beside_a_running_serve_job_gives_each_port_one_listener() {
+    let c = ctx(&tmpdir("timer-ports"), CONFIG);
+    let _sh = FakeShed::attached(&c);
+    let r = serve_job_running(&c, 42);
+    let (code, out) = run(&c, &r, &["timer", "install"]);
+    assert_eq!(code, 0, "{out}");
+    let unit = std::fs::read_to_string(job(&c, "dev.drover.service")).unwrap();
+    let api = arg_after(&unit, "--api").expect("the service job names its API address");
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let port = |a: &str| a.rsplit(':').next().unwrap().to_string();
+    let ports = [port(&cfg.serve.addr()), port(&cfg.serve.hooks_addr()), port(api)];
+    assert_eq!(
+        ports.iter().collect::<std::collections::BTreeSet<_>>().len(),
+        3,
+        "{ports:?}"
+    );
+    let calls = r.calls.borrow().join("\n");
+    assert!(
+        calls
+            .lines()
+            .any(|l| l.contains(LOAD) && l.contains("dev.drover.service")),
+        "{calls}"
+    );
+    assert!(job(&c, "dev.drover.serve").exists(), "the board stays where it was");
+    let off = if MAC {
+        "launchctl bootout"
+    } else {
+        "systemctl --user disable"
+    };
+    assert!(
+        !calls
+            .lines()
+            .any(|l| l.contains(off) && l.contains("dev.drover.serve.")),
+        "{calls}"
+    );
+    assert!(
+        !calls
+            .lines()
+            .any(|l| l.contains(off) && l.ends_with("dev.drover.serve")),
+        "{calls}"
+    );
+
+    let (code, again) = run(&c, &r, &["timer", "install"]);
+    assert_eq!(code, 0, "{again}");
+    assert!(again.lines().all(|l| l.starts_with("= already ")), "{again}");
+}
+
+#[test]
+fn doctor_names_the_job_holding_the_services_port() {
+    let cfg = format!("{CONFIG}\n[serve]\nhooks_addr = \"127.0.0.1:7779\"\n");
+    let c = ctx(&tmpdir("svc-held"), &cfg);
+    let _sh = FakeShed::attached(&c);
+    let r = serve_job_running(&c, 42).reply("lsof -nP -t -iTCP:7779 -sTCP:LISTEN", "42\n");
+    assert_eq!(run(&c, &r, &["timer", "install"]).0, 0);
+    let (_, out) = run(&c, &r, &["doctor"]);
+    let line = out.lines().find(|l| l.contains(" service — ")).unwrap_or_default();
+    assert!(
+        line.starts_with("✗ service — not running: 127.0.0.1:7779 is held by dev.drover.serve (pid 42) → "),
+        "{out}"
+    );
+    assert!(
+        line.contains("hooks_addr") && line.contains("dev.drover.serve"),
+        "{line}"
+    );
 }
