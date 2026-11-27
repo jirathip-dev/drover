@@ -12,9 +12,9 @@ pub const TICK: &str = "dev.drover.tick";
 pub const FAST: &str = "dev.drover.fast";
 /// `drover service`, kept alive; it runs the fast step itself.
 pub const SERVICE: &str = "dev.drover.service";
-/// The build's own jobs (label, args); `install` derives each one's interval from its args.
 /// The housekeeping job: check, clean, reclaim and the chores, beside the drive passes, never inside one.
 pub const HOUSEKEEP: &str = "dev.drover.housekeep";
+/// The build's own jobs (label, args); `install` derives each one's interval from its args.
 pub const JOBS: [(&str, &[&str]); 3] = [(TICK, &["tick"]), (SERVICE, &["service"]), (HOUSEKEEP, &["housekeep"])];
 /// The tick's steps in order (`tick.step` names the running one) and the `[limits]` keys that time them.
 pub const TICK_STEPS: [(&str, &[&str]); 1] = [("drive", &[])];

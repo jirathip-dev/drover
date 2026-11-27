@@ -86,18 +86,15 @@ pub fn run(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, only: Option<&str>) -
                 let res = chore(ctx, cfg, &pass, &mut buf, name);
                 tx.send((buf, res)).ok();
             });
-            match rx.recv_timeout(std::time::Duration::from_secs(budget)) {
-                Ok((buf, res)) => {
-                    out.write_all(&buf)?;
-                    if let Err(e) = res {
-                        writeln!(out, "{name}: {e:#}")?;
-                        failed.push(name);
-                    }
-                }
-                Err(_) => {
-                    writeln!(out, "housekeep: {name} past its {budget} s budget; skipped")?;
-                    late.push(name);
-                }
+            let Ok((buf, res)) = rx.recv_timeout(std::time::Duration::from_secs(budget)) else {
+                writeln!(out, "housekeep: {name} past its {budget} s budget; skipped")?;
+                late.push(name);
+                continue;
+            };
+            out.write_all(&buf)?;
+            if let Err(e) = res {
+                writeln!(out, "{name}: {e:#}")?;
+                failed.push(name);
             }
         }
         let d = json!({"at": ctx.now, "secs": t0.elapsed().as_secs(), "late": late, "failed": failed});
