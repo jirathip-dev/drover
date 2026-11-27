@@ -485,9 +485,6 @@ enum Cmd {
         #[arg(help = "Also serve the board here (the `serve` job's address)")]
         #[arg(long)]
         board: Option<String>,
-        #[arg(help = "Write its launchd/systemd unit and print the commands that load it; loads nothing")]
-        #[arg(long)]
-        install: bool,
     },
     #[command(
         about = "Alert once per state on stall, lane-dead, ready-unmerged, ci-missing, ask-waiting, orphan-lane, outbox-stale; idempotent, safe from cron"
@@ -1250,8 +1247,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 let look = crate::snapshot::Snap::read(ctx, &spared);
                 let (at, slots) = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
                 let skip = |s: &crate::events::IssueState| {
-                    let f = cfg.as_ref().and_then(|c| c.fleet.get(&s.fleet));
-                    let skip = queue::skipped(&events, &all, f, &s.fleet, (s.issue, ctx), &slots);
+                    let skip = queue::skipped(&events, &all, cfg.as_ref(), &s.fleet, (s.issue, ctx), &slots);
                     skip.map(|s| format!("skipped this pass: {}", s.1))
                 };
                 let skips: Vec<_> = rows.iter().map(|s| skip(s)).collect();
@@ -1516,12 +1512,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 crate::providers::get(h).sync(ctx, &role, &role, &p, &usage_doc(), out)?;
             }
         }
-        Cmd::Service {
-            api,
-            board,
-            install: true,
-        } => crate::timer::service_unit(ctx, r, out, &api, board.as_deref())?,
-        Cmd::Service { api, board, .. } => (crate::SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
+        Cmd::Service { api, board } => (crate::SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
         Cmd::Chat { thread } => anyhow::ensure!(crate::app(ctx, r, &crate::Open::Threads(thread))?, "needs a terminal"),
         cmd => {
             let cfg = match cmd {
@@ -1808,7 +1799,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             }
                             None => match crate::drive::retrying(ctx, &events, &s.fleet, s.issue)
                                 .map(|w| (String::new(), w))
-                                .or_else(|| queue::skipped(&events, &st, Some(f), &s.fleet, (s.issue, ctx), &slots))
+                                .or_else(|| queue::skipped(&events, &st, Some(&cfg), &s.fleet, (s.issue, ctx), &slots))
                             {
                                 Some((_, why)) => ("drive", format!("next in the queue, held back: {why}{note}")),
                                 None => ("drive", format!("next in the queue: drive starts it{note}")),

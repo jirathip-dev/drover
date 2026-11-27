@@ -92,8 +92,7 @@ fn an_admission_its_hung_kick_left_holds_starts_at_most_the_wait_then_is_dropped
         "alpha's kick hung mid-admission"
     );
 
-    let (code, out, r) =
-        beta_pass(&c, 0).expect("beta's start waited at most admit_wait_secs, not on the hung admission");
+    let (code, out, r) = beta_pass(&c, 0).expect("beta's start never waits on the hung admission");
     assert_eq!(code, 0, "{out}");
     assert!(
         out.contains("beta #1 start: REFUSED SPAWN_PENDING: another pass is admitting a spawn on local"),

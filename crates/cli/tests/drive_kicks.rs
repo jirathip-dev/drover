@@ -288,36 +288,6 @@ fn a_panicking_kick_leaves_no_marker_or_lock() {
 }
 
 #[test]
-fn spawn_pending_for_15_minutes_alerts_once() {
-    let (c, _sh) = fleet("kicks-held", 6, 1);
-    let held = |ts| {
-        let a = serde_json::json!([{"issue": 3, "step": "spawn", "outcome": "waiting", "code": "SPAWN_PENDING"}]);
-        let e = drover::events::Event::new(ts, "sendmeter", None, "drive-pass", serde_json::json!({"actions": a}));
-        drover::events::append(&c.state, &e).unwrap();
-    };
-    held(c.now - 600);
-    let alerts = || {
-        read(&c.state)
-            .unwrap()
-            .iter()
-            .filter(|e| e.kind == "spawn-held")
-            .count()
-    };
-    assert_eq!(run(&c, &Fake::default(), &["check"]).0, 0);
-    assert_eq!(alerts(), 0, "held 10 min");
-    let later = drover::Ctx {
-        now: c.now + 420,
-        ..c.clone()
-    };
-    held(c.now + 360);
-    let (code, out) = run(&later, &Fake::default(), &["check"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(out.contains("#3 held back by SPAWN_PENDING for 17m"), "{out}");
-    run(&later, &Fake::default(), &["check"]);
-    assert_eq!(alerts(), 1, "once per episode");
-}
-
-#[test]
 fn a_kick_refused_disk_low_leaves_no_driven_ok() {
     let (c, _sh) = fleet("kicks-disk-low", 6, 1);
     pass(&c, &fake(80));
@@ -851,11 +821,6 @@ fn a_dead_kicks_marker_counts_nowhere_and_the_hold_names_the_live_one() {
     }
     let (code, out) = run(&c, &r, &["check"]);
     assert_eq!(code, 0, "{out}");
-    let ev = read(&c.state).unwrap();
-    let alert = ev.iter().rfind(|e| e.kind == "spawn-held").expect("spawn-held");
-    let why = alert.str("reason").unwrap_or_default();
-    assert!(why.contains("spawn-sendmeter-17.pending 30s"), "{why}");
-    assert!(!why.contains("spawn-sendmeter-11.pending"), "{why}");
     assert_eq!(stale(&c).len(), 6);
 }
 

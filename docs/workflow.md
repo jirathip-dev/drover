@@ -61,7 +61,7 @@ stateDiagram-v2
 ```mermaid
 flowchart TD
     j0["dev.drover.tick: drover tick"] --> t0
-    j1["dev.drover.fast: drover drive"] --> d0
+    j1["dev.drover.service: drover service"] --> d0
     t0["check"] --> t1
     t1["drive"] --> t2
     t2["clean"] --> t3
@@ -105,7 +105,6 @@ flowchart TD
     d3 -.- k_start_max(["start_max = 2"])
     d3 -.- k_start_release(["start_release = "started""])
     d3 -.- k_spawn_pending_max_secs(["spawn_pending_max_secs = 300"])
-    d3 -.- k_admit_wait_secs(["admit_wait_secs = 5"])
     d3 -.- k_respawn_max(["respawn_max = 3"])
     d3 -.- k_respawn_window_minutes(["respawn_window_minutes = 60"])
     other -.- k_overload_minutes(["overload_minutes = 10"])

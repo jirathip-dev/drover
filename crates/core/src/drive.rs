@@ -53,7 +53,6 @@ pub const STEPS: [(&str, &[&str]); 4] = [
             "start_max",
             "start_release",
             "spawn_pending_max_secs",
-            "admit_wait_secs",
             "respawn_max",
             "respawn_window_minutes",
         ],
@@ -240,6 +239,7 @@ thread_local! {
     static IN_ACT: Cell<bool> = const { Cell::new(false) };
     static ROOM: RefCell<(bool, Option<(&'static str, String)>)> = const { RefCell::new((false, None)) };
     static SLOT: Cell<bool> = const { Cell::new(false) };
+    static FULL_ON: RefCell<Vec<String>> = const { RefCell::new(vec![]) };
 }
 
 /// A pass's own command runs (its `clean` leaves disabled hosts alone).
@@ -358,7 +358,18 @@ fn admitted(
     };
     let skip = |all: &[Event], h: &str| {
         let live: Vec<&Event> = all.iter().filter(counts).collect();
-        crate::starts::skip(ctx, (cfg, p), ev, (all, &live), (me, start, n, role), h)
+        let behind = crate::starts::ahead(cfg, ev, ctx.now, (fleet, n), h, all);
+        let behind = behind.map(|w| {
+            (
+                "SPAWN_PENDING",
+                format!("waits its turn behind {} #{} on {h}", w.fleet, w.n),
+            )
+        });
+        let why = behind.or_else(|| crate::starts::skip(ctx, (cfg, p), ev, (all, &live), (me, start, n, role), h));
+        if why.is_some() {
+            FULL_ON.with_borrow_mut(|v| v.push(h.into()));
+        }
+        why
     };
     let all = pending(ctx, cfg, r);
     starting(&all)?;
@@ -372,7 +383,7 @@ fn admitted(
         return crate::gate::refused(code, why);
     }
     let host = placed.as_ref().map_or("local", |p| p.name.as_str());
-    let _admit = admit(ctx, cfg, r, host)?;
+    let _admit = admit(ctx, r, host)?;
     let all = pending(ctx, cfg, r);
     starting(&all)?;
     if let Some((code, why)) = skip(&all, host) {
@@ -394,24 +405,20 @@ pub fn own_marker(ctx: &Ctx, fleet: &str, n: u64) -> Option<crate::db::Lease> {
     held(ctx, &format!("spawn-{fleet}-{n}.pending")).filter(|_| SLOT.get())
 }
 
-fn admit(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str) -> Result<Lock> {
+fn admit(ctx: &Ctx, r: &dyn Runner, host: &str) -> Result<Lock> {
     let key = format!("admit-{host}.lock");
-    for left in (0..=cfg.limits.admit_wait_secs).rev() {
-        let now = crate::now();
-        let was = crate::db::leases(&ctx.state, &key).into_iter().find(|l| l.key == key);
-        let was = was.filter(|w| w.expires_at <= now || gone(r, w, now));
-        if let Some(l) = crate::db::take(&ctx.state, &key, now, 60, "", &|l| gone(r, l, now)) {
-            if let Some(w) = was {
-                let d = json!({"host": host, "pid": w.pid, "age": now.saturating_sub(w.at)});
-                append(&ctx.state, &Event::new(now, "drover", None, "admission-dropped", d))?;
-            }
-            return Ok(Lock(ctx.state.clone(), l));
-        }
-        if left > 0 {
-            r.sleep(1);
-        }
+    let now = crate::now();
+    let was = crate::db::leases(&ctx.state, &key).into_iter().find(|l| l.key == key);
+    let was = was.filter(|w| w.expires_at <= now || gone(r, w, now));
+    let Some(l) = crate::db::take(&ctx.state, &key, now, 60, "", &|l| gone(r, l, now)) else {
+        FULL_ON.with_borrow_mut(|v| v.push(host.into()));
+        return crate::gate::refused("SPAWN_PENDING", format!("another pass is admitting a spawn on {host}"));
+    };
+    if let Some(w) = was {
+        let d = json!({"host": host, "pid": w.pid, "age": now.saturating_sub(w.at)});
+        append(&ctx.state, &Event::new(now, "drover", None, "admission-dropped", d))?;
     }
-    crate::gate::refused("SPAWN_PENDING", format!("another pass is admitting a spawn on {host}"))
+    Ok(Lock(ctx.state.clone(), l))
 }
 
 pub(crate) fn failures<'a>(ev: &'a [Event], fleet: &str, n: u64) -> Vec<&'a Event> {
@@ -662,7 +669,7 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
 }
 
 fn start_pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
-    let late = 2 * cfg.limits.pass_max_secs + cfg.limits.fast_secs;
+    let late = (2 * cfg.limits.pass_max_secs + cfg.limits.fast_secs).max(cfg.limits.slow_secs);
     let fresh = last_pass(ctx, fleet).is_some_and(|t| ctx.now.saturating_sub(t) <= late);
     if held(ctx, &format!("drive-{fleet}.lock")).is_some() || crate::service::wake(ctx, fleet) && fresh {
         return Ok(());
@@ -2045,6 +2052,7 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
     let mut buf = vec![];
     let kicks = c.first() == Some(&"spawn") && KICK.get().is_none() && cfg.limits.max_parallel_spawns > 0;
     IN_ACT.set(!kicks);
+    FULL_ON.with_borrow_mut(Vec::clear);
     let spawn = issue.filter(|_| c.first() == Some(&"spawn"));
     let back = spawn
         .filter(|_| KICK.get().is_none())
@@ -2143,7 +2151,8 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
     }
     ACTS.with_borrow_mut(|a| {
         a.entry(fleet.into()).or_default().push(
-            json!({"issue": issue, "step": step, "outcome": outcome, "code": code, "words": w, "why": why, "kick": kicks}),
+            json!({"issue": issue, "step": step, "outcome": outcome, "code": code, "words": w, "why": why, "kick": kicks,
+                "hosts": FULL_ON.with_borrow(Clone::clone)}),
         );
     });
     let who = issue.map_or(fleet.to_string(), |n| format!("{fleet} #{n}"));

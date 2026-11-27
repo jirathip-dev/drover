@@ -892,3 +892,15 @@ pub fn cpu_ms() -> f64 {
     let tv = |s: i64, us: i64| f64::from(u32::try_from(s).unwrap()) * 1e3 + f64::from(u32::try_from(us).unwrap()) / 1e3;
     tv(u[0], u[1]) + tv(u[2], u[3])
 }
+
+/// A live `drover service` on `c`'s socket that answers every request with `pid`.
+pub fn fake_service(c: &Ctx, pid: u64) {
+    let sock = std::os::unix::net::UnixListener::bind(drover::service::sock(c)).unwrap();
+    std::thread::spawn(move || {
+        for s in sock.incoming().flatten() {
+            let mut l = String::new();
+            std::io::BufRead::read_line(&mut std::io::BufReader::new(&s), &mut l).ok();
+            std::io::Write::write_all(&mut &s, format!("{{\"pid\": {pid}}}\n").as_bytes()).ok();
+        }
+    });
+}
