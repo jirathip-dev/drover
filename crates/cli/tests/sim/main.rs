@@ -280,8 +280,8 @@ fn a_sometimes_state_never_reached_fails_the_run() {
         <[String; 0]>::default()
     );
     assert_eq!(
-        gates::unreached(&outs, &["round-limit"]),
-        ["sometimes round-limit: never reached in seeds [9591]"]
+        gates::unreached(&outs, &["stuck"]),
+        ["sometimes stuck: never reached in seeds [9591]"]
     );
 }
 
@@ -335,7 +335,7 @@ fn random_seeds() {
 fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
     let s = Some(Sabotage::Planted);
     let tripped = |f: &str| f.starts_with("I1 ") && f.contains(" rev has ");
-    let h = hunt::hunt(&[2, 9, 4, 5], 2, s, |r, f| {
+    let h = hunt::hunt(&[2, 9, 4, 5], 3, s, |r, f| {
         r < 40 && !f.iter().any(|x| tripped(&x.failure))
     });
     let f = h
@@ -411,14 +411,14 @@ fn the_known_fleet_gives_exact_metrics() {
     let o = run_world(seeds::KNOWN, seeds::known(), STEPS + 1000, None);
     assert!(o.failure.is_none(), "{}", o.report());
     let want = metrics::Metrics {
-        to_merge: vec![963, 1255],
+        to_merge: vec![964, 1256],
         spawns: 5,
         wasted: 1,
         supersedes: 1,
         lanes: 4,
-        idle: 267,
+        idle: 279,
         ci_wait: 600,
-        lock_wait: 3,
+        lock_wait: 1,
         serial: 0,
         host_busy: 0,
         caps: 0,
@@ -434,10 +434,10 @@ fn the_known_fleet_gives_exact_metrics() {
             ("caps", 0.0),
             ("ci_wait_min", 10.0),
             ("host_busy", 0.0),
-            ("idle_lane_min", 4.45),
-            ("lock_wait_min", 0.05),
-            ("queue_to_merge_p50_min", 16.05),
-            ("queue_to_merge_p90_min", 20.92),
+            ("idle_lane_min", 4.65),
+            ("lock_wait_min", 0.02),
+            ("queue_to_merge_p50_min", 16.07),
+            ("queue_to_merge_p90_min", 20.93),
             ("review_rounds_per_merge", 1.0),
             ("serial_busy", 0.0),
             ("supersedes_per_lane", 0.25),

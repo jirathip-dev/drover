@@ -1420,7 +1420,7 @@ impl<'a> Server<'a> {
                 &self.r,
                 &mut out,
                 Some(&fleet),
-                (None, Some(agent), false, false),
+                (None, Some(agent), false, false, false, false),
                 yes,
             )?),
             "close" => crate::check::close(ctx, &cfg, &self.r, &mut out, agent, None)?,
@@ -1788,7 +1788,7 @@ impl<'a> Server<'a> {
                 pr: pr_data(ctx, fc, f, n, None),
                 repo: fc.map(|c| c.repo.clone()),
                 mergeable: m.to_lowercase(),
-                merge: fc.is_some_and(|c| gate(c, &pr, Some(s), true).is_ok()) && m == "MERGEABLE",
+                merge: fc.is_some_and(|c| gate(c, &pr, Some(s)).is_ok()) && m == "MERGEABLE",
                 shots: crate::verify::served(events, (f, n), None)
                     .into_iter()
                     .map(|x| x.0)
@@ -2100,12 +2100,6 @@ impl<'a> Server<'a> {
                 let at = p.str("at").unwrap_or("?");
                 card.notes
                     .push(format!("landing paused: {} red since {at}", fc.integration));
-            }
-            let cap = gh::cached(ctx, "cap", f, 0).unwrap_or_default();
-            let left = cap.at("cap").as_i64().zip(cap.at("lines").as_i64()).map(|(c, n)| c - n);
-            if let Some(l) = left.filter(|l| *l < cap.at("warn").as_i64().unwrap_or(500)) {
-                card.notes
-                    .push(format!("cap-near: {l} lines of headroom on {}", fc.integration));
             }
             d.fleets.push(card);
         }
@@ -2740,7 +2734,7 @@ LOGIN_NEEDED|a|held|{why}
 CAP|a|waiting|{why} · starts when a lane finishes
 NO_HOST HOST_OFFLINE|a|waiting|{why}
 SERIAL_BUSY|a|waiting|{slots} full ({busy} must merge first)
-ROUND_LIMIT UPDATE_LIMIT|r|needs you|#{n}: {why} · your call on its card
+STUCK|r|needs you|#{n}: {why} · your call on its card
 WORKTREE_DIRTY|r|needs you|#{n}: {why} · `drover kill` it, or spawn `--supersede`
 CI_NOT_GREEN|a|waiting|#{n}'s CI is not green yet
 NO_VERDICT STALE_VERDICT VERDICT_FAIL|a|waiting|#{n} has no PASS for its head · a new round
@@ -3224,10 +3218,6 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
     let path = ctx.config.display().to_string();
     let home = crate::config::home().display().to_string();
     let l = &cfg.limits;
-    let line_cap = std::fs::read_to_string(fc.local_path().join("ci/cap.toml"))
-        .ok()
-        .and_then(|t| t.parse::<toml::Table>().ok())
-        .and_then(|t| t.get("fleet")?.get(fleet)?.get("line_cap")?.as_integer());
     let notify = |n: &[crate::config::Notify]| {
         let on = |n: &crate::config::Notify| {
             if n.on.is_empty() {
@@ -3282,13 +3272,10 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
         env: fc.env.keys().cloned().collect(),
         node_modules: fc.clone_node_modules,
         builtin: fc.flow().builtin,
-        review_rounds: l.review_rounds,
-        update_rounds: l.update_rounds,
         stall_minutes: l.stall_minutes,
         ask_minutes: l.ask_default_minutes,
         max_impl: fc.max_impl,
         max_rev: fc.max_rev,
-        line_cap,
         serial: (fc.serial.iter())
             .map(|g| format!("🔒{} {} at a time: {}", g.name, g.max, g.paths.join(", ")))
             .collect(),
@@ -3448,7 +3435,7 @@ fn pipe(fleet: &str, fc: &crate::config::Fleet, st: &States) -> serde_json::Valu
                 format!("{} · {m} · effort {}", r.harness, r.effort.as_deref().unwrap_or("none"))
             });
             let here = count(&|x| stage_at(fc, x).is_some_and(|a| a.0 == s.name));
-            json!({"name": s.name, "kind": s.kind, "role": s.role, "run": run, "next": s.next, "rounds": s.rounds,
+            json!({"name": s.name, "kind": s.kind, "role": s.role, "run": run, "next": s.next,
                 "line": s.line, "here": here, "loop": p.loop_of(&s.name)})
         })
         .collect();

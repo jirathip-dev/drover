@@ -416,14 +416,9 @@ pub struct IssueState {
     /// The latest lane's reasoning effort, as spawned.
     pub effort: Option<String>,
     pub rounds: u32,
-    /// Extra rounds the owner allowed (`round-extended`); the latest grants the round after any stage's.
-    pub extra: u32,
-    pub granted: u32,
     /// Passed `--update` rounds, apart from `rounds`; `updating` while one is open (state `fix(n)+uk`).
     pub updates: u32,
     pub updating: bool,
-    /// Update rounds the owner allowed past `update_rounds` (`round-extended` on an `UPDATE_LIMIT` card).
-    pub update_extra: u32,
     pub last_ts: u64,
     pub last_event: String,
     /// Latest agent per role (impl, rev).
@@ -975,7 +970,7 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
         };
         let s = m.entry((e.fleet.clone(), n)).or_insert_with(new);
         match (e.kind.as_str(), e.str("worktree")) {
-            ("clean", Some(w)) => drop(s.worktrees.remove(w)),
+            ("clean" | "clean-settled", Some(w)) => drop(s.worktrees.remove(w)),
             ("spawn", w) => s.worktrees.extend(w.or(e.str("agent")).map(String::from)),
             (k, Some(w)) if k.starts_with("spawn") => drop(s.worktrees.insert(w.into())),
             _ => {}
@@ -1070,11 +1065,6 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
             "round-extended" if s.state == "needs-human" && s.card() == "start lane" => s.state = "queued".into(),
             "round-extended" => {
                 let on = |k: &str| e.data.get(k) == Some(&Value::Bool(true));
-                if on("update") {
-                    s.update_extra += 1;
-                } else {
-                    (s.extra, s.granted) = (s.extra + 1, s.stage_rounds.values().max().unwrap_or(&0) + 1);
-                }
                 if s.state == "needs-human" && on("update") && on("spawn") {
                     s.state = "ready".into();
                 } else if s.state == "needs-human" && on("queued") {
@@ -1148,7 +1138,7 @@ pub const STATES: &[(&str, &[(&str, &str)])] = &[
         &[
             ("ready", "PASS at head"),
             ("fix(n)", "FAIL at head"),
-            ("needs-human", "ROUND_LIMIT after review_rounds"),
+            ("needs-human", "STUCK: the same blocking finding in 3 FAILs in a row"),
         ],
     ),
     (
@@ -1165,15 +1155,16 @@ pub const STATES: &[(&str, &[(&str, &str)])] = &[
         "ready",
         &[
             ("review(n)", "verify stage at head for ui_paths, a verify or repro mark"),
-            (
-                "fix(n)",
-                "update round +uN when behind or conflicting, UPDATE_LIMIT after update_rounds",
-            ),
+            ("fix(n)", "update round +uN when behind or conflicting"),
             (
                 "merged",
                 "squash-merge into one commit, with PASS at head and CI green, no STAGING_WOULD_BREAK",
             ),
             ("blocked", "merge refused, or PR closed outside drover"),
+            (
+                "needs-human",
+                "STUCK: CI red at the same check for 2 fix rounds, or still conflicting after 2 update rounds",
+            ),
         ],
     ),
     (

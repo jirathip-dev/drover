@@ -53,7 +53,7 @@ fn fixture(name: &str) -> drover::Ctx {
         "zeta",
         5,
         "needs-human",
-        json!({"code": "ROUND_LIMIT", "reason": "rounds ran out"}),
+        json!({"code": "STUCK", "reason": "rounds ran out"}),
     );
     ev(
         "beta",
@@ -154,7 +154,7 @@ fn parity_80_the_config_sheet_shows_every_group_and_its_pickers_post_through_set
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let res = sheet(&s, "alpha");
     assert_eq!(res["path"], c.config.display().to_string());
-    assert_eq!((&res["repo"], &res["line_cap"]), (&json!("acme/alpha"), &json!(null)));
+    assert_eq!((&res["repo"], res.get("line_cap")), (&json!("acme/alpha"), None));
     assert_eq!(res["models"], json!(["opus", "sonnet"]));
     let imp = &res["roles"][0];
     assert_eq!(

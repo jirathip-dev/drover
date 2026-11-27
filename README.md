@@ -12,7 +12,7 @@ it through orchestrator threads, in cooee or on the phone page. Setup and detail
 drover is the autonomous agent workflow plus its `/api/v1`: queue, spawn, hook, drive, check, flow, gate, land,
 events, asks, cards, config propose, the design, architect and judge lanes, host-load admission, the generic
 `[[notify]]` command hook and the screens JSON. It owns policy and each lane's env, its cache env included. Its own
-threads and thread blocks (desk thread, `[chat]`, `[move]`) stay. Two binaries sit outside core and the line cap:
+threads and thread blocks (desk thread, `[chat]`, `[move]`) stay. Two binaries sit outside core:
 drover-serve (the page relay, webpush, paired devices) and drover-tui (a terminal client of `/api/v1`).
 
 ## Non-goals
@@ -38,8 +38,7 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
   timer install` runs it every few minutes (#135, #213).
 - Merge needs a PASS verdict and green CI at the PR's exact head sha, at most 3 review rounds, never main (`crates/core/src/gate.rs`).
 - The lane hook blocks merges, comments and protected pushes; reviewers are read-only (`hooks/`, #848).
-- Serial path groups (#306), the queue-wide line cap `drover cap` (#671), its history `drover cap log` (#1096), and
-  arch-check from `.drover/arch.toml` (#758, #772).
+- Serial path groups (#306) and arch-check from `.drover/arch.toml` (#758, #772).
 - `--repro`, `--perf` and `--refactor` playbooks (#758); impl lanes end each turn with `drover turn` (#591).
 - `drover turn done` is a hard gate: no review until the PR body names the pushed head and format and arch-check
   pass (#1362); `drover why` shows a line's commit, issue and the issue's asks and answers (#691).

@@ -7,8 +7,6 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 
 | key | default | what it sets |
 | --- | --- | --- |
-| `review_rounds` | `3` | review rounds before an issue goes needs-human (ROUND_LIMIT) |
-| `update_rounds` | `3` | PASSed update rounds before `spawn --update` refuses UPDATE_LIMIT |
 | `stall_minutes` | `30` | a working lane with no event this long is stalled |
 | `silent_minutes` | `10` | an ACP lane's open turn with no session event this long is cancelled and nudged |
 | `ci_start_minutes` | `10` | a PR head with no checks this long after its push alerts `ci-missing` |

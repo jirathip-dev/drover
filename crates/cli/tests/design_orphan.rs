@@ -116,7 +116,7 @@ fn a_finished_design_lane_is_adopted_once_and_never_hides_the_fix_round() {
 fn a_respawn_is_named_after_the_build_lane() {
     let (c, _sh) = sctx("design-respawn", CONFIG);
     failed(&c, 12);
-    ev(&c, 12, 500, "needs-human", json!({"code": "ROUND_LIMIT"}));
+    ev(&c, 12, 500, "needs-human", json!({"code": "STUCK"}));
     ev(&c, 12, 600, "round-extended", json!({"by": "owner", "spawn": false}));
     let r = fake("4\n");
     let w = waiting(&c, &r, 12);

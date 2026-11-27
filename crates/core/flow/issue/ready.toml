@@ -92,7 +92,7 @@ when = { pr = ["red"], verdict = ["PASS"], ask = ["none"] }
 do = "ci-fail"
 owner = "drive"
 timeout = "act_minutes"
-to = ["fix"]
+to = ["fix", "needs-human"]
 say = "CI is red: a fix round"
 
 [[row]]
@@ -101,7 +101,7 @@ when = { pr = ["conflicting"], verdict = ["PASS"], ask = ["none"] }
 do = "update"
 owner = "drive"
 timeout = "act_minutes"
-to = ["fix"]
+to = ["fix", "needs-human"]
 say = "the PR conflicts: update it"
 
 [[row]]

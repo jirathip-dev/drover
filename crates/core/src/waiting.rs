@@ -475,7 +475,7 @@ fn waits(
         .verdicts
         .last()
         .is_some_and(|v| v.0.eq_ignore_ascii_case(base) || v.0.eq_ignore_ascii_case(pushed));
-    let done = passed.is_some() && crate::gate::verified(fc, Some(s), pushed, false).is_ok();
+    let done = passed.is_some() && crate::gate::verified(fc, Some(s), pushed).is_ok();
     let mut outcomes = s
         .verdicts
         .iter()

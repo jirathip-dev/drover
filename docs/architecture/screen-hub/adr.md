@@ -282,7 +282,7 @@ this folder, and carries its tests from `usage.md`. Slices 1 to 3 need nothing f
    Recommended: yes. Drawing through blocks' renderer needs its theme as well, changes pixels in an issue that
    should change none, and would put slice 6 behind two more blocks slices. If the owner wants the page to draw
    through blocks' renderer inside #1318, slice 6 is blocked on blocks' HTML renderer and theme too.
-2. **The line cap.** `drover cap` today: 53,359 of 53,500, and the open PRs already project 210 over, so a raise
+2. **The line cap.** the removed cap view (#1812) today: 53,359 of 53,500, and the open PRs already project 210 over, so a raise
    is coming whatever #1318 does. #1318 adds about 620 across its slices. Recommended: the one raise the
    orchestrator files counts #1318 in (to about 54,900), before slice 1 starts.
 

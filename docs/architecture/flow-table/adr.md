@@ -172,7 +172,7 @@ Disagreements the table makes on purpose, marked `today's bug` in advance:
 - **`src/` first grows, then shrinks.** Slices 1 to 5 add about 1,250 lines (`flow/`, with shadow) while the old
   paths still stand. Slice 6 removes about 2,000 (`waiting.rs`'s ladder, `drive.rs`'s pass body, `stall.rs`,
   `pending.rs`, `promise.rs`, `respawn.rs`, `undriven.rs`, check's issue rules, `flow::shadow`). The rows are
-  outside `src/`. `drover cap` will show whether one raise is needed before slice 3.
+  outside `src/`. the removed cap view (#1812) will show whether one raise is needed before slice 3.
 - **Adding behaviour is adding a row.** Two PRs that touch different states touch different files.
 - **The orchestrator thread becomes a required hop, once per row.** A fleet with no orchestrator role skips
   it: the try fails and the card goes to the owner. #1609 builds on the level this logs (in-scope judgment,

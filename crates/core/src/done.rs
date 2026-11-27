@@ -102,14 +102,15 @@ fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64), role:
         head: &head,
         body: text,
     };
-    let heavy = crate::heavy::Heavy::of(f, sp.str("host").and_then(|h| cfg.hosts.get(h)));
-    let via = on.machine.is_none().then_some((&heavy, ctx.exe.as_str()));
+    let heavy = match on.machine {
+        None => crate::heavy::Heavy::at(cfg, f, sp.str("host")),
+        Some(_) => crate::heavy::Heavy::default(),
+    };
     for c in checks(f, &on, Path::new(wt)) {
         let o = if c == crate::gatekeeper::CHECK {
             crate::gatekeeper::check(&on, Path::new(wt), &pr, &f.private_names, limit)
         } else {
-            let line = via.map_or_else(|| c.clone(), |(h, exe)| h.gate(exe, &c, wt));
-            on.run_for("sh", &argv(&["-c", &format!("cd \"$0\" && {line}"), wt]), "", limit)
+            on.run_for("sh", &heavy.check(&ctx.exe, &c, wt), "", limit)
         };
         let o = match o {
             Ok(o) if o.code == 0 => continue,
@@ -133,16 +134,9 @@ fn checks(f: &Fleet, on: &On, wt: &Path) -> Vec<String> {
     if let Some(c) = &f.done_checks {
         return c.clone();
     }
-    let (gk, arch, cargo) = (
-        crate::gatekeeper::wrapper(wt),
-        wt.join(".drover/arch.toml"),
-        wt.join("Cargo.toml"),
-    );
-    let (gk, arch, cargo) = (gk.to_string_lossy(), arch.to_string_lossy(), cargo.to_string_lossy());
-    let there = on.existing(&[&gk, &arch, &cargo]);
-    if there.contains(gk.as_ref()) {
-        return vec![crate::gatekeeper::CHECK.into()];
-    }
+    let (arch, cargo) = (wt.join(".drover/arch.toml"), wt.join("Cargo.toml"));
+    let (arch, cargo) = (arch.to_string_lossy(), cargo.to_string_lossy());
+    let there = on.existing(&[&arch, &cargo]);
     [(&arch, "drover arch-check"), (&cargo, "cargo fmt --check")]
         .into_iter()
         .filter(|(p, _)| there.contains(p.as_ref()))

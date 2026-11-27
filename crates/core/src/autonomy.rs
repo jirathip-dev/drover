@@ -10,7 +10,7 @@ use std::io::Write;
 type Rule = fn(&Event) -> bool;
 
 /// What counts as an owner action: the event kind, its label, the rule as `--explain` prints it, the rule.
-pub const OWNER: [(&str, &str, &str, Rule); 11] = [
+pub const OWNER: [(&str, &str, &str, Rule); 10] = [
     ("decision", "ask answered", "`by` is the owner's", owned),
     ("needs-human", "needs-human", "every one", |_| true),
     ("run-settled", "run card approved", "`approved` is true", |e| {
@@ -28,7 +28,6 @@ pub const OWNER: [(&str, &str, &str, Rule); 11] = [
     ("parked", "parked", "`by` is the owner's", owned),
     ("unparked", "unparked", "`by` is the owner's", owned),
     ("override", "override", "`by` is the owner's", owned),
-    ("merged", "owner-override merge", "`by` is the owner's", owned),
 ];
 
 fn owned(e: &Event) -> bool {

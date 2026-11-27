@@ -48,7 +48,7 @@ fn send(addr: SocketAddr, req: &str) -> String {
 fn board(name: &str, issues: &[u64], gated: &'static [u64]) -> Board {
     let c = ctx(&tmpdir(name), CONFIG);
     for &n in issues {
-        let d = serde_json::json!({"code": "ROUND_LIMIT", "reason": "out of rounds"});
+        let d = serde_json::json!({"code": "STUCK", "reason": "out of rounds"});
         append(&c.state, &Event::new(c.now, "sendmeter", Some(n), "needs-human", d)).unwrap();
     }
     let f = Fake::default();

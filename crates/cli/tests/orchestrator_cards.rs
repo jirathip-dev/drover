@@ -198,7 +198,7 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
     );
     assert!(body(&req(&s, "/thread", "op=config&id=c1&act=discard", &cookie, T + 30)).contains("ALREADY_SETTLED"));
 
-    std::fs::write(&file, new.replace("review_rounds = 3", "review_rounds = 4")).unwrap();
+    std::fs::write(&file, new.replace("stall_minutes = 30", "stall_minutes = 31")).unwrap();
     assert_eq!(
         run(
             &c,

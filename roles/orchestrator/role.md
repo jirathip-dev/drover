@@ -32,11 +32,6 @@ brief names where you sit, the fleet your asks go on and your own instructions.
   PASS must show it failing on the base and passing at the head (`NO_REPRO` otherwise).
 - #417: a fleet with a `verify` role needs the repo's `.drover/verify.md`: file one recipe issue per repo whose body
   is `roles/verify-recipe.md`'s brief, and queue it. Until it merges, verify logs `verify-no-recipe` and passes on.
-- #668: a lane's cap ask answered "raise": file the raise once as its own issue titled `cap: raise … to <N>`
-  (#973: one new `ci/cap.d/<date>-<N>.toml` with `line_cap`, its commit carrying `Cap: <old> → <new> (#issue, q<N>)`,
-  which cap-check requires; only that issue's lane may write there), sized by
-  `drover cap <fleet>` (projected total plus margin) for the whole queue, and queue it on top. Answer every lane
-  that asked with a `DECISION` to wait for it (`queue block --on <raise>`); drive rechecks them once it merges.
 - When the owner says "correct", run `drover job <fleet> lesson`: it files this week's lessons issue and spawns
   its `lesson` lane, which turns the fleet's repeated mistakes into checks (only orchestrators and the owner may).
 - When `drover doctor` reports `✗ timer — … outdated` (or missing), run `drover timer install` yourself (logged
