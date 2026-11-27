@@ -255,3 +255,49 @@ fn a_tick_skips_a_fleet_the_live_service_drove_within_the_tick_interval() {
         "older than the tick interval: the tick drives it: {out}"
     );
 }
+
+#[test]
+fn a_pass_ended_by_its_deadline_leaves_no_process_it_started_alive() {
+    let d = tmpdir("loops-deadline-kill");
+    let c = ctx(&d, &CONFIG.replace("[limits]\n", "[limits]\npass_max_secs = 1\n"));
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    let _sh = FakeShed::attached(&c);
+    let d12 = serde_json::json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "branch": "issue-12"});
+    drover::events::append(&c.state, &Event::new(c.now - 60, "sendmeter", Some(12), "spawn", d12)).unwrap();
+    let bin = d.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let pid = d.join("child.pid");
+    let gh = bin.join("gh");
+    std::fs::write(
+        &gh,
+        format!("#!/bin/sh\nsleep 30 &\necho $! > '{}'\nwait\n", pid.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&gh, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let home = c.state.parent().unwrap().parent().unwrap();
+    let st = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
+        .args(["drive", "sendmeter"])
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("HOME", home)
+        .env("DROVER_HOME", home)
+        .env("FLEET_CONFIG", &c.config)
+        .env("FLEET_STATE", &c.state)
+        .env("FLEET_WORKTREES", &c.worktrees)
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&st.stdout).into_owned() + &String::from_utf8_lossy(&st.stderr);
+    assert_eq!(st.status.code(), Some(124), "{said}");
+    let child = std::fs::read_to_string(&pid).expect("the pass started its call");
+    let alive = || {
+        let o = std::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", child.trim()])
+            .output()
+            .unwrap();
+        o.status.success() && !String::from_utf8_lossy(&o.stdout).trim_start().starts_with('Z')
+    };
+    let end = Instant::now() + Duration::from_secs(5);
+    while alive() && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!alive(), "pid {} outlived its pass", child.trim());
+}

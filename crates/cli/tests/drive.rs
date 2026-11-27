@@ -1785,11 +1785,7 @@ fn auto_update_runs_in_a_pass_with_no_merge() {
 #[test]
 fn auto_update_rechecks_premerge_before_its_push() {
     for fails in [false, true] {
-        let c = setup(if fails {
-            "drive-update-premerge-red"
-        } else {
-            "drive-update-premerge"
-        });
+        let c = setup(["drive-update-premerge", "drive-update-premerge-red"][usize::from(fails)]);
         let cfg = CONFIG.replace(
             "integration = \"staging\"",
             "integration = \"staging\"\npremerge = [\"make lint\"]",
@@ -1805,7 +1801,10 @@ fn auto_update_rechecks_premerge_before_its_push() {
             json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
         );
         let wt = c.state.with_file_name("update-sendmeter");
-        let check = format!("sh -c cd \"$0\" && make lint {}", wt.display());
+        let check = format!(
+            "sh -c renice -n 19 -p $$ >/dev/null 2>&1; cd \"$0\" && make lint {}",
+            wt.display()
+        );
         let push = format!("git -C {} push -q origin HEAD:issue-12", wt.display());
         let r = fake(NONE)
             .once(&check, i32::from(fails), "lint: error: unused import\n")
