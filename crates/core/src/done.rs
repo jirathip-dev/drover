@@ -134,16 +134,9 @@ fn checks(f: &Fleet, on: &On, wt: &Path) -> Vec<String> {
     if let Some(c) = &f.done_checks {
         return c.clone();
     }
-    let (gk, arch, cargo) = (
-        crate::gatekeeper::wrapper(wt),
-        wt.join(".drover/arch.toml"),
-        wt.join("Cargo.toml"),
-    );
-    let (gk, arch, cargo) = (gk.to_string_lossy(), arch.to_string_lossy(), cargo.to_string_lossy());
-    let there = on.existing(&[&gk, &arch, &cargo]);
-    if there.contains(gk.as_ref()) {
-        return vec![crate::gatekeeper::CHECK.into()];
-    }
+    let (arch, cargo) = (wt.join(".drover/arch.toml"), wt.join("Cargo.toml"));
+    let (arch, cargo) = (arch.to_string_lossy(), cargo.to_string_lossy());
+    let there = on.existing(&[&arch, &cargo]);
     [(&arch, "drover arch-check"), (&cargo, "cargo fmt --check")]
         .into_iter()
         .filter(|(p, _)| there.contains(p.as_ref()))
