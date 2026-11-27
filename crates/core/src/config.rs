@@ -323,7 +323,7 @@ pub struct Fleet {
     /// The only checks merge, `check` and `wait` look at (latest run of each); empty = all.
     #[serde(default)]
     pub required_checks: Vec<String>,
-    /// A label the PR needs for its full CI (e.g. `merge-ready`), kept on it exactly while a PASS stands at its head; unset = none.
+    /// A label the PR needs for its full CI, kept on it exactly while a PASS stands at its head; unset = `merge-ready`, `off` = none.
     pub merge_label: Option<String>,
     /// `always` catches every behind ready PR up with integration; unset/`needed`: only on a conflict or a strict rule.
     pub update_ready: Option<String>,
@@ -1252,6 +1252,11 @@ impl Config {
             f.form_rounds.get_or_insert(c.limits.form_rounds);
             f.respawn_per_pass.get_or_insert(c.limits.respawn_per_pass);
             f.ci_flaky_retries.get_or_insert(c.limits.ci_flaky_retries);
+            f.merge_label = match f.merge_label.take().as_deref() {
+                None => Some("merge-ready".into()),
+                Some("off") => None,
+                Some(l) => Some(l.into()),
+            };
             (f.bad, f.pipeline, f.jobs) = (p.validate(name, &f.role), Some(p), jobs(name, &c.job, f)?);
         }
         for (name, f) in &mut c.fleet {

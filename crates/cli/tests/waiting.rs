@@ -613,10 +613,7 @@ fn a_green_pass_on_a_draft_or_unlabelled_pr_names_the_cause() {
     let four = |c: &drover::Ctx, r: &Fake| waits(c, r, &[]).into_iter().find(|w| w.issue == 4).unwrap();
     assert_eq!(four(&c, &r).what, "PASS · CI green · PR is a draft");
     let (c, r) = fixture("waiting-812-label");
-    let cfg = CONFIG.replace(
-        "integration = \"staging\"",
-        "integration = \"staging\"\nmerge_label = \"full-ci\"",
-    );
+    let cfg = CONFIG.replace("merge_label = \"off\"", "merge_label = \"full-ci\"");
     std::fs::write(&c.config, cfg).unwrap();
     assert_eq!(four(&c, &r).what, "PASS · CI green · PR lacks label `full-ci`");
 }

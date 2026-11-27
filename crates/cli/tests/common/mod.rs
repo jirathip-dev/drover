@@ -22,6 +22,7 @@ pub const CONFIG: &str = r#"# fleet config (test)
 [fleet.sendmeter]
 repo = "jirathip-dev/sendmeter"
 local = "/tmp/does-not-matter/sendmeter"
+merge_label = "off"
 integration = "staging"   # never main
 
 [fleet.sendmeter.role.impl]

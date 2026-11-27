@@ -74,7 +74,7 @@ repo = "<owner>/<repo>"
 local = "~/src/<repo>"
 integration = "staging"                      # merge target; main never is
 required_checks = ["test"]                   # gate on these checks only; unset = all
-merge_label = "merge-ready"                  # the full CI runs only with this label; drover adds it on a PASS at the head
+# merge_label = "off"                        # unset = "merge-ready": the full CI runs on this label, added on a PASS
 
 [[fleet.app.serial]]                         # one-at-a-time paths (docs/config.md); any number of groups
 name = "db"                                  # its Queue mark, 🔒db; ≤ 8 characters
@@ -105,7 +105,8 @@ Check it worked: `drover status` prints no error. Every other key is in
 0600 files, never in fleet.toml: see [accounts.md](accounts.md) and [providers.md](providers.md).
 
 `merge_label` goes with the affected-only CI recipe in [ci.md](ci.md): pull requests run only the checks the change
-can affect, and the full run starts when drover adds the label. `drover setup` creates the label in the repo.
+can affect, and the full run starts when drover adds the label. It is on by default (`merge-ready`); `merge_label =
+"off"` opts out. `drover setup` creates the label in the repo.
 
 ## 3. First lane
 
