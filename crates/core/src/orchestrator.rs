@@ -618,14 +618,18 @@ pub fn post(
     text_ok(text)?;
     let t = find(&working(&ctx.state)?, id)?.clone();
     log(ctx, cfg, &t, from, (text, files))?;
-    let path = |f: &Value| format!(" (attached: {})", f["path"].as_str().unwrap_or_default());
-    let paths: String = files.iter().map(path).collect();
     let line = if raw {
         text.into()
     } else {
-        format!("[{id}] {from}: {text}{paths}")
+        owner_line(id, from, text, files)
     };
     Ok((t, line))
+}
+
+fn owner_line(id: &str, from: &str, text: &str, files: &[Value]) -> String {
+    let path = |f: &Value| format!(" (attached: {})", f["path"].as_str().unwrap_or_default());
+    let paths: String = files.iter().map(path).collect();
+    format!("[{id}] {from}: {text}{paths}")
 }
 
 /// `say`'s second half: type `line` into thread `t`'s orchestrator, starting or resuming it first.
@@ -1016,8 +1020,8 @@ fn start(
     let wire = r.shed().map_or(shed.wire.clone(), |w| w.wire);
     let all = crate::shed::accounts(r, &wire).ok();
     let hold = (p.account.as_ref()).and_then(|a| crate::accounts::of(all.as_deref()?, &p.harness, a));
-    if let Some(h) = hold {
-        return on_hold(ctx, cfg, r, t, events, &h);
+    if let (Some(h), Some(a)) = (hold, p.account.as_ref()) {
+        return on_hold(ctx, cfg, r, (t, events), &h, a);
     }
     let aid = shed.acp.clone().context(crate::config::NO_RUNTIME)?;
     let acp = match crate::spawn::acp_cmd(ctx, r, &p, &aid, None) {
@@ -1278,7 +1282,8 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
         let a = a.as_ref();
         let out = account(s).filter(|_| a.is_some()).and_then(|(h, acct)| {
             let all = all.get_or_init(|| crate::accounts::ls(cfg, r));
-            crate::accounts::of(all.as_deref()?, &h, &acct).filter(|h| h.why == crate::accounts::Why::SignedOut)
+            let out = crate::accounts::of(all.as_deref()?, &h, &acct);
+            out.filter(|h| matches!(h.why, crate::accounts::Why::SignedOut | crate::accounts::Why::Drifted))
         });
         if let Some(h) = out {
             signed_out(ctx, cfg, r, t, s, &h)?;
@@ -1367,10 +1372,10 @@ fn held(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], a:
     let at = crate::limit::reset_at(r, a.note.as_deref().unwrap_or_default(), ctx.now);
     let until = at.map_or("its reset".into(), |at| crate::usage::date(r, at, "+%a %H:%M"));
     let text = format!("orchestrator out of usage until {until}; your message is kept");
-    hold_row(ctx, cfg, t, events, (&text, at))
+    hold_row(ctx, cfg, t, events, json!({"text": text, "at": at}))
 }
 
-fn hold_row(ctx: &Ctx, cfg: &Config, t: &Event, events: &[Event], (text, at): (&str, Option<u64>)) -> Result<()> {
+fn hold_row(ctx: &Ctx, cfg: &Config, t: &Event, events: &[Event], mut d: Value) -> Result<()> {
     let id = t.str("thread").unwrap_or_default();
     let Some(m) = of(events, id)
         .rfind(|e| human(e))
@@ -1378,7 +1383,9 @@ fn hold_row(ctx: &Ctx, cfg: &Config, t: &Event, events: &[Event], (text, at): (&
     else {
         return Ok(());
     };
-    let d = json!({"thread": id, "from": "system", "text": text, "held": m.seq, "at": at});
+    d.put("thread", json!(id))
+        .put("from", json!("system"))
+        .put("held", json!(m.seq));
     emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))
 }
 
@@ -1386,47 +1393,69 @@ fn on_hold(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
-    t: &Event,
-    events: &[Event],
+    (t, events): (&Event, &[Event]),
     h: &crate::accounts::Hold,
+    a: &crate::config::Account,
 ) -> Result<String> {
     use crate::accounts::Why;
     let line = h.line(r);
-    match &h.why {
-        Why::Setup(_) => {
-            let why = format!("{line}; the orchestrator does not start");
-            log(
-                ctx,
-                cfg,
-                t,
-                "system",
-                (&format!("the orchestrator does not start: ACP_UNGUARDED: {why}"), &[]),
-            )?;
-            return refused("ACP_UNGUARDED", why);
-        }
-        Why::Limited(at) => {
-            let text = format!("{line}; your message is kept. New threads will fail too until then.");
-            hold_row(ctx, cfg, t, events, (&text, *at))?;
-        }
-        Why::SignedOut | Why::Missing => {
-            let d = json!({"thread": t.str("thread"), "from": "system", "text": line, "signin": h.signin()});
-            emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))?;
-        }
+    if let Why::Setup(_) = h.why {
+        let why = format!("{line}; the orchestrator does not start");
+        log(
+            ctx,
+            cfg,
+            t,
+            "system",
+            (&format!("the orchestrator does not start: ACP_UNGUARDED: {why}"), &[]),
+        )?;
+        return refused("ACP_UNGUARDED", why);
     }
-    refused("LOGIN_NEEDED", format!("{line}; the orchestrator waits"))
+    let kept = format!("{line}; your message is kept");
+    let (text, at) = match h.why {
+        Why::Limited(at) => (format!("{kept}. New threads will fail too until then."), at),
+        _ => (kept.clone(), None),
+    };
+    let d = json!({"text": text, "at": at, "signin": h.signin(), "harness": h.agent, "account": a.word()});
+    hold_row(ctx, cfg, t, events, d)?;
+    refused("LOGIN_NEEDED", kept)
 }
 
 /// `check`: per thread, its rate-limited orchestrator's `out of usage` row, one `continue` at that row's reset time, and a `no reply yet` row for an owner message unanswered `orchestrator_reply_minutes`.
 pub fn silence(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], agents: &[Session]) -> Result<()> {
+    let all = std::cell::OnceCell::new();
+    let ready = |h: &Event| {
+        let Some((harness, acct)) = account(h) else {
+            return false;
+        };
+        let all = all.get_or_init(|| crate::accounts::ls(cfg, r));
+        all.as_deref()
+            .is_some_and(|all| crate::accounts::of(all, &harness, &acct).is_none())
+    };
     for t in threads(events) {
         let id = t.str("thread").unwrap_or_default();
         let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
         let s = last.filter(|e| e.kind == "orchestrator-start");
         let a = s.and_then(|s| agents.iter().find(|a| Some(a.name.as_str()) == s.str("agent")));
         held(ctx, cfg, r, t, events, a)?;
-        let due = pending(events, id).filter(|h| h.val("at").as_u64().is_some_and(|at| ctx.now >= at));
+        let due = pending(events, id).filter(|h| h.val("at").as_u64().is_some_and(|at| ctx.now >= at) || ready(h));
         if let Some(h) = due {
-            let sent = deliver(ctx, cfg, r, t, crate::limit::CONTINUE).is_ok();
+            let kept =
+                (of(events, id).find(|m| Some(m.seq) == h.val("held").as_u64())).filter(|_| account(h).is_some());
+            let files = kept
+                .and_then(|m| m.val("files").as_array().cloned())
+                .unwrap_or_default();
+            let line = kept.map_or(crate::limit::CONTINUE.into(), |m| {
+                owner_line(
+                    id,
+                    m.str("from").unwrap_or_default(),
+                    m.str("text").unwrap_or_default(),
+                    &files,
+                )
+            });
+            let sent = deliver(ctx, cfg, r, t, &line).is_ok();
+            if sent {
+                log(ctx, cfg, t, "system", ("your kept message is sent", &[]))?;
+            }
             let d = json!({"thread": id, "held": h.seq, "sent": sent});
             emit(
                 &ctx.state,
