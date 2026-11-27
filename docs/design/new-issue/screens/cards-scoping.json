@@ -1,0 +1,207 @@
+[
+ {
+  "type": "card",
+  "id": "ask-s2",
+  "kind": "ask",
+  "tone": "warn",
+  "title": "acme-web \u00b7 new issue",
+  "meta": "scope \u00b7 question 2 \u00b7 1m",
+  "fold": {
+   "line": "scope \u00b7 acme-web \u00b7 Where should the sort live, so Back keeps it? \u00b7 1m",
+   "main": {
+    "action": "answer",
+    "block": "s2",
+    "label": "in the URL",
+    "value": "in the URL"
+   }
+  },
+  "blocks": [
+   {
+    "type": "text",
+    "markdown": "**Where should the sort live, so Back keeps it?**\n\nToday `OrdersTable` keeps the column and direction in its own state (`src/orders/Table.tsx:42`), so leaving the page loses them. Your answer to question 1: only the orders table."
+   },
+   {
+    "type": "choice",
+    "id": "s2",
+    "action": "answer",
+    "recommended": "in the URL",
+    "options": [
+     {
+      "label": "in the URL",
+      "value": "in the URL"
+     },
+     {
+      "label": "in sessionStorage, per tab",
+      "value": "in sessionStorage, per tab"
+     },
+     {
+      "label": "in the user's saved settings",
+      "value": "in the user's saved settings"
+     }
+    ],
+    "other": {
+     "placeholder": "other\u2026"
+    }
+   }
+  ],
+  "buttons": [
+   {
+    "type": "button",
+    "id": "ask-s2-later",
+    "label": "later",
+    "action": "later",
+    "values": {
+     "card": "ask-s2"
+    }
+   }
+  ]
+ },
+ {
+  "blocks": [
+   {
+    "markdown": "**Rate-limit the public search endpoint per API key or per client IP?**",
+    "type": "text"
+   },
+   {
+    "action": "answer",
+    "id": "q2",
+    "options": [
+     {
+      "label": "per API key",
+      "value": "per API key"
+     },
+     {
+      "label": "per client IP",
+      "value": "per client IP"
+     },
+     {
+      "label": "both, key first: throttle each API key at 600 requests a minute, then each client IP at 120 a minute for anonymous traffic behind shared NAT",
+      "value": "both, key first: throttle each API key at 600 requests a minute, then each client IP at 120 a minute for anonymous traffic behind shared NAT"
+     }
+    ],
+    "other": {
+     "placeholder": "other\u2026"
+    },
+    "recommended": "per API key",
+    "type": "choice"
+   }
+  ],
+  "buttons": [
+   {
+    "action": "later",
+    "id": "ask-q2-later",
+    "label": "later",
+    "type": "button",
+    "values": {
+     "card": "ask-q2"
+    }
+   }
+  ],
+  "fold": {
+   "line": "#21 \u00b7 owner \u00b7 Rate-limit the public search endpoint per API ke\u2026 \u00b7 18m",
+   "main": {
+    "action": "answer",
+    "block": "q2",
+    "label": "per API key",
+    "value": "per API key"
+   }
+  },
+  "id": "ask-q2",
+  "kind": "ask",
+  "meta": "owner \u00b7 18m",
+  "title": "acme-api #21",
+  "tone": "warn",
+  "type": "card"
+ },
+ {
+  "type": "card",
+  "id": "new-issue",
+  "kind": "new-issue",
+  "fold": {
+   "line": "+ new issue \u00b7 acme-web: scoping, 1 waits"
+  },
+  "blocks": [
+   {
+    "type": "text",
+    "markdown": "A scope lane reads the repo, asks you here one question at a time, then shows the draft. Nothing is filed until you approve it."
+   },
+   {
+    "type": "list",
+    "rows": [
+     {
+      "type": "row",
+      "id": "scope-acme-web-1",
+      "title": "The orders table loses its sort after Back",
+      "badge": {
+       "text": "scoping",
+       "tone": "ok"
+      },
+      "subtitle": "acme-web \u00b7 1 answered, 1 open \u00b7 4m",
+      "swipe": [
+       {
+        "label": "drop",
+        "tone": "bad",
+        "action": "new-issue-drop",
+        "values": {
+         "scope": "scope-acme-web-1"
+        },
+        "confirm": {
+         "title": "Drop this new issue?",
+         "message": "Its scope lane stops. Nothing is filed.",
+         "ok": "drop"
+        }
+       }
+      ]
+     },
+     {
+      "type": "row",
+      "id": "scope-acme-web-2",
+      "title": "Export the orders list as CSV",
+      "badge": {
+       "text": "waits",
+       "tone": "warn"
+      },
+      "subtitle": "acme-web \u00b7 starts once the one above is filed or dropped",
+      "swipe": [
+       {
+        "label": "drop",
+        "tone": "bad",
+        "action": "new-issue-drop",
+        "values": {
+         "scope": "scope-acme-web-2"
+        },
+        "confirm": {
+         "title": "Drop this new issue?",
+         "message": "Its scope lane stops. Nothing is filed.",
+         "ok": "drop"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "type": "composer",
+    "id": "new-issue",
+    "action": "new-issue",
+    "label": "scope",
+    "placeholder": "one line: the bug or the feature",
+    "chips": [
+     {
+      "name": "repo",
+      "cur": "acme-web",
+      "all": [
+       "acme-api",
+       "acme-web",
+       "acme-ios",
+       "docs"
+      ]
+     }
+    ],
+    "values": {
+     "req": "new"
+    }
+   }
+  ]
+ }
+]
