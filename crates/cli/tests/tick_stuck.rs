@@ -127,10 +127,7 @@ fn a_host_that_never_answers_costs_one_retried_probe_and_drive_still_starts() {
     );
     let cached = drover::hosts::cached(&c);
     assert!(!cached["air"].up, "the Air shows offline");
-    assert!(
-        out.contains(&format!("keep air:{WT}: host unreachable (not cleaned)")),
-        "{out}"
-    );
+    assert!(out.contains("air: 1 lanes, host offline — not checked"), "{out}");
     let (_, status) = run(&c, &Fake::default(), &["status"]);
     assert!(status.contains("host offline: air"), "{status}");
 }
@@ -146,10 +143,7 @@ fn the_ticks_clean_never_probes_a_disabled_hosts_worktrees() {
     };
     let (code, out) = run(&c, &on, &["tick"]);
     assert_eq!(code, 0, "{out}");
-    assert!(
-        out.contains(&format!("keep air:{WT}: host unreachable (not cleaned)")),
-        "{out}"
-    );
+    assert!(out.contains("air: 1 lanes, host off — not checked"), "{out}");
     let calls = r.calls.borrow();
     let removes = calls
         .iter()
@@ -180,10 +174,7 @@ fn clean_reports_a_silent_disabled_host_offline_after_one_retried_probe() {
     };
     let (code, out) = run(&c, &r, &["clean", "--yes"]);
     assert_eq!(code, 0, "{out}");
-    assert!(
-        out.contains(&format!("keep air:{WT}: host unreachable (not cleaned)")),
-        "{out}"
-    );
+    assert!(out.contains("air: 1 lanes, host off — not checked"), "{out}");
     assert!(out.contains("scratch: air: host offline (not cleaned)"), "{out}");
     let calls = r.f.calls.borrow();
     let to_air: Vec<_> = calls.iter().filter(|l| l.contains(" air ")).collect();
