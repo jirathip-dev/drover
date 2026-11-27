@@ -131,7 +131,10 @@ fn a_pass_after_the_lanes_shed_host_vanished_mid_lane_ends_within_its_bound() {
         ..c.clone()
     };
     let (_, out) = within("drive", move || run(&later, &spawn_fake(), &["drive"]));
-    assert!(out.contains("sendmeter spawns: no shed server"), "{out}");
+    assert!(
+        out.contains("sendmeter: the main host gave no word (no shed server"),
+        "{out}"
+    );
     assert_eq!(
         kinds(&c, "spawn").len(),
         1,
