@@ -74,7 +74,6 @@
                   "push": "rev"
                 },
                 "role": "impl",
-                "rounds": null,
                 "run": "claude · opus · effort none"
               },
               {
@@ -88,7 +87,6 @@
                   "PASS": "gates"
                 },
                 "role": "rev",
-                "rounds": 3,
                 "run": "claude · default · effort none"
               },
               {
@@ -103,14 +101,12 @@
                   "ok": "merge"
                 },
                 "role": null,
-                "rounds": 3,
                 "run": null
               }
             ]
           },
           "repo": "jirathip-dev/sendmeter",
           "required": [],
-          "review_rounds": 3,
           "roles": [
             {
               "accounts": [],
@@ -168,8 +164,7 @@
             }
           ],
           "serial": [],
-          "stall_minutes": 30,
-          "update_rounds": 3
+          "stall_minutes": 30
         },
         "done": [],
         "done_n": 0,

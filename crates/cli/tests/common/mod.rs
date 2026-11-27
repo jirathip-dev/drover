@@ -34,7 +34,6 @@ harness = "claude"
 profile = "fleet-rev"
 
 [limits]
-review_rounds = 3
 stall_minutes = 30
 max_parallel_spawns = 0   # spawns in the pass; tests/drive_kicks.rs runs them as kicks (#318)
 build_root = ""           # #630: retired (builds go under the worktree root); a stale key is ignored

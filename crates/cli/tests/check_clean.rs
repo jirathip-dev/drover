@@ -690,7 +690,7 @@ fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
         let rev = json!({"role": "rev", "agent": REV, "worktree": w, "pane": REV, "runtime": "shed"});
         ev(&c, 20, 12, "spawn", rev);
         let f = d.join("verdict.md");
-        std::fs::write(&f, "FAIL\n1. blocking a.rs:1\nProof: spec\n> AC 1\n").unwrap();
+        std::fs::write(&f, "FAIL\n1. blocking [ac] a.rs:1\nProof: spec\n> AC 1\n").unwrap();
         let r = Fake::default()
             .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", HEAD)
             .reply("gh api -X POST repos/jirathip-dev/sendmeter/statuses/", "{}")

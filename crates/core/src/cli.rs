@@ -82,15 +82,9 @@ enum Cmd {
     #[command(
         about = "Merge the issue's PR into the integration branch if every gate passes; writes the one closing comment, closes the issue"
     )]
-    Merge {
-        fleet: String,
-        issue: u64,
-        #[arg(help = "Owner only: merge past ROUND_LIMIT (never past PASS, CI or serial); logged `by: owner`")]
-        #[arg(long)]
-        owner_override: bool,
-    },
+    Merge { fleet: String, issue: u64 },
     #[command(
-        about = "Owner only: one more round for a needs-human issue (its card's [one more round]): an update round on an UPDATE_LIMIT card, else a review round; logs `round-extended`"
+        about = "Owner only: one more round for a needs-human issue (its card's [one more round]): an update round on a stuck update's card, else a review round; logs `round-extended`"
     )]
     Extend {
         fleet: String,
@@ -1917,11 +1911,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     let id = format!("{sha}-{verdict}");
                     let _ = crate::drive::kick_once(ctx, r, (&fleet, issue), "verdict", Some(&id));
                 }
-                Cmd::Merge {
-                    fleet,
-                    issue,
-                    owner_override: o,
-                } => gate::merge(ctx, &cfg, r, out, &fleet, issue, o)?,
+                Cmd::Merge { fleet, issue } => gate::merge(ctx, &cfg, r, out, &fleet, issue)?,
                 Cmd::Extend {
                     fleet,
                     issue,

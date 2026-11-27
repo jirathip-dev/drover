@@ -87,7 +87,6 @@
               "push": "rev"
             },
             "role": "impl",
-            "rounds": null,
             "run": "claude · opus · effort none"
           },
           {
@@ -101,7 +100,6 @@
               "PASS": "gates"
             },
             "role": "rev",
-            "rounds": 3,
             "run": "claude · default · effort none"
           },
           {
@@ -116,14 +114,12 @@
               "ok": "merge"
             },
             "role": null,
-            "rounds": 3,
             "run": null
           }
         ]
       },
       "repo": "jirathip-dev/sendmeter",
       "required": [],
-      "review_rounds": 3,
       "roles": [
         {
           "accounts": [],
@@ -181,8 +177,7 @@
         }
       ],
       "serial": [],
-      "stall_minutes": 30,
-      "update_rounds": 3
+      "stall_minutes": 30
     },
     "fleet": "sendmeter"
   },
@@ -217,11 +212,9 @@
       "pipe": "null",
       "repo": "string",
       "required": [],
-      "review_rounds": "number",
       "roles": [],
       "serial": [],
-      "stall_minutes": "number",
-      "update_rounds": "number"
+      "stall_minutes": "number"
     },
     "fleet": "string"
   },

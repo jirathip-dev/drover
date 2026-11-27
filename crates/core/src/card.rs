@@ -57,7 +57,6 @@ pub fn forbidden(cmd: &str) -> Option<&'static str> {
     }
     let del = has("delete") || has("-xdelete") || has("--method=delete");
     if (del && any(&|x| x.contains("protection") || x.contains("rulesets")))
-        || has("--owner-override")
         || has("--no-verify")
         || ((has("drover") || has("herdsman")) && has("timer") && has("remove"))
     {

@@ -41,8 +41,6 @@ pub const STEPS: [(&str, &[&str]); 4] = [
             "ci_stuck_minutes",
             "ci_flaky_retries",
             "gate_check_minutes",
-            "review_rounds",
-            "update_rounds",
             "job_max",
         ],
     ),
@@ -510,7 +508,7 @@ pub(crate) fn words(code: Option<&str>, step: &str, result: &str) -> String {
             ),
             None => "a lane is already on it".into(),
         },
-        Some("ROUND_LIMIT" | "UPDATE_LIMIT") => "out of rounds: needs you".into(),
+        Some("STUCK") => "stuck: needs you".into(),
         Some("EXIT" | "ERROR") => format!("failed: {result}"),
         Some(c) => format!("held back ({c})"),
     }
@@ -1468,7 +1466,7 @@ fn pass(
                 && !full;
             let verified = || -> Result<bool> {
                 let st = fold(&working(&ctx.state)?).remove(&(fleet.to_string(), s.issue));
-                Ok(crate::gate::verified(f, st.as_ref(), arg(5), false).is_ok())
+                Ok(crate::gate::verified(f, st.as_ref(), arg(5)).is_ok())
             };
             if step == "verdict" && code.is_none() && arg(3) == "PASS" && green && verified()? {
                 merge = true;
@@ -1587,7 +1585,8 @@ fn no_proof(
     let sp = ev.iter().rfind(|e| e.is("spawn", fleet, n) && crate::events::checks(e));
     let on = crate::hosts::On::of(r, sp);
     let body = crate::link::read(ctx, cfg, r, sp, args.get(7).unwrap_or(&"")).unwrap_or_default();
-    let Some((code, why)) = crate::gate::unfit(&body) else {
+    let form = cfg.fleet(fleet)?.form_categories.clone().unwrap_or_default();
+    let Some((code, why)) = crate::gate::unfit(&body, &form) else {
         return Ok(None);
     };
     let hash = &crate::devices::sha256(body.as_bytes())[..16];
@@ -1602,10 +1601,10 @@ fn no_proof(
     let told = mine.iter().any(|e| e.val("prompted") == true);
     if !seen {
         act(ctx, cfg, r, out, ev, (fleet, Some(n), "verdict"), args)?;
-        let fix = if code == "NO_PROOF" {
-            "Add the Proof blocks"
-        } else {
-            "Drop those findings"
+        let fix = match code {
+            "NO_PROOF" => "Add the Proof blocks",
+            "OUT_OF_SCOPE" => "Make those findings `- follow-up` lines",
+            _ => "Drop those findings",
         };
         let text = format!("drover verdict refused your verdict.md: REFUSED {code}: {why}. {fix}.");
         let tell = |p| crate::term::reply(&on, lane, p, &text).is_ok() && crate::term::landed(&on, lane, p, &text);

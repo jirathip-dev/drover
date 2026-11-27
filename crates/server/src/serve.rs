@@ -1788,7 +1788,7 @@ impl<'a> Server<'a> {
                 pr: pr_data(ctx, fc, f, n, None),
                 repo: fc.map(|c| c.repo.clone()),
                 mergeable: m.to_lowercase(),
-                merge: fc.is_some_and(|c| gate(c, &pr, Some(s), true).is_ok()) && m == "MERGEABLE",
+                merge: fc.is_some_and(|c| gate(c, &pr, Some(s)).is_ok()) && m == "MERGEABLE",
                 shots: crate::verify::served(events, (f, n), None)
                     .into_iter()
                     .map(|x| x.0)
@@ -2734,7 +2734,7 @@ LOGIN_NEEDED|a|held|{why}
 CAP|a|waiting|{why} · starts when a lane finishes
 NO_HOST HOST_OFFLINE|a|waiting|{why}
 SERIAL_BUSY|a|waiting|{slots} full ({busy} must merge first)
-ROUND_LIMIT UPDATE_LIMIT|r|needs you|#{n}: {why} · your call on its card
+STUCK|r|needs you|#{n}: {why} · your call on its card
 WORKTREE_DIRTY|r|needs you|#{n}: {why} · `drover kill` it, or spawn `--supersede`
 CI_NOT_GREEN|a|waiting|#{n}'s CI is not green yet
 NO_VERDICT STALE_VERDICT VERDICT_FAIL|a|waiting|#{n} has no PASS for its head · a new round
@@ -3272,8 +3272,6 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
         env: fc.env.keys().cloned().collect(),
         node_modules: fc.clone_node_modules,
         builtin: fc.flow().builtin,
-        review_rounds: l.review_rounds,
-        update_rounds: l.update_rounds,
         stall_minutes: l.stall_minutes,
         ask_minutes: l.ask_default_minutes,
         max_impl: fc.max_impl,
@@ -3437,7 +3435,7 @@ fn pipe(fleet: &str, fc: &crate::config::Fleet, st: &States) -> serde_json::Valu
                 format!("{} · {m} · effort {}", r.harness, r.effort.as_deref().unwrap_or("none"))
             });
             let here = count(&|x| stage_at(fc, x).is_some_and(|a| a.0 == s.name));
-            json!({"name": s.name, "kind": s.kind, "role": s.role, "run": run, "next": s.next, "rounds": s.rounds,
+            json!({"name": s.name, "kind": s.kind, "role": s.role, "run": run, "next": s.next,
                 "line": s.line, "here": here, "loop": p.loop_of(&s.name)})
         })
         .collect();

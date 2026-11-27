@@ -52,10 +52,10 @@ fn default_pipeline_replays_recorded_histories() {
             Some(("/v.md", "PASS")),
         );
         let b = waiting_on(&log, &events[..=i], s, Some((&moved, 1)), &pr(&moved), f, None);
-        let g = gate(f, &pr(&last), Some(s), false).map_or_else(|r| r.code.to_string(), |_| "ok".into());
+        let g = gate(f, &pr(&last), Some(s)).map_or_else(|r| r.code.to_string(), |_| "ok".into());
         out += &format!(
-            "{i} {} #{n} {} r{} u{} x{} | {} {:?} | {} {:?} | {g}\n",
-            s.fleet, s.state, s.rounds, s.updates, s.extra, a.who, a.next_cmd, b.who, b.next_cmd
+            "{i} {} #{n} {} r{} u{} | {} {:?} | {} {:?} | {g}\n",
+            s.fleet, s.state, s.rounds, s.updates, a.who, a.next_cmd, b.who, b.next_cmd
         );
     }
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/pipeline/decisions.txt");
@@ -147,14 +147,6 @@ fn each_rule_rejects_a_crafted_pipeline() {
             ]),
         ),
         (
-            "no limit",
-            stages(&[
-                IMPL,
-                ("rev", "check", "rev", None, "PASS = \"gates\", FAIL = \"impl\""),
-                GATES,
-            ]),
-        ),
-        (
             "unmapped",
             stages(&[IMPL, ("rev", "check", "rev", Some(3), "PASS = \"gates\""), GATES]),
         ),
@@ -206,19 +198,15 @@ fn the_design_error_example_breaks_its_rules() {
         GATES,
     ])))
     .unwrap();
-    assert_eq!(
-        rules(&cfg),
-        ["unreachable", "no end", "no limit", "unmapped", "no role"]
-    );
+    assert_eq!(rules(&cfg), ["unreachable", "no end", "unmapped", "no role"]);
     let bad = &cfg.fleet["atlas"].bad;
     assert_eq!(bad[0].msg, "stage gates can't be reached: no outcome leads to it");
-    assert_eq!(bad[2].msg, "loop qa → docs → qa has no round limit: set rounds on qa");
     assert_eq!(
-        bad[3].msg,
+        bad[2].msg,
         "stage qa: PASS goes to docs; it must go to a check or gate or merge"
     );
     assert_eq!(
-        bad[4].msg,
+        bad[3].msg,
         "stage docs: role writer is not defined; add [fleet.atlas.role.writer]"
     );
     assert_eq!((bad[0].stage.as_str(), bad[0].line), ("gates", 36));
@@ -261,10 +249,7 @@ fn next(cfg: &Config, events: &[Event], head: &str) -> (Option<String>, Result<(
         f,
         None,
     );
-    (
-        w.next_cmd,
-        gate(f, &pr(head), Some(s), false).map(drop).map_err(|r| r.code),
-    )
+    (w.next_cmd, gate(f, &pr(head), Some(s)).map(drop).map_err(|r| r.code))
 }
 
 #[test]
@@ -304,7 +289,7 @@ fn two_checks_merge_on_both_passes_and_either_fail_routes_to_fix() {
 }
 
 #[test]
-fn round_limits_are_per_check_stage() {
+fn rounds_are_counted_per_check_stage_with_no_limit() {
     let d = common::tmpdir("pipeline-rounds");
     let c = common::ctx(&d, &two_checks());
     let (a, b) = ("a".repeat(40), "b".repeat(40));
@@ -318,23 +303,23 @@ fn round_limits_are_per_check_stage() {
     };
     log(spawn(1, "impl", false));
     log(spawn(2, "rev", true));
-    assert!(verdict("PASS", &a).1.contains("(round 1/3)"));
+    assert!(verdict("PASS", &a).1.contains("(round 1)"));
     log(spawn(3, "sec", true));
     let (_, out) = verdict("FAIL", &a);
-    assert!(out.contains("(round 1/2)") && !out.contains("needs-human"), "{out}");
+    assert!(out.contains("(round 1)") && !out.contains("needs-human"), "{out}");
     log(spawn(4, "impl", false));
     log(spawn(5, "rev", true));
-    assert!(verdict("PASS", &b).1.contains("(round 2/3)"));
+    assert!(verdict("PASS", &b).1.contains("(round 2)"));
     log(spawn(6, "sec", true));
     let (_, out) = verdict("FAIL", &b);
     assert!(
-        out.contains("(round 2/2)") && out.contains("round limit reached → needs-human"),
-        "{out}"
+        out.contains("(round 2)") && !out.contains("needs-human"),
+        "sec's `rounds = 2` is retired: {out}"
     );
     let s = &fold(&drover::events::read(&c.state).unwrap())[&("atlas".to_string(), 12)];
     assert_eq!(
         (s.state.as_str(), s.stage_rounds["rev"], s.stage_rounds["sec"]),
-        ("needs-human", 2, 2)
+        ("fix(2)", 2, 2)
     );
 }
 
@@ -359,7 +344,7 @@ fn a_bad_pipeline_refuses_spawn_and_doctor_lists_it() {
 }
 
 #[test]
-fn red_ci_in_the_last_round_goes_to_park() {
+fn red_ci_after_a_pass_is_a_gates_fail_in_revs_loop_with_no_limit() {
     let d = common::tmpdir("pipeline-ci-red");
     let c = common::ctx(&d, common::CONFIG);
     let file = d.join("v.md");
@@ -384,7 +369,7 @@ fn red_ci_in_the_last_round_goes_to_park() {
         &r,
         &["verdict", "sendmeter", "12", "FAIL", "--sha", &head, "--file", &file],
     );
-    assert!(out.contains("(round 3/3)") && out.contains("needs-human"), "{out}");
+    assert!(out.contains("(round 3)") && !out.contains("needs-human"), "{out}");
     let events = drover::events::read(&c.state).unwrap();
     let v = events.iter().rfind(|e| e.kind == "verdict").unwrap();
     assert_eq!((v.str("stage"), v.str("loop")), (Some("gates"), Some("rev")));

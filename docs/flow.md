@@ -162,8 +162,8 @@ Generated from `crates/core/flow/` (#1649) by `just gen`; CI fails when this fil
 | `merge` | green | PASS | none | merge | drive | `gate_check_minutes` |  |  | merged, fix | PASS and CI green: merge |
 | `ci-running` | pending | PASS | none | wait | drive | `ci_stuck_minutes` | unstick-ci |  |  | CI is running |
 | `ci-not-started` | open | PASS | none | wait | drive | `ci_start_minutes` | unstick-ci, ci-fail |  |  | CI has not started |
-| `ci-red` | red | PASS | none | ci-fail | drive | `act_minutes` |  |  | fix | CI is red: a fix round |
-| `conflict` | conflicting | PASS | none | update | drive | `act_minutes` |  |  | fix | the PR conflicts: update it |
+| `ci-red` | red | PASS | none | ci-fail | drive | `act_minutes` |  |  | fix, needs-human | CI is red: a fix round |
+| `conflict` | conflicting | PASS | none | update | drive | `act_minutes` |  |  | fix, needs-human | the PR conflicts: update it |
 | `no-pr` | none | PASS | none | reconcile | drive | `act_minutes` |  | orch |  | PASS with no PR: reconcile |
 
 ### `review` (file `review`) · reads lane, host, pr, verdict, ask · in flight
@@ -172,7 +172,7 @@ Generated from `crates/core/flow/` (#1649) by `just gen`; CI fails when this fil
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `merged-outside` | | | merged | | | record-merge | drive | `act_minutes` |  |  | merged | merged outside drover: record it |
 | `pr-closed` | | | closed | | | raise-card | drive | `act_minutes` |  | orch | needs-human | PR closed outside drover: a card |
-| `record` | | | none, open, pending, red, green, conflicting | written | | record | drive | `act_minutes` |  |  | ready, fix | record the written verdict |
+| `record` | | | none, open, pending, red, green, conflicting | written | | record | drive | `act_minutes` |  |  | ready, fix, needs-human | record the written verdict |
 | `ask-open` | | | | | open | wait | owner | `ask_waiting_minutes` | remind | owner |  | waiting on the owner's answer |
 | `decided` | | | | | answered | deliver | drive | `act_minutes` |  |  |  | apply the answer |
 | `recorded-here` | | | | PASS, FAIL | none | reconcile | drive | `act_minutes` |  | orch |  | a recorded verdict at review: reconcile |

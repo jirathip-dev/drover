@@ -324,7 +324,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 let oid = pr.at("headRefOid").as_str().unwrap_or_default();
                 hits.push(("ci-missing", oid.into(), why));
             }
-            if let Some(head) = gate(f, &pr, Some(s), false).ok().filter(|_| idle > stall) {
+            if let Some(head) = gate(f, &pr, Some(s)).ok().filter(|_| idle > stall) {
                 let (short, ago) = (&head[..7.min(head.len())], age(idle));
                 let why = format!("PASS @ {short} with green CI, unmerged for {ago}; run `drover merge`");
                 hits.push(("ready-unmerged", format!("{}:{head}", s.last_ts), why));

@@ -868,8 +868,6 @@ pub struct ConfigSheet {
     pub env: Vec<String>,
     pub node_modules: bool,
     pub builtin: bool,
-    pub review_rounds: u32,
-    pub update_rounds: u32,
     pub stall_minutes: u64,
     pub ask_minutes: u64,
     pub max_impl: Option<usize>,

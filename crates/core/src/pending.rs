@@ -201,8 +201,7 @@ pub(crate) fn stuck(
         "LANE_LIVE",
         "EXIT",
         "ERROR",
-        "ROUND_LIMIT",
-        "UPDATE_LIMIT",
+        "STUCK",
     ];
     let carded = step == "start" || step == "respawn" && crate::drive::owner_refusal(code);
     if carded || waits.contains(&code) || SOFT.contains(&code) || crate::starts::stops(Some(code)) {
