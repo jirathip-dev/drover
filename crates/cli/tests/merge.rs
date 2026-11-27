@@ -813,7 +813,7 @@ fn named_premerge_failure_refuses_with_its_code_and_a_fix_round() {
     assert_eq!(exit, 3, "{out}");
     let want = "REFUSED BACKDATED_MIGRATION: migration 20260101_x.sql is behind the dev ledger";
     assert!(out.contains(want), "{out}");
-    assert!(r.called("sh -c cd \"$0\" && node scripts/check-migrations.mjs --base origin/staging --ledger"));
+    assert!(r.called("sh -c renice -n 19 -p $$ >/dev/null 2>&1; cd \"$0\" && node scripts/check-migrations.mjs --base origin/staging --ledger"));
     assert!(!r.called("gh pr merge"), "{:#?}", r.calls.borrow());
     let ev = read(&c.state).unwrap();
     let st = &fold(&ev)[&("sendmeter".to_string(), 12)];
@@ -846,7 +846,7 @@ fn list_form_premerge_still_runs_its_checks() {
         out.contains("REFUSED STAGING_WOULD_BREAK: make lint: lint: error: unused import"),
         "{out}"
     );
-    assert!(r.called("sh -c cd \"$0\" && make lint"));
+    assert!(r.called("sh -c renice -n 19 -p $$ >/dev/null 2>&1; cd \"$0\" && make lint"));
     assert!(!r.called(&format!("git -C {wt} diff")), "no `when`, no diff");
     assert!(!r.called("gh pr merge"));
     let p = read(&c.state)

@@ -743,21 +743,21 @@ fn premerge(
         ctx.state.with_file_name(format!("premerge-{fleet}")),
         format!("origin/{}", f.integration),
     );
-    let (dir, wts) = (f.local_path(), wt.to_string_lossy());
+    let dir = f.local_path();
     let tip = || crate::clone::fetch_branches(ctx, r, &dir).and_then(|_| git(r, &dir, &["rev-parse", &into]));
-    let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
+    let heavy = crate::heavy::Heavy::at(cfg, f, None);
     for _ in 0..2 {
         let base = tip()?;
-        tree(&["remove", "--force", &wts]).ok();
-        tree(&["add", "-f", "--detach", &wts, &base])?;
+        scratch(r, &dir, &wt, &base)?;
         let clean = git(r, &wt, &["merge", "--no-ff", "--no-edit", head]).is_ok();
         let t = crate::clock::instant();
-        let fail = clean.then(|| run_checks(r, &wt, &base, &checks)).flatten();
+        let fail = clean
+            .then(|| run_checks(r, (&heavy, &ctx.exe), &wt, &base, &checks))
+            .flatten();
         if clean && fail.is_none() {
             crate::lesson::record(ctx, r, &wt, (fleet, issue))?;
         }
         let secs = t.elapsed().as_secs();
-        tree(&["remove", "--force", &wts]).ok();
         if !clean {
             return Ok(Err(refuse("NOT_MERGEABLE", format!("{head:.7} conflicts with {into}"))));
         }
@@ -787,13 +787,29 @@ pub(crate) fn premerge_checks(f: &Fleet) -> Vec<Check> {
     f.premerge.clone().unwrap_or_default().into_iter().map(check).collect()
 }
 
-pub(crate) fn run_checks<'a>(r: &dyn Runner, wt: &Path, base: &str, cs: &'a [Check]) -> Option<(&'a Check, String)> {
+pub(crate) fn scratch(r: &dyn Runner, dir: &Path, wt: &Path, rev: &str) -> Result<()> {
+    let reset = || git(r, wt, &["reset", "-q", "--hard", rev]).and_then(|_| git(r, wt, &["clean", "-fdq"]));
+    if wt.join(".git").exists() && reset().is_ok() {
+        return Ok(());
+    }
+    let wts = wt.to_string_lossy();
+    git(r, dir, &["worktree", "remove", "--force", "--force", &wts]).ok();
+    git(r, dir, &["worktree", "add", "-f", "--detach", &wts, rev]).map(drop)
+}
+
+pub(crate) fn run_checks<'a>(
+    r: &dyn Runner,
+    (heavy, exe): (&crate::heavy::Heavy, &str),
+    wt: &Path,
+    base: &str,
+    cs: &'a [Check],
+) -> Option<(&'a Check, String)> {
     let diff = || git(r, wt, &["diff", "--name-only", base, "HEAD"]).unwrap_or_default();
     let files = cs.iter().any(|c| !c.when.is_empty()).then(diff).unwrap_or_default();
     let glob = |g: &String| files.lines().any(|p| crate::config::glob(g.as_bytes(), p.as_bytes()));
     let hit = |c: &&Check| c.when.is_empty() || c.when.iter().any(&glob);
     cs.iter().filter(hit).find_map(|c| {
-        let sh = argv(&["-c", &format!("cd \"$0\" && {}", c.run), &wt.to_string_lossy()]);
+        let sh = heavy.check(exe, &c.run, &wt.to_string_lossy());
         let limit = std::time::Duration::from_secs(crate::config::limits().gate_check_minutes * 60);
         let o = r.run_for("sh", &sh, "", limit).unwrap_or_default();
         (o.code != 0).then(|| (c, format!("{}{}", o.stdout, o.stderr)))
