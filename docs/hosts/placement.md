@@ -20,7 +20,7 @@ are none and points to `drover reclaim --apply`); a remote host's finished lanes
 slot, so it never holds back spawns bound for another host (#416). `drover clean` covers every host's merged or
 closed lanes (shown as `<host>:<path>`) and lists the orphan folders under each enabled host's worktree root;
 `--orphans --yes` removes them. It lists each leftover secrets file (`*.env` beside a worktree or none) on every host;
-`--yes` removes them (#1532). When every fitting host fails, the spawn is refused with the least-busy host's reason. The load in `HOST_BUSY` leaves out
+`--yes` removes them (#1532). It prints one summary line per host (`--verbose` lists each lane), and a host that is off or offline is one line (`boat3: 42 lanes, host off — not checked`) and no connection; a disabled host the last look saw down is not probed. A lane kept off-root is logged `clean-settled` once: no later run walks it and `status` shows no row for it; its old root is one `orphan root` line, and `--orphans` takes its lanes back through the usual wip save and removal (#1633). When every fitting host fails, the spawn is refused with the least-busy host's reason. The load in `HOST_BUSY` leaves out
 drover's own processes and the `cp` clones they run (#825), and a refusal on load names the 3 busiest other processes
 (`top: rustc 900%, …`). A tapped start held by load alone waits and starts on the first pass the host admits it; its
 card never comes back for the load. When no host fits at

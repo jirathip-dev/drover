@@ -1,6 +1,5 @@
 frozen = [
     ".github/workflows/ci.yml",
-    "ci/cap.toml",
     "crates/core/src/events/passive.rs",
     "crates/core/src/events/push.rs",
     "docs/serve.md",
@@ -59,10 +58,6 @@ glob = "**/*.toml"
 
 [[collect]]
 dir = "roles/jobs"
-glob = "*.toml"
-
-[[collect]]
-dir = "ci/cap.d"
 glob = "*.toml"
 
 [[collect]]

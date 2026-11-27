@@ -1448,10 +1448,8 @@ fn start(
         on.write(&crate::sandbox::tmp(&p).join(".keep"), "")?;
     }
     let rules = placed.as_ref().filter(|pl| pl.machine.is_some());
-    let cap_raise = crate::gh::cached_title(ctx, fleet, issue).is_some_and(|t| t.starts_with("cap:"));
     let hygiene = crate::hygiene::of(ctx, Some(r), cfg, fleet);
     let rules = rules.map(|pl| crate::hook::Rules {
-        cap_raise,
         hygiene,
         ..crate::hook::Rules::resolve(cfg, fleet, role, &pl.name)
     });

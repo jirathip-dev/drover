@@ -598,15 +598,19 @@ fn merge_without_a_human_summary_gives_the_facts_line_only() {
     assert!(read(&c.state).unwrap().iter().any(|e| e.kind == "no-human-summary"));
 }
 
-fn premerge_setup(name: &str, cap: bool, extra: &str) -> (std::path::PathBuf, drover::Ctx, String, String) {
+fn premerge_setup(name: &str, check: bool, extra: &str) -> (std::path::PathBuf, drover::Ctx, String, String) {
     let d = tmpdir(name);
     let local = d.join("local");
     std::fs::create_dir_all(local.join("ci")).unwrap();
-    if cap {
-        std::fs::write(local.join("ci/cap.toml"), "[fleet.x]\nline_cap = 1\n").unwrap();
-    }
     let local = local.to_string_lossy().to_string();
-    let c = ctx(&d, &(CONFIG.replace("/tmp/does-not-matter/sendmeter", &local) + extra));
+    let mut cfg = CONFIG.replace("/tmp/does-not-matter/sendmeter", &local);
+    if check {
+        cfg = cfg.replace(
+            "integration = \"staging\"",
+            "integration = \"staging\"\npremerge = [\"make lint\"]",
+        );
+    }
+    let c = ctx(&d, &(cfg + extra));
     let spawn = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"});
     append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", spawn)).unwrap();
     let v = json!({"verdict": "PASS", "sha": HEAD, "round": 1});
@@ -623,49 +627,15 @@ fn premerge_fake(local: &str) -> Fake {
 }
 
 #[test]
-fn premerge_cap_failure_refuses_without_merging_and_goes_to_fix() {
-    let (_d, c, local, wt) = premerge_setup("pre-cap", true, "");
-    let r = premerge_fake(&local).once("sh -c", 1, "src lines (formatted): 14885 / cap 14700\n");
-    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
-    assert_eq!(exit, 3, "{out}");
-    let want = "REFUSED STAGING_WOULD_BREAK: /opt/drover/bin/drover cap-check --config ci/cap.toml: src lines (formatted): 14885 / cap 14700";
-    assert!(out.contains(want), "{out}");
-    assert!(!r.called("gh pr merge"), "{:#?}", r.calls.borrow());
-    assert!(r.called(&format!("git -C {wt} merge --no-ff --no-edit {HEAD}")));
-    let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
-    assert_eq!((st.state.as_str(), st.rounds), ("fix(1)", 1), "not a new review round");
-    let ev = read(&c.state).unwrap();
-    let v = ev.iter().rfind(|e| e.kind == "verdict").unwrap();
-    assert!(v.str("body").unwrap().contains("14885 / cap 14700"), "{v:?}");
-}
-
-#[test]
 fn premerge_passing_merges_and_logs_its_time() {
     let (_d, c, local, _) = premerge_setup("pre-ok", true, "");
-    let r = premerge_fake(&local).reply("sh -c", "src lines (formatted): 10 / cap 14700\n");
+    let r = premerge_fake(&local).reply("sh -c", "ok\n");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
     assert!(r.index("sh -c").unwrap() < r.index("gh pr merge").unwrap());
     let ev = read(&c.state).unwrap();
     let m = ev.iter().find(|e| e.kind == "merged").unwrap();
     assert!(m.val("premerge_secs").is_u64(), "{:?}", m.data);
-}
-
-#[test]
-fn premerge_runs_the_cap_through_the_gatekeeper_wrapper() {
-    let (_d, c, local, wt) = premerge_setup("pre-gk-cap", true, "");
-    std::fs::create_dir_all(format!("{wt}/.gatekeeper")).unwrap();
-    std::fs::write(format!("{wt}/.gatekeeper/run"), "").unwrap();
-    let r = premerge_fake(&local).once("sh -c", 1, "FAIL core/cap: 14885 / cap 14700\n");
-    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
-    assert_eq!(exit, 3, "{out}");
-    let want = "REFUSED STAGING_WOULD_BREAK: ./.gatekeeper/run check --gate core/cap: FAIL core/cap: 14885 / cap 14700";
-    assert!(out.contains(want), "{out}");
-    let cap =
-        format!("sh -c renice -n 19 -p $$ >/dev/null 2>&1; cd \"$0\" && ./.gatekeeper/run check --gate core/cap {wt}");
-    assert!(r.called(&cap), "{:#?}", r.calls.borrow());
-    assert!(!r.called("cap-check"), "{:#?}", r.calls.borrow());
-    assert!(!r.called("gh pr merge"));
 }
 
 #[test]
@@ -721,8 +691,9 @@ fn premerge_rechecks_when_staging_moved() {
 }
 
 #[test]
-fn premerge_default_needs_cap_toml() {
+fn a_pr_past_an_old_line_cap_merges_with_no_premerge_check() {
     let (_d, c, local, _) = premerge_setup("pre-none", false, "");
+    std::fs::write(format!("{local}/ci/cap.toml"), "[fleet.sendmeter]\nline_cap = 1\n").unwrap();
     let r = premerge_fake(&local);
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
@@ -743,7 +714,7 @@ fix   = "Rename the migration so its version is after {min}; output: {output}"
 
 #[test]
 fn named_premerge_skips_when_its_paths_are_unchanged() {
-    let (_d, c, local, wt) = premerge_setup("pre-when-skip", true, NAMED);
+    let (_d, c, local, wt) = premerge_setup("pre-when-skip", false, NAMED);
     let diff = format!("git -C {wt} diff --name-only base1 HEAD");
     let r = premerge_fake(&local).once(&diff, 0, "src/a.rs\n");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
@@ -755,7 +726,7 @@ fn named_premerge_skips_when_its_paths_are_unchanged() {
 
 #[test]
 fn named_premerge_failure_refuses_with_its_code_and_a_fix_round() {
-    let (_d, c, local, wt) = premerge_setup("pre-when-fail", true, NAMED);
+    let (_d, c, local, wt) = premerge_setup("pre-when-fail", false, NAMED);
     let o = "migration 20260101_x.sql is behind the dev ledger\nmin_version=20261104000000\nSUPABASE_ACCESS_TOKEN=sbp9f8e7d6c5b4a\n";
     let r = premerge_fake(&local)
         .once(
@@ -793,13 +764,7 @@ fn named_premerge_failure_refuses_with_its_code_and_a_fix_round() {
 
 #[test]
 fn list_form_premerge_still_runs_its_checks() {
-    let (_d, c, local, wt) = premerge_setup("pre-list", false, "");
-    let cfg = std::fs::read_to_string(&c.config).unwrap();
-    let cfg = cfg.replace(
-        "integration = \"staging\"",
-        "integration = \"staging\"\npremerge = [\"make lint\"]",
-    );
-    std::fs::write(&c.config, cfg).unwrap();
+    let (_d, c, local, wt) = premerge_setup("pre-list", true, "");
     let r = premerge_fake(&local).once("sh -c", 2, "lint: error: unused import\n");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 3, "{out}");
@@ -835,59 +800,6 @@ fn a_concluded_check_github_still_lists_in_progress_is_green() {
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
     assert!(r.called("gh pr merge 34"), "{:?}", r.calls.borrow());
-}
-
-#[test]
-fn a_squash_merge_keeps_the_cap_trailer_so_cap_check_passes() {
-    let (d, c) = setup("msg-cap", CONFIG, &[("PASS", HEAD)]);
-    let view = json!({"number": 34, "title": "cap: raise to 200", "body": "Closes #12",
-        "files": [{"path": "ci/cap.toml", "additions": 1, "deletions": 1}],
-        "commits": [{"oid": HEAD, "messageHeadline": "cap: raise to 200",
-            "messageBody": "Why it grows.\n\nCap: 100 → 200 (#12, q7)"}]});
-    let r = pr("staging", &green()).once(
-        "gh pr view 34 -R jirathip-dev/sendmeter --json number",
-        0,
-        &view.to_string(),
-    );
-    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
-    assert_eq!(exit, 0, "{out}");
-    let calls = r.calls.borrow();
-    let call = calls.iter().find(|c| c.starts_with("gh pr merge 34")).unwrap();
-    let (rest, body) = call.split_once(" --body ").unwrap();
-    let subject = rest.split_once(" --subject ").unwrap().1;
-    let repo = d.join("repo");
-    std::fs::create_dir_all(repo.join("ci")).unwrap();
-    let git = |args: &[&str]| {
-        let o = std::process::Command::new("git")
-            .arg("-C")
-            .arg(&repo)
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(
-            o.status.success(),
-            "git {args:?}: {}",
-            String::from_utf8_lossy(&o.stderr)
-        );
-        String::from_utf8_lossy(&o.stdout).trim().to_string()
-    };
-    git(&["init", "-q", "-b", "staging"]);
-    git(&["config", "user.email", "t@example.com"]);
-    git(&["config", "user.name", "t"]);
-    std::fs::write(repo.join("ci/cap.toml"), "[fleet.x]\nline_cap = 100\n").unwrap();
-    git(&["add", "."]);
-    git(&["commit", "-qm", "ci: the first cap"]);
-    let base = git(&["rev-parse", "HEAD"]);
-    std::fs::write(repo.join("ci/cap.toml"), "[fleet.x]\nline_cap = 200\n").unwrap();
-    git(&["commit", "-qam", &format!("{subject}\n\n{body}")]);
-    let o = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
-        .args(["cap-check", "--config", "ci/cap.toml", "--base", &base])
-        .current_dir(&repo)
-        .output()
-        .unwrap();
-    let out = String::from_utf8_lossy(&o.stdout);
-    assert_eq!(o.status.code(), Some(0), "{body}\n{out}");
-    assert!(body.contains("\nCap: 100 → 200 (#12, q7)"), "{body}");
 }
 
 #[test]

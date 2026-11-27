@@ -72,23 +72,14 @@ Production code added only for tests counts against the change too.
 
 ## Standing answers (decide, don't ask)
 
-- An issue's line budget is a guide, not a gate. Never ask about it. State `src/ net +N (budget +M)`
-  in the PR body with one line on why. The cap in `ci/cap.toml` is a total for the repo and the only
-  hard limit: ask only when your own PR, merged onto current integration, would put the total over
-  `line_cap`; trim first, then ask `--kind owner`.
-- Never edit `ci/cap.toml` or add a raise in `ci/cap.d/` (the hook refuses both): one orchestrator-filed issue raises it for the whole queue.
-  Your cap ask carries `drover cap <fleet>`'s queue-wide view, with its two options: raise to the
-  projected total plus margin in one orchestrator-filed issue (recommended), or trim. A `DECISION` to wait
-  for that issue: `drover queue <fleet> block --on N <issue>` and end the turn.
-- Being near the cap, or another PR's growth, is never a reason to ask. A `STAGING_WOULD_BREAK` from
-  the cap after another merge is a fix round: trim, or ask under the same rule.
+- The PR body states `src/ net +N (budget +M)` with one line on why; the budget is a guide, never a gate.
 - Staging moved or conflicts: merge `origin/<integration>` again and push. Repeat as needed
   (no limit inside one round).
 - Staging itself broken by someone else's merge: fix the minimal break in your PR, say
   "staging build fix" in the body, and carry on.
 - A host tool died (Docker, simulator): retry once after 2 min; then `drover ask --kind owner`
   (lanes may not change the host).
-- The cap or a shared-file edit another open PR also makes: use the exact text from the issue
+- A shared-file edit another open PR also makes: use the exact text from the issue
   amendment.
 
 ## Report
