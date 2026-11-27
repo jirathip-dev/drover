@@ -255,11 +255,11 @@ fn liveness(w: &mut World) {
     }
 }
 
-/// I8, as process `me` exits: it holds no lease (each guard released it; markers it handed on carry another pid). A `.again` flag is a message to the busy kick, not a hold.
+/// I8, as process `me` exits: it holds no lease (each guard released it; markers it handed on carry another pid). A queued kick (`.queued`) is a message to the fleet's kick runner, not a hold.
 pub fn on_exit(w: &mut World, me: usize, pid: u32) {
     let state = crate::scenario::ctx(&w.root, 0).state;
     let held: Vec<String> = (drover::db::leases(&state, "").into_iter())
-        .filter(|l| l.pid == pid && l.expires_at > w.now && l.key.strip_suffix(".again").is_none())
+        .filter(|l| l.pid == pid && l.expires_at > w.now && l.key.strip_suffix(".queued").is_none())
         .map(|l| l.key)
         .collect();
     if !held.is_empty() {

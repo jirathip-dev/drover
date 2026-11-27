@@ -1,0 +1,22 @@
+about = "the debug suite: every crate's tests, in 4 CI shards by scripts/test-shards.sh (#1162, #1548), CI only (a lane's host leaves it to CI, as before #1587); nextest runs the binaries side by side (#957)"
+fix = "fix the failing test the log names"
+budget_secs = 900
+leg = "test"
+setup = ["rust", "node"]
+shards = { hosted = 4, self-hosted = 4 }
+run = '''
+if [ -z "${CI:-}" ]; then echo "CI's test leg runs it: the whole suite is 19 min serial on a lane's host"; exit 0; fi
+set -eu
+if [ -n "${CI:-}" ]; then export CARGO_PROFILE_DEV_DEBUG=line-tables-only; fi
+shard={shard}
+targets=--workspace
+if [ "${shard#*/}" != 1 ]; then targets="--workspace $(scripts/test-shards.sh "${shard%/*}")"; fi
+if ! cargo nextest --version >/dev/null 2>&1 && [ -n "${CI:-}" ]; then
+  curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C "${CARGO_HOME:-$HOME/.cargo}/bin"
+fi
+if cargo nextest --version >/dev/null 2>&1; then
+  cargo nextest run --locked --no-fail-fast $targets
+else
+  cargo test --locked --no-fail-fast $targets
+fi
+'''

@@ -38,7 +38,7 @@ fn spawn(c: &drover::Ctx, sh: &FakeShed, n: u64) {
 }
 
 #[test]
-fn retired_account_keys_load_warn_once_and_the_lane_runs_on_the_hosts_login() {
+fn retired_account_keys_load_warn_once_and_the_lane_runs_on_shed_account_auto() {
     let d = tmpdir("acct-retired");
     let old = config(&d, "accounts = [\"A\", \"B\"]\nfallback = [\"codex\"]")
         + "\n[accounts]\nA = \"token-file:/nowhere/A\"\ncap_reset_minutes = 300\naccount_env = \"cooee accounts env {provider} {name}\"\n\n[accounts.usage]\nA = \"/nowhere\"\n";
@@ -69,59 +69,38 @@ fn retired_account_keys_load_warn_once_and_the_lane_runs_on_the_hosts_login() {
     assert_eq!(
         cli.out.borrow().as_slice(),
         ["|"],
-        "the CLI's default folder, no account"
+        "drover sets no folder: shed injects the account's"
     );
     let sp = kinds(&c, "spawn");
-    assert!(sp[0].val("account").is_null(), "{sp:?}");
+    assert_eq!(sp[0].str("account"), Some("auto"), "{sp:?}");
 }
 
 #[test]
-fn sheds_rate_limited_alerts_once_and_holds_new_lanes_until_hosts_on() {
+fn an_account_lanes_banner_holds_nothing_and_account_ls_holds_new_lanes() {
     let d = tmpdir("acct-banner-hold");
     let c = ctx(&d, &config(&d, ""));
     let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
-    let banner = ("rate-limited", "resets 3pm (Asia/Bangkok)");
-    let out = check_shows(&c, &sh, banner);
-    let hit = kinds(&c, "usage-limit");
-    assert_eq!(hit.len(), 1, "{out}");
-    let why = hit[0].str("reason").unwrap();
-    assert!(
-        why.contains("sendmeter-impl-12") && why.contains("claude /login") && why.contains("hosts on main"),
-        "{why}"
-    );
-    check_shows(&c, &sh, banner);
-    assert_eq!(kinds(&c, "usage-limit").len(), 1, "one alert per hold");
-    let (code, out) = spawn_run(&c, 13);
-    assert_eq!(code, 3, "{out}");
-    assert!(out.contains("LOGIN_NEEDED") && out.contains("claude /login"), "{out}");
-    let log = drover::events::jsonl(&c.state).unwrap_or_default();
-    assert!(!log.contains("until") && !log.contains("account"), "no rest: {log}");
-    let help = run(&c, &Fake::default(), &["help", "--agent"]).1;
-    assert!(!help.contains("drover accounts"), "no accounts verb: {help}");
-
-    let (code, out) = run(&c, &Fake::default(), &["hosts", "on", "main"]);
-    assert_eq!(code, 0, "{out}");
+    for banner in [
+        ("rate-limited", "resets 3pm (Asia/Bangkok)"),
+        ("error", "auth: API Error: 401 · Please run /login"),
+    ] {
+        check_shows(&c, &sh, banner);
+    }
+    assert!(kinds(&c, "usage-limit").is_empty() && kinds(&c, "signed-out").is_empty());
     spawn(&c, &sh, 13);
-    check_shows(&c, &sh, banner);
-    assert_eq!(kinds(&c, "usage-limit").len(), 2, "a new hold after the owner acted");
-}
-
-#[test]
-fn sheds_auth_error_is_reported_as_signed_out_and_holds_the_host() {
-    let d = tmpdir("acct-signed-out");
-    let c = ctx(&d, &config(&d, ""));
-    let sh = FakeShed::attached(&c);
-    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    spawn(&c, &sh, 12);
-    let out = check_shows(&c, &sh, ("error", "auth: API Error: 401 · Please run /login"));
-    assert!(kinds(&c, "usage-limit").is_empty(), "{out}");
-    let s = kinds(&c, "signed-out");
-    assert_eq!(s.len(), 1, "{out}");
-    assert!(s[0].str("reason").unwrap().contains("is signed out on main"), "{s:?}");
-    let (code, out) = spawn_run(&c, 13);
-    assert_eq!((code, out.contains("LOGIN_NEEDED")), (3, true), "{out}");
+    sh.lock().accounts = vec![serde_json::json!({"provider": "claude", "name": "work", "state": "limited"})];
+    let (code, out) = spawn_run(&c, 14);
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        out.contains("LOGIN_NEEDED: claude account work hit its usage limit"),
+        "{out}"
+    );
+    check_shows(&c, &sh, ("rate-limited", ""));
+    assert_eq!(kinds(&c, "usage-limit").len(), 1, "one alert, from account.ls");
+    sh.lock().accounts = vec![serde_json::json!({"provider": "claude", "name": "work", "state": "ready"})];
+    spawn(&c, &sh, 14);
 }
 
 #[test]

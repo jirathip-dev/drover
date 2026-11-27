@@ -424,7 +424,7 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
         } else {
             vec![]
         };
-        let fail = crate::gate::run_checks(r, (heavy.as_ref(), &ctx.exe), &wt, &into, &checks);
+        let fail = crate::gate::run_checks(r, (&heavy, &ctx.exe), &wt, &into, &checks);
         let res = if !clean {
             crate::drive::update_lane(ctx, cfg, r, out, &events, fleet, s.issue).map(drop)
         } else if let Some((c, o)) = fail {

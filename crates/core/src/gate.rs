@@ -760,7 +760,7 @@ fn premerge(
         let t = crate::clock::instant();
         let checks = premerge_checks(ctx, f, &wt);
         let fail = clean
-            .then(|| run_checks(r, (heavy.as_ref(), &ctx.exe), &wt, &base, &checks))
+            .then(|| run_checks(r, (&heavy, &ctx.exe), &wt, &base, &checks))
             .flatten();
         if clean && fail.is_none() {
             crate::lesson::record(ctx, r, &wt, (fleet, issue))?;
@@ -811,7 +811,7 @@ pub(crate) fn scratch(r: &dyn Runner, dir: &Path, wt: &Path, rev: &str) -> Resul
 
 pub(crate) fn run_checks<'a>(
     r: &dyn Runner,
-    (heavy, exe): (Option<&crate::heavy::Heavy>, &str),
+    (heavy, exe): (&crate::heavy::Heavy, &str),
     wt: &Path,
     base: &str,
     cs: &'a [Check],
@@ -821,7 +821,7 @@ pub(crate) fn run_checks<'a>(
     let glob = |g: &String| files.lines().any(|p| crate::config::glob(g.as_bytes(), p.as_bytes()));
     let hit = |c: &&Check| c.when.is_empty() || c.when.iter().any(&glob);
     cs.iter().filter(hit).find_map(|c| {
-        let sh = crate::heavy::Heavy::check(heavy, exe, &c.run, &wt.to_string_lossy());
+        let sh = heavy.check(exe, &c.run, &wt.to_string_lossy());
         let limit = std::time::Duration::from_secs(crate::config::limits().gate_check_minutes * 60);
         let o = r.run_for("sh", &sh, "", limit).unwrap_or_default();
         (o.code != 0).then(|| (c, format!("{}{}", o.stdout, o.stderr)))
@@ -974,7 +974,7 @@ pub fn merge(
         },
         res => res,
     };
-    let res = match res.and_then(|h| crate::compact::head(r, &events, (fleet, f), h)) {
+    let res = match res.and_then(|h| crate::reroot::head(r, &events, (fleet, f), h)) {
         Ok(h) if fast && !crate::land::based(ctx, r, f, &h) => Err(refuse(
             "BEHIND",
             format!(
@@ -1005,6 +1005,7 @@ pub fn merge(
             return Err(rf.into());
         }
     };
+    gh::flaky(ctx, out, (fleet, Some(issue)), &events, &head)?;
     gh::forget_pr(ctx, fleet, issue);
     let fields = "number,title,body,files,commits";
     let view = ["pr", "view", &num, "-R", &f.repo, "--json", fields];
@@ -1127,31 +1128,80 @@ fn merged(
         f.integration,
         if over { "\nOwner override: ROUND_LIMIT" } else { "" },
     );
-    let n = issue.to_string();
     writeln!(out, "{evidence}")?;
-    let comment = ["issue", "comment", &n, "-R", &f.repo, "--body", &evidence];
-    let sent = crate::hygiene::args(ctx, r, cfg, fleet, &comment);
-    if let Err(e) = sent.and_then(|()| ok(r, "gh", &comment).or_else(|_| ok(r, "gh", &comment))) {
-        let reason = format!("PR #{num} merged @ {merge_sha}, but the evidence comment failed twice: {e:#}");
-        let e = Event::new(
-            ctx.now,
-            fleet,
-            Some(issue),
-            "evidence-missing",
-            json!({"reason": reason}),
-        );
-        emit(&ctx.state, cfg, e)?;
+    let at = (num, merge_sha.as_str());
+    if let Err(reason) = close_with(ctx, cfg, r, (fleet, issue), &evidence, at, "completed")? {
         bail!("{reason}; issue #{issue} left open");
     }
-    r.run(
-        "gh",
-        &argv(&["issue", "close", &n, "-R", &f.repo, "--reason", "completed"]),
-    )
-    .ok();
+    let mut missing = vec![];
+    for (n, moot) in named(body).into_iter().filter(|x| x.0 != issue) {
+        if let Some(w) = crate::triage::busy(ctx, cfg, r, (fleet, n)).unwrap_or(Some("could not be checked")) {
+            writeln!(out, "skipped #{n}: it {w}")?;
+            continue;
+        }
+        let (word, reason) = if moot {
+            ("Moot", "not planned")
+        } else {
+            ("Closed", "completed")
+        };
+        let text = format!("{word} by PR #{num} (#{issue}) → `{}` @ `{merge_sha}`", f.integration);
+        match close_with(ctx, cfg, r, (fleet, n), &text, at, reason)? {
+            Ok(()) => writeln!(out, "closed #{n}: {reason}")?,
+            Err(e) => missing.push(format!("#{n}: {e}")),
+        }
+    }
     if let Err(e) = crate::check::teardown(ctx, cfg, r, out, fleet, issue) {
         writeln!(out, "teardown: {e:#}")?;
     }
+    if !missing.is_empty() {
+        bail!("left open: {}", missing.join("; "));
+    }
     Ok(())
+}
+
+fn named(body: &str) -> Vec<(u64, bool)> {
+    let mut v: Vec<(u64, bool)> = vec![];
+    for l in body.lines().map(|l| l.trim().trim_start_matches(['-', '*', ' '])) {
+        let (rest, moot) = match (l.strip_prefix("Closes "), l.strip_prefix("Moot:")) {
+            (Some(r), _) => (r, false),
+            (_, Some(r)) => (r, true),
+            _ => continue,
+        };
+        let nums = rest.split([',', ' ']).filter_map(|w| w.strip_prefix('#')?.parse().ok());
+        for n in nums {
+            if !v.iter().any(|x| x.0 == n) {
+                v.push((n, moot));
+            }
+        }
+    }
+    v
+}
+
+fn close_with(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    (fleet, n): (&str, u64),
+    text: &str,
+    (num, merge_sha): (&str, &str),
+    reason: &str,
+) -> Result<Result<(), String>> {
+    let (repo, s) = (&cfg.fleet(fleet)?.repo, n.to_string());
+    let comment = ["issue", "comment", &s, "-R", repo, "--body", text];
+    let sent = crate::hygiene::args(ctx, r, cfg, fleet, &comment);
+    if let Err(e) = sent.and_then(|()| ok(r, "gh", &comment).or_else(|_| ok(r, "gh", &comment))) {
+        let why = format!("PR #{num} merged @ {merge_sha}, but the evidence comment failed twice: {e:#}");
+        let d = json!({"reason": why});
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, fleet, Some(n), "evidence-missing", d),
+        )?;
+        return Ok(Err(why));
+    }
+    r.run("gh", &argv(&["issue", "close", &s, "-R", repo, "--reason", reason]))
+        .ok();
+    Ok(Ok(()))
 }
 
 /// A needs-human card's `override` / `extend` / `park`; `drover extend|park` (`spawn: false` = `--no-spawn`). `why` is `park --why`, stored on the `parked` event.

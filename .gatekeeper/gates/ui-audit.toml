@@ -1,0 +1,21 @@
+about = "headless Chrome audits the exported demo and the lifeboat page at 390 px and 1440 (#63, #337, #725, #927); hung runs go to the job summary, views hung 3 times are a warning (#566)"
+fix = "fix the view the audit names in its JSON; ui-390/ holds the screenshots"
+budget_secs = 600
+leg = "ui"
+setup = ["rust", "node"]
+run = '''
+if [ -z "${CI:-}" ]; then echo "CI's ui leg runs it"; exit 0; fi
+set -eu
+DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl cargo run --quiet --locked --bin drover -- serve --export site --demo
+LIFEBOAT_SITE="$PWD/site" cargo test --locked --test lifeboat the_page_for_the_ui_audit
+status=0
+scripts/chrome.sh scripts/ui-audit.sh site ui-390 || status=$?
+if [ -s ui-390/hangs.txt ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then { echo "### Chrome hangs (#566)"; sed 's/^/- /' ui-390/hangs.txt; } >> "$GITHUB_STEP_SUMMARY"; fi
+flaky=$(cut -d' ' -f1 ui-390/flaky.txt 2>/dev/null | sort -u | xargs)
+if [ -n "$flaky" ]; then echo "warning: headless Chrome hung 3 times on: $flaky (not this PR's failure)"; fi
+exit $status
+'''
+
+[[upload]]
+name = "ui-390"
+paths = ["ui-390/*.png"]

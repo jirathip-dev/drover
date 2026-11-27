@@ -72,12 +72,6 @@ Generated from `crates/core/flow/` (#1649) by `just gen`; CI fails when this fil
 
 ## Flow `handoff`
 
-### `pick` (file `pick`) · reads nothing
-
-| id | do | owner | timeout | then | esc | to | say |
-|---|---|---|---|---|---|---|---|
-| `waiting` | wait | owner | `ask_waiting_minutes` | remind | owner |  | the owner picks a thread |
-
 ### `picked` (file `picked`) · reads nothing
 
 | id | do | owner | timeout | then | esc | to | say |

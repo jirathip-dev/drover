@@ -1,8 +1,12 @@
 pub mod chart;
+pub mod decide;
 pub mod episode;
+pub mod escalate;
 pub mod facts;
+pub mod shadow;
 pub mod table;
 
+pub use decide::{decide, Clock, Step};
 pub use episode::Episode;
 pub use facts::Cond;
 pub use table::{table, Table};
@@ -12,7 +16,7 @@ pub fn line(seen: Option<&facts::Seen>, s: Option<&crate::events::IssueState>) -
     let (Some(seen), Some(s)) = (seen, s) else {
         return Ok(String::new());
     };
-    let (cond, why) = seen.cond(s);
+    let (cond, why) = seen.cond(s, &seen.episode(s));
     let name = s.state.split(['(', '+']).next().unwrap_or_default();
     let file = table()?
         .flow("issue")

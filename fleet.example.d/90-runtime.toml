@@ -4,4 +4,4 @@
 # acp = "claude-acp"   # the ACP agent lanes run (default: the role's harness's)
 # #565: or one fleet's own, e.g. to pilot ACP lanes (cooee's Workflow list) on it:
 # [fleet.drover.runtime]
-# kind = "shed-acp"   # each lane a claude-acp session, guarded by the profile's hook; remote ones need [proxy] token-file
+# kind = "shed-acp"   # each lane a claude-acp session, guarded by the profile's hook

@@ -90,7 +90,14 @@ fn with_one_fleets_pass_hung_the_others_last_pass_advances_each_fast_step() {
             let now = at(&c, c.now + k * 30);
             let (code, out) = run_only(&now, &r, &["drive"]);
             assert_eq!(code, 0, "{out}");
-            assert_eq!((started("sendmeter"), started("slowfleet")), (i + 1, 0), "{out}");
+            assert_eq!((started("sendmeter"), started("slowfleet")), (1, 0), "{out}");
+            if i > 0 {
+                assert_eq!(
+                    drover::drive::last_pass(&now, "sendmeter"),
+                    Some(now.now),
+                    "quiet: no process, its last pass now"
+                );
+            }
             let (code, out) = run_only(&now, &r, &["drive", "sendmeter"]);
             assert_eq!(code, 0, "{out}");
             assert_eq!(drover::drive::last_pass(&now, "sendmeter"), Some(now.now), "{out}");
@@ -206,16 +213,7 @@ fn a_wake_starts_its_fleets_pass_within_a_second() {
 #[test]
 fn a_service_that_answers_a_wake_but_runs_no_pass_never_leaves_a_fleets_last_pass_stale() {
     let c = ctx(&tmpdir("loops-1625-deaf"), CONFIG);
-    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
-    let _sh = FakeShed::attached(&c);
-    let deaf = std::os::unix::net::UnixListener::bind(drover::service::sock(&c)).unwrap();
-    std::thread::spawn(move || {
-        for s in deaf.incoming().flatten() {
-            let mut line = String::new();
-            std::io::BufRead::read_line(&mut std::io::BufReader::new(&s), &mut line).ok();
-            std::io::Write::write_all(&mut &s, b"{\"pid\": 1}\n").ok();
-        }
-    });
+    let _sh = deaf(&c);
     assert!(drover::service::wake(&c, "sendmeter"), "the service answers a wake");
     let last = c.state.with_file_name("drive-sendmeter.last");
     let detached = "sh -c nohup '/opt/drover/bin/drover' drive sendmeter";
@@ -229,6 +227,33 @@ fn a_service_that_answers_a_wake_but_runs_no_pass_never_leaves_a_fleets_last_pas
     assert_eq!(code, 0, "{out}");
     assert_eq!(r.count(detached), 1, "a 15 min old pass: drive starts it itself: {out}");
 }
+
+fn deaf(c: &drover::Ctx) -> FakeShed {
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    let sh = FakeShed::attached(c);
+    fake_service(c, 1);
+    sh
+}
+
+#[test]
+fn a_tick_skips_a_fleet_the_live_service_drove_within_the_tick_interval() {
+    let c = ctx(&tmpdir("loops-1802-tick"), CONFIG);
+    let _sh = deaf(&c);
+    let last = c.state.with_file_name("drive-sendmeter.last");
+    let detached = "sh -c nohup '/opt/drover/bin/drover' drive sendmeter";
+    let r = Fake::default().reply("sh -c nohup", "4321\n").reply("git -C", "");
+    std::fs::write(&last, (c.now - 240).to_string()).unwrap();
+    let (code, out) = run_only(&c, &r, &["tick"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(r.count(detached), 0, "driven by the service 4 min ago: {out}");
+    std::fs::write(&last, (c.now - 400).to_string()).unwrap();
+    let (code, out) = run_only(&c, &r, &["tick"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(
+        r.count(detached),
+        1,
+        "older than the tick interval: the tick drives it: {out}"
+    );
 
 #[test]
 fn a_pass_ended_by_its_deadline_leaves_no_process_it_started_alive() {

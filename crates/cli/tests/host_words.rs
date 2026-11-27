@@ -206,13 +206,9 @@ fn every_refusal_and_outcome_has_its_plain_words() {
             Some("NO_HOST"),
             "start",
             12,
-            "REFUSED NO_HOST: no host with docker (cloud host stopped or over budget)",
+            "REFUSED NO_HOST: no host with docker",
             "serial",
-            [
-                "a",
-                "waiting",
-                "no host with docker (cloud host stopped or over budget)",
-            ],
+            ["a", "waiting", "no host with docker"],
         ),
     ];
     for (code, step, issue, result, serial, want) in golden {

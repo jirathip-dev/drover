@@ -1,0 +1,1 @@
+# flow = "shadow"   # #1649: the flow table runs beside drive and only logs (`drover flow report`); "legacy" turns it off

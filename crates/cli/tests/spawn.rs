@@ -49,12 +49,7 @@ fn low() -> Vec<String> {
 
 fn claude(model: &[&str]) -> Vec<String> {
     let env = ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1"];
-    let unset = ["&&", "unset", "CLAUDE_CODE_OAUTH_TOKEN"];
-    [&env[..], model, &unset[..]]
-        .concat()
-        .into_iter()
-        .map(String::from)
-        .collect()
+    [&env[..], model].concat().into_iter().map(String::from).collect()
 }
 
 fn exports(p: &Value) -> String {

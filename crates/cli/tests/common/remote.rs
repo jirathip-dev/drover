@@ -2,7 +2,7 @@ use super::{Fake, FakeShed, OverSsh};
 use drover::runner::{Out, Runner};
 use serde_json::{json, Value};
 
-/// Runner `r` whose remote `hosts` pass a remote ACP lane's guard: what `r` leaves unscripted there is answered as a synced host with shed's `claude-acp` (the profile's hook, `shed agents|help|run|send|cancel|kill` on that host's server), this host's shed lists them (`shed machine ls`) and the proxy and its tunnel start here (their `nohup` gives a pid).
+/// Runner `r` whose remote `hosts` pass a remote ACP lane's guard: what `r` leaves unscripted there is answered as a synced host with shed's `claude-acp` (the profile's hook, `shed agents|help|run|send|cancel|kill` on that host's server) and this host's shed lists them (`shed machine ls`).
 pub struct Acp<'a, R> {
     pub r: R,
     pub hosts: Vec<(&'a str, &'a FakeShed)>,
@@ -23,12 +23,6 @@ impl<R: Runner> Acp<'_, R> {
         if prog == "shed" && args.iter().map(String::as_str).eq(["machine", "ls", "--json"]) {
             let names: Vec<Value> = self.hosts.iter().map(|(h, _)| json!({"name": h})).collect();
             return Some(out(&json!(names).to_string()));
-        }
-        let local = args.first().filter(|_| prog == "sh").filter(|a| *a == "-c");
-        let proxy =
-            |s: &String| s.starts_with("nohup 'ssh' -N ") || (s.starts_with("nohup '") && s.contains("' proxy >> '"));
-        if local.is_some() && args.get(1).is_some_and(proxy) {
-            return Some(out("4242\n"));
         }
         let end = args.iter().position(|a| a == "--").filter(|_| prog == "ssh")?;
         let m = args.get(end.checked_sub(1)?)?;
@@ -93,18 +87,6 @@ impl<R: Runner> Runner for Acp<'_, R> {
     fn shed(&self) -> Option<drover::shed::Shed> {
         self.r.shed()
     }
-}
-
-/// Ctx `c`'s config with a proxy token saved (`[proxy] token-file`, mode 0600), as a remote ACP lane needs; the table goes first, so text a test appends still lands where it did.
-pub fn proxied(c: &drover::Ctx) {
-    use std::os::unix::fs::PermissionsExt;
-    let tf = c.config.with_file_name("tokens").join("proxy");
-    std::fs::create_dir_all(tf.parent().unwrap()).unwrap();
-    std::fs::write(&tf, concat!("sk", "-ant-oat01-PPPP-secret")).unwrap();
-    std::fs::set_permissions(&tf, std::fs::Permissions::from_mode(0o600)).unwrap();
-    let toml = std::fs::read_to_string(&c.config).unwrap();
-    let px = format!("[proxy]\nport = 9\ntoken-file = \"{}\"\n\n", tf.display());
-    std::fs::write(&c.config, px + &toml).unwrap();
 }
 
 /// The exports the last `shed run --acp` over ssh to `host` in `f`'s calls starts its lane with: its `sh -c` line up to the profile copy (`DROVER_*`, env, the secrets file sourced and removed).

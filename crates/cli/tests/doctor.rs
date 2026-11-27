@@ -40,7 +40,7 @@ fn write(p: &Path, text: &str, mode: u32) {
 }
 
 fn setup(name: &str, harness: &str) -> (drover::Ctx, PathBuf) {
-    let d = tmpdir(name);
+    let d = tmpdir(name.get(..8).unwrap_or(name));
     let c = ctx(&d, &config(&d, harness));
     std::fs::create_dir_all(d.join("local")).unwrap();
     std::fs::create_dir_all(&c.worktrees).unwrap();
@@ -66,6 +66,7 @@ fn setup(name: &str, harness: &str) -> (drover::Ctx, PathBuf) {
         write(&st.join(format!("{w}.at")), &(c.now - 60).to_string(), 0o644);
     }
     assert_eq!(run(&c, &good(), &["timer", "install", "--no-load"]).0, 0);
+    fake_service(&c, 4242);
     (c, d)
 }
 
@@ -74,6 +75,10 @@ fn good() -> Fake {
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1")
         .reply("vm_stat", "Swapouts: 5.\n")
         .reply("sysctl -n vm.loadavg", "{ 1.00 1.00 1.00 }")
+        .reply(
+            "iostat",
+            " us sy id   1m   5m   15m\n 10 10 80  1 1 1\n 30 27 43  52 1 1\n",
+        )
         .reply("sysctl -n hw.ncpu", "8")
         .reply("gh auth status", "")
         .reply("gh repo view o/demo", "{}")
@@ -384,6 +389,32 @@ fn bad_config() {
 }
 
 #[test]
+fn load_per_cpu_warns_naming_min_cpu_idle_and_each_host_shows_its_own_floor() {
+    let (c, _) = setup("doc-load", "claude");
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    let old = format!("{text}\n[limits]\nload_per_cpu = 5.0\n\n[hosts.mini]\nmin_cpu_idle = 50.0\n");
+    std::fs::write(&c.config, &old).unwrap();
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(code, 0, "a warning never fails: {out}");
+    let warn = "! config — [limits] load_per_cpu is replaced (#1780): load average is no gate now; set `min_cpu_idle`";
+    assert!(out.lines().any(|l| l.starts_with(warn)), "{out}");
+    assert!(
+        out.lines()
+            .any(|l| l.starts_with("! limits mini — cpu idle 43% (min 50%) · mem")),
+        "the host's own floor, not [limits]' 15: {out}"
+    );
+    std::fs::write(&c.config, format!("{text}\n[hosts.mini]\n")).unwrap();
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("load_per_cpu"), "{out}");
+    assert!(
+        out.lines()
+            .any(|l| l.starts_with("✓ limits mini — cpu idle 43% (min 15%) · mem")),
+        "{out}"
+    );
+}
+
+#[test]
 fn retired_account_keys_warn_until_they_are_dropped() {
     let (c, _) = setup("doc-retired", "claude");
     let text = std::fs::read_to_string(&c.config).unwrap();
@@ -392,7 +423,7 @@ fn retired_account_keys_warn_until_they_are_dropped() {
         "profile = \"fleet-impl\"\naccount = \"main\"\n",
     ) + "\n[accounts]\nmain = \"TOKEN_MAIN\"\naccounts_env = \"/x/tokens.env\"\n";
     std::fs::write(&c.config, &old).unwrap();
-    let warn = "! config — [accounts] is removed (#923): lanes run on the host's own CLI login; delete [accounts], fleet.demo.role.impl.account";
+    let warn = "! config — [accounts] is removed (#1576): accounts are shed's, a role or fleet names one with `account`; delete [accounts]";
 
     let r = good();
     let (code, out) = run(&c, &r, &["doctor"]);
@@ -464,7 +495,7 @@ fn spawns_row_dedupes_stale_names() {
     names.extend(std::iter::repeat_n("spawn-demo-1.pending".to_string(), 299));
     for (i, f) in names.iter().enumerate() {
         let ev = drover::events::Event::new(
-            c.now - 600 + i as u64,
+            c.now - 600 + u64::try_from(i).unwrap(),
             "demo",
             Some(1),
             "stale-marker",

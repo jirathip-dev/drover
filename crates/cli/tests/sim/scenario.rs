@@ -14,6 +14,7 @@ repo = "{REPO}"
 public = false
 local = "LOCAL"
 integration = "staging"
+flow = "legacy"
 baseline = "{BASELINE}"
 
 [fleet.{FLEET}.role.impl]
@@ -117,7 +118,7 @@ pub fn due(sim: &Arc<Sim>, w: &mut World) {
                     .filter(|&i| w.procs[i].live() && w.procs[i].started.is_some() && w.procs[i].args[0] == kind)
                     .collect();
                 if !live.is_empty() {
-                    let i = live[usize::try_from(w.rng.below(live.len() as u64)).unwrap()];
+                    let i = live[usize::try_from(w.rng.below(u64::try_from(live.len()).unwrap())).unwrap()];
                     w.procs[i].killed = true;
                     let name = w.procs[i].name.clone();
                     w.log(&format!("crash {name}"));
@@ -226,10 +227,11 @@ fn write_verdict(cwd: &str, body: &str, now: u64) {
     let f = Path::new(cwd).join("verdict.md");
     std::fs::write(&f, body).unwrap();
     let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(now);
-    let _ = std::fs::File::options()
+    std::fs::File::options()
         .write(true)
         .open(&f)
-        .and_then(|f| f.set_modified(t));
+        .and_then(|f| f.set_modified(t))
+        .ok();
 }
 
 fn done(sim: &Arc<Sim>, w: &mut World, id: &str, i: usize, step: u8) {
@@ -324,7 +326,7 @@ pub fn random(seed: u64) -> (Model, (u64, u64)) {
     for _ in 0..rng.below(4) {
         let t = T0 + rng.below(6 * 3600);
         m.at(t, Ev::Run(args(&["drive"])));
-        let n = issues[usize::try_from(rng.below(issues.len() as u64)).unwrap()].to_string();
+        let n = issues[usize::try_from(rng.below(u64::try_from(issues.len()).unwrap())).unwrap()].to_string();
         m.at(T0 + 3600 + rng.below(5 * 3600), Ev::Run(args(&["merge", FLEET, &n])));
     }
     for _ in 0..rng.below(3) {

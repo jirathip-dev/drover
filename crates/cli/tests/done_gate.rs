@@ -766,6 +766,102 @@ fn no_check_runs_off_ui_paths_or_without_the_setup() {
     }
 }
 
+fn routed_done(name: &str, runners: i32, checks: &str) -> (Repo, drover::Ctx, Fake, PathBuf) {
+    let (repo, mut c, _sh, bin) = gatekept(name, 1);
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
+    let cfg = std::fs::read_to_string(&c.config).unwrap().replace(
+        "integration = \"staging\"",
+        &format!("integration = \"staging\"\n{checks}"),
+    );
+    let route =
+        "\n[fleet.sendmeter.heavy]\ncargo = [\"cargo test*\"]\n\n[fleet.sendmeter.remote.cargo]\ntag = \"linux\"\n";
+    std::fs::write(&c.config, format!("{cfg}{route}")).unwrap();
+    let script = format!(
+        "#!/bin/sh\necho \"runners $* | $GATEKEEPER_HEAD\" >> {}\necho 'remote: FAIL gate-9'\nexit {runners}\n",
+        bin.join("ran.log").display()
+    );
+    std::fs::write(bin.join("runners"), script).unwrap();
+    let mut p = std::fs::metadata(bin.join("runners")).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut p, 0o755);
+    std::fs::set_permissions(bin.join("runners"), p).unwrap();
+    let f = fake(&repo.head);
+    (repo, c, f, bin)
+}
+
+#[test]
+fn a_routed_fleets_done_checks_route_the_same_way_but_never_routed_ones() {
+    let (repo, c, f, bin) = routed_done(
+        "done-set-routed",
+        4,
+        "done_checks = [\"drover arch-check\", \"cargo test\"]",
+    );
+    let (out, _) = refused(&c, &ui(Git::new(&f), &bin, false), "DONE_CHECK");
+    assert!(
+        out.contains("`cargo test` failed (exit 4):\nremote: FAIL gate-9"),
+        "{out}"
+    );
+    let wt = repo.wt.canonicalize().unwrap();
+    let ran = std::fs::read_to_string(bin.join("ran.log")).unwrap();
+    let want = format!(
+        "drover arch-check {}\nrunners run --tag linux --dir {} -- bash -c cargo test | \n",
+        wt.display(),
+        repo.wt.display()
+    );
+    assert_eq!(ran, want);
+}
+
+#[test]
+fn a_routed_fleets_gatekeeper_done_check_runs_in_the_lanes_git_tree() {
+    for (code, name) in [(0, "done-gk-here"), (2, "done-gk-here-fail")] {
+        let (repo, c, f, bin) = routed_done(name, 0, "");
+        tool(&repo.wt.join(".gatekeeper"), "run", code, "FAIL gate-3: needs git");
+        let r = ui(Git::new(&f), &bin, false);
+        if code == 0 {
+            let (code, out) = run(&c, &r, &["turn", "done"]);
+            assert_eq!(code, 0, "{out}");
+        } else {
+            let (out, _) = refused(&c, &r, "DONE_CHECK");
+            assert!(
+                out.contains("`./.gatekeeper/run check` failed (exit 2):\nFAIL gate-3: needs git"),
+                "{out}"
+            );
+        }
+        assert!(!bin.join("ran.log").exists(), "never sent to runners run");
+        let wt = repo.wt.canonicalize().unwrap();
+        let ran = std::fs::read_to_string(repo.wt.join(".gatekeeper/ran.log")).unwrap();
+        let want = format!("run check --pr-body target/gatekeeper/pr-body.md {}\n", wt.display());
+        assert_eq!(ran, want);
+    }
+}
+
+#[test]
+fn a_routed_fleets_just_check_reaching_gatekeeper_runs_in_the_lanes_git_tree() {
+    for (code, name) in [(0, "done-just-here"), (2, "done-just-here-fail")] {
+        let (repo, c, f, bin) = routed_done(name, 0, "done_checks = [\"just check\"]");
+        std::fs::write(repo.wt.join("justfile"), "check:\n    ./.gatekeeper/run check\n").unwrap();
+        tool(&repo.wt.join(".gatekeeper"), "run", code, "FAIL gate-3: needs git");
+        std::fs::write(bin.join("just"), "#!/bin/sh\nexec ./.gatekeeper/run \"$@\"\n").unwrap();
+        let mut p = std::fs::metadata(bin.join("just")).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut p, 0o755);
+        std::fs::set_permissions(bin.join("just"), p).unwrap();
+        let r = ui(Git::new(&f), &bin, false);
+        if code == 0 {
+            let (code, out) = run(&c, &r, &["turn", "done"]);
+            assert_eq!(code, 0, "{out}");
+        } else {
+            let (out, _) = refused(&c, &r, "DONE_CHECK");
+            assert!(
+                out.contains("`just check` failed (exit 2):\nFAIL gate-3: needs git"),
+                "{out}"
+            );
+        }
+        assert!(!bin.join("ran.log").exists(), "never sent to runners run");
+        let wt = repo.wt.canonicalize().unwrap();
+        assert!(wt.join(".git").exists());
+        let ran = std::fs::read_to_string(repo.wt.join(".gatekeeper/ran.log")).unwrap();
+        assert_eq!(ran, format!("run check {}\n", wt.display()));
+    }
+
 #[test]
 fn a_heavy_done_check_waits_for_a_free_slot_and_runs_in_it() {
     let (repo, mut c, _sh, bin) = ui_lane("done-heavy", None);

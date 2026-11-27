@@ -23,6 +23,7 @@ use std::sync::Arc;
 mod fire;
 mod stranded;
 mod sweep;
+mod unset;
 
 use sweep::{disabled, sweep_off};
 pub use sweep::{drop_scratch, sweep, Sweep};
@@ -117,17 +118,14 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             }
         }
     }
+    for (kind, d) in crate::accounts::alerts(cfg, r, &events) {
+        fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
+    }
     let (stall, remote) = (cfg.limits.stall_minutes * 60, crate::hosts::survey(ctx, cfg, r, false));
     crate::session::stamp::observe(ctx, cfg, r, &sessions)?;
     let events = working(&ctx.state)?;
-    crate::cloud::tick(ctx, cfg, r, &remote, out)?;
     for (name, a) in &remote {
-        let stopped = || crate::cloud::state(&events, name) == "stopped";
-        if cfg
-            .hosts
-            .get(name)
-            .is_none_or(|h| h.machine.is_none() || h.cloud.is_some() && stopped())
-        {
+        if cfg.hosts.get(name).is_none_or(|h| h.machine.is_none()) {
             continue;
         }
         let was = |e: &&Event| e.str("host") == Some(name) && matches!(e.kind.as_str(), "host-offline" | "host-online");
@@ -157,19 +155,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
     }
     crate::setup::reap(ctx, r, &events).and_then(|()| stranded::alert(ctx, cfg, out, &events))?;
-    match crate::runners::tick(ctx, cfg, r, &events) {
-        Some(Ok((on, want))) => {
-            let was = |e: &&Event| matches!(e.kind.as_str(), "runners-low" | "runners-ok");
-            let last = events.iter().rev().find(was);
-            if (on < want) != last.is_some_and(|e| e.kind == "runners-low") {
-                let kind = if on < want { "runners-low" } else { "runners-ok" };
-                let d = json!({"key": last.map_or(0, |e| e.ts), "reason": format!("CI runners {on}/{want} online")});
-                fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
-            }
-        }
-        Some(Err(e)) => crate::stderr!("drover check: CI runners: {e:#}"),
-        None => {}
-    }
     for (k, w) in cfg.warnings() {
         let d = json!({"key": k, "reason": format!("{k} is {w}")});
         fire(ctx, cfg, out, &events, ("drover", None), "config-warning", d)?;
@@ -191,18 +176,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 json!({"key": sha, "reason": why}),
             )?;
         }
-        let ran = |e: &&Event| {
-            e.fleet == *name && (e.kind == "lesson-skipped" || e.kind == "spawn" && e.str("role") == Some("lesson"))
-        };
-        let last = (events.iter().rfind(ran))
-            .or_else(|| events.iter().find(|e| e.fleet == *name))
-            .map(|e| e.ts)
-            .filter(|t| !f.paused && f.lessons.as_deref() != Some("off") && ctx.now > t + 8 * 86400);
-        if let Some(t) = last {
-            let why = format!("no lessons issue for {} days", (ctx.now - t) / 86400);
-            let d = json!({"key": t, "reason": why});
-            fire(ctx, cfg, out, &events, (name, None), "lessons-missed", d)?;
-        }
         for i in crate::queue::replay(&events, name) {
             gh::spec(ctx, r, f, name, i.issue, false).ok();
         }
@@ -210,39 +183,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let events = closed_on_github((ctx, cfg, r, &mut *out), events, None)?;
     crate::drive::markers(ctx, cfg, r, true);
     let passes = crate::events::since(&ctx.state, &["drive-pass"], ctx.now.saturating_sub(2 * 86_400))?;
-    let mut held = BTreeMap::<(&str, u64), (u64, u64)>::new();
-    for e in &passes {
-        let acts = e.data.get("actions").and_then(serde_json::Value::as_array);
-        for a in acts.into_iter().flatten() {
-            let Some(n) = a["issue"].as_u64() else { continue };
-            if a["code"] == "SPAWN_PENDING" {
-                held.entry((&e.fleet, n)).or_insert((e.ts, e.ts)).1 = e.ts;
-            } else {
-                held.remove(&(e.fleet.as_str(), n));
-            }
-        }
-    }
-    held.retain(|_, (since, last)| ctx.now >= *since + 900 && ctx.now < *last + 900);
-    for name in cfg.fleet.keys() {
-        let mine: Vec<_> = held.iter().filter(|h| h.0 .0 == name).collect();
-        let Some(since) = mine.iter().map(|h| h.1 .0).min() else {
-            continue;
-        };
-        let ns: Vec<String> = mine.iter().map(|h| format!("#{}", h.0 .1)).collect();
-        let by = crate::drive::held_by(ctx, cfg, r);
-        let by = if by.is_empty() {
-            "no spawn starting now".into()
-        } else {
-            format!("slots held by {by}")
-        };
-        let why = format!(
-            "{} held back by SPAWN_PENDING for {}: {by}",
-            ns.join(", "),
-            age(ctx.now - since)
-        );
-        let d = json!({"key": since, "reason": why});
-        fire(ctx, cfg, out, &events, (name, None), "spawn-held", d)?;
-    }
     let ids: std::collections::BTreeSet<_> = events
         .iter()
         .filter(|e| e.kind == "spawn-error")
@@ -328,7 +268,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 ));
             }
             if let Some(a) = agent {
-                if let Some(sp) = spawned {
+                if let Some(sp) = spawned.filter(|sp| !crate::hosts::on_account(sp)) {
                     let seen = match a.status() {
                         Some(Status::Limited) => Some(("usage-limit", "hit the usage limit")),
                         _ if a.signed_out() => Some(("signed-out", "is signed out")),
@@ -743,10 +683,10 @@ fn overload(
 ) -> Result<()> {
     let rows = crate::hosts::history(ctx);
     let remote = |h: &str| cfg.hosts.get(h).is_some_and(|c| c.machine.is_some());
-    let over = (rows.iter().rev().filter(|w| !remote(&w.host)))
-        .take_while(|w| w.load_cpu.is_some_and(|l| l > cfg.limits.load_per_cpu));
-    let (Some(since), Some((load, main))) = over.fold((None, None), |(_, l), w| {
-        (Some(w.ts), l.or(w.load_cpu.map(|x| (x, w.host.clone()))))
+    let floor = cfg.limits_on(None).min_cpu_idle;
+    let over = (rows.iter().rev().filter(|w| !remote(&w.host))).take_while(|w| w.cpu_idle.is_some_and(|i| i < floor));
+    let (Some(since), Some((idle, main))) = over.fold((None, None), |(_, l), w| {
+        (Some(w.ts), l.or(w.cpu_idle.map(|x| (x, w.host.clone()))))
     }) else {
         return Ok(());
     };
@@ -755,8 +695,7 @@ fn overload(
     }
     let top = crate::top::busiest(ctx, cfg, r, agents, 5)?;
     let why = format!(
-        "{main} load/cpu {load:.2} > {} for {}; top: {}",
-        cfg.limits.load_per_cpu,
+        "{main} cpu idle {idle:.0}% < {floor}% for {}; top: {}",
         age(ctx.now - since),
         top.join(", ")
     );
@@ -913,12 +852,12 @@ pub fn clean_all(
             })
         })
         .collect();
-    let spawns: Vec<&Event> = (lanes(&events).into_iter().rev())
+    let spawns = (lanes(&events).into_iter().rev())
         .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && fleet.is_none_or(|f| f == e.fleet))
         .chain(&revs)
         .filter(|e| e.issue.is_some_and(|n| issue.is_none_or(|i| i == n)))
-        .filter(|e| lane.is_none_or(|a| e.str("agent") == Some(a)))
-        .collect();
+        .filter(|e| lane.is_none_or(|a| e.str("agent") == Some(a)));
+    let spawns = unset::unconfigured(cfg, out, &events, lane, spawns)?;
     let held = |e: &Event| {
         let away = e.str("host").filter(|_| e.str("machine").is_some());
         let held = match away.filter(|h| cfg.hosts.get(*h).is_some_and(|c| !c.enabled)) {
@@ -2155,8 +2094,8 @@ pub fn hogs(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Res
         .find(|w| !remote(&w.host))
         .filter(|w| w.ts + 600 >= ctx.now);
     let busy = last
-        .and_then(|w| w.load_cpu)
-        .is_some_and(|l| l > cfg.limits.load_per_cpu);
+        .and_then(|w| w.cpu_idle)
+        .is_some_and(|i| i < cfg.limits_on(None).min_cpu_idle);
     let lanes = if busy {
         host::lane_cpu(r, &crate::hosts::lane_dirs(&events, None))
     } else {
@@ -2463,6 +2402,7 @@ fn snapshot(
             git(&["reset", "-q", "--", &format!(":(literal){p}")])?;
             skip.push(format!("{p} ({} MB)", n >> 20));
         }
+        git(&["fetch", "-q", "origin", crate::clone::ALL, "^refs/heads/wip/*"]).ok();
         Ok((
             git(&["diff", "--cached"])?,
             git(&[&UNPUSHED[..], kept.as_slice()].concat())?,
@@ -2471,7 +2411,20 @@ fn snapshot(
     let (staged, log) = snap().map_err(undo)?;
     let diff = format!("{staged}\n{log}");
     let secret = |a: &str| Some(crate::lanes::redact(a.trim())).filter(|m| m != a.trim());
-    let leak = chk.and_then(|c| Some((c, crate::hygiene::hits(&diff, |l| c.find(l)).into_iter().next()?)));
+    let differs = (chk.and_then(|c| c.tree.as_ref())).and_then(|(_, b)| {
+        let at = format!("origin/{b}");
+        git(&["diff", "--cached", "--name-only", "--no-renames", "-z", &at, "--"]).ok()
+    });
+    let public = |at: &str| {
+        let file = at.rsplit_once(':').map_or(at, |a| a.0);
+        differs.as_ref().is_some_and(|d| !d.split('\0').any(|p| p == file))
+    };
+    let leak = chk.and_then(|c| {
+        let staged = crate::hygiene::hits(&staged, |l| c.find(l))
+            .into_iter()
+            .filter(|h| !public(&h.1));
+        Some((c, staged.chain(crate::hygiene::hits(&log, |l| c.find(l))).next()?))
+    });
     let hit = match crate::hygiene::hits(&diff, secret)
         .into_iter()
         .find(|h| !unscanned(&h.1))

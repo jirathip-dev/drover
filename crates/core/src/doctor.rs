@@ -20,12 +20,17 @@ fn mode(path: &Path) -> String {
 
 pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config_only: bool) -> Result<i32> {
     let mut rows = vec![];
-    if !config_only {
-        let sample = crate::host::sample(r);
-        let host = sample.pressure.is_some() && sample.swap_count.is_some() && sample.load_per_cpu.is_some();
-        match sample.not_found(&["sysctl", "vm_stat"]).filter(|_| !host) {
+    let sample = (!config_only).then(|| crate::host::sample(r));
+    if let Some(sample) = &sample {
+        let host = sample.pressure.is_some() && sample.swap_count.is_some() && sample.cpu_idle.is_some();
+        match sample.not_found(&["sysctl", "vm_stat", "iostat"]).filter(|_| !host) {
             Some(why) => rows.push(format!("? host — {why}")),
-            None => row(&mut rows, host, '✗', "host — sysctl + vm_stat → put /usr/sbin on PATH"),
+            None => row(
+                &mut rows,
+                host,
+                '✗',
+                "host — sysctl + vm_stat + iostat → put /usr/sbin on PATH",
+            ),
         }
         let gh = ok(r, "gh", &["auth", "status"]).is_ok();
         row(&mut rows, gh, '✗', "gh — auth status → gh auth login");
@@ -34,6 +39,7 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
         Ok(cfg) if config_only => config_rows(ctx, &cfg, r, &mut rows),
         Ok(cfg) => {
             checks(ctx, &cfg, r, &mut rows);
+            rows.extend(sample.iter().flat_map(|s| limit_rows(ctx, &cfg, r, s)));
             rows.extend(just_rows(ctx, &cfg, r));
             rows.extend(crate::status::doctor(ctx, &cfg));
         }
@@ -109,6 +115,46 @@ fn hygiene(
     }
 }
 
+fn limit_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, main: &crate::host::Host) -> Vec<String> {
+    let seen = crate::hosts::cached(ctx);
+    let n = |x: Option<f64>, p: usize| x.map_or("?".into(), |x| format!("{x:.p$}"));
+    let mut rows = vec![];
+    for (name, h) in crate::hosts::cards(cfg, r) {
+        let machine = h.and_then(|h| h.machine.as_deref());
+        let (l, s) = (cfg.limits_on(machine), seen.get(&name).cloned().unwrap_or_default());
+        if machine.is_some() && !s.up {
+            continue;
+        }
+        let at = |p: u8| {
+            ["normal", "warn", "critical"]
+                .get(usize::from(p))
+                .map(|w| (*w).to_string())
+        };
+        let h = match machine {
+            None => main.clone(),
+            Some(_) => crate::host::Host {
+                cpu_idle: s.idle,
+                free_mem_gb: s.mem,
+                swapout: s.swap,
+                pressure: s.pressure.and_then(at),
+                ..crate::host::Host::default()
+            },
+        };
+        let low = h.free_mem_gb.is_some_and(|g| g < l.min_free_mem_gb);
+        let text = format!(
+            "limits {name} — cpu idle {}% (min {}%) · mem {} GB free (min {}) · swap-out {} pages/2s (max {}) → raise [hosts.{name}] or [limits] only if it has room",
+            n(h.cpu_idle, 0),
+            l.min_cpu_idle,
+            n(h.free_mem_gb, 1),
+            l.min_free_mem_gb,
+            n(h.swapout, 0),
+            l.swapout_rate
+        );
+        row(&mut rows, !low && crate::host::admit(&h, &l).is_ok(), '!', &text);
+    }
+    rows
+}
+
 fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     rows.push(format!("✓ config — {}", ctx.config.display()));
     rows.extend(cfg.warnings().iter().map(|(k, w)| format!("! config — {k} is {w}")));
@@ -118,7 +164,6 @@ fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) 
 
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     config_rows(ctx, cfg, r, rows);
-    rows.extend(crate::proxy::status(ctx, cfg, r).map(|f| f.join(" · ")));
     let line = crate::drive::spawns_line(ctx, cfg, r, &crate::events::working(&ctx.state).unwrap_or_default());
     row(rows, !line.contains(" · stale"), '!', &line);
     let (n401, n503) = crate::devices::denials(ctx);
@@ -332,12 +377,15 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line = format!("timer — {label} {state} → drover timer install (the owner or an orchestrator)");
         row(rows, state == "loaded", '✗', &line);
     }
-    for name in cfg.hosts.iter().filter(|h| h.1.cloud.is_some()).map(|h| h.0) {
-        if let Err(e) = crate::cloud::doctor(ctx, cfg, r, name, rows) {
-            rows.push(format!("✗ cloud {name} — {e:#}"));
-        }
+    let has = |l: &str| crate::timer::has_job(ctx, l);
+    let pid = crate::service::up(ctx).filter(|_| has(crate::timer::SERVICE));
+    let line = pid.map_or("service — not running → drover timer install".into(), |p| {
+        format!("service — running (pid {p})")
+    });
+    row(rows, pid.is_some(), '✗', &line);
+    if has(crate::timer::FAST) && has(crate::timer::SERVICE) {
+        rows.push("✗ fast job — replaced by the service → drover timer install".into());
     }
-    crate::cloud::includes(ctx, rows);
     if cfg.shed().is_some() {
         shed_rows(ctx, cfg, r, rows);
     }
@@ -351,7 +399,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             continue;
         };
         crate::hosts::went(ctx, m, true);
-        let (tags, own) = ([tags, h.tags.clone()].concat(), h.watches_token());
+        let tags = [tags, h.tags.clone()].concat();
         let bad = host_rows(ctx, cfg, &on, &tags, &home);
         let h = crate::providers::lanes().filter_map(|h| h.health_check());
         let logins: String = h.map(|c| format!("{}, ", c.0)).collect();
@@ -363,7 +411,6 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         rows.extend(shed.map(|b| at(&crate::shed::line(&on, &b.wire))));
         rows.extend(login_token(&on, Some(name)));
         rows.push(crate::hosts::sshd_row(&on, name));
-        rows.extend(own.then(|| crate::cloud::github(&on, ctx.now).1).flatten());
         let conf = crate::hosts::rehome(vec![ctx.config.display().to_string()], Some(&home)).remove(0);
         if on.exists(Path::new(&conf)) {
             rows.push(format!("! stale fleet.toml on {name}: no longer read → rm {conf}"));
@@ -376,7 +423,7 @@ fn just_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<String> {
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled) {
         let on = crate::hosts::On::new(r, h.machine.as_deref());
         let (path, fix) = match on.machine {
-            Some(_) => (crate::cloud::SH.to_string(), format!("drover hosts bootstrap {name}")),
+            Some(_) => (String::new(), format!("install just on {name}")),
             None => (
                 format!("export PATH='{}'; ", crate::timer::job_path(ctx, cfg, r)),
                 "install just into a folder on the timer's PATH (apt-get install just, brew install just)".into(),
@@ -510,6 +557,15 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line =
             format!("shed agent {id} — {cmd} not on the timer's PATH → install {cmd} in a folder on it ({path})");
         row(rows, found, '✗', &line);
+    }
+    let acp = cfg.fleet.iter().filter(|(n, _)| cfg.shed_for(n).is_some());
+    let roles = acp.flat_map(|(_, f)| f.role.values().map(|role| role.harness.as_str()));
+    let agents: BTreeSet<String> = (roles.chain(cfg.chat.harness.as_deref()))
+        .filter(|h| crate::providers::get(h).acp().is_some())
+        .map(str::to_string)
+        .collect();
+    if let Some(s) = cfg.shed().filter(|_| !agents.is_empty()) {
+        rows.extend(crate::shed::account_rows(r, &s.wire, &agents));
     }
     if let Ok(n) = crate::top::normal(ctx, cfg, r) {
         rows.push(n.first().map_or_else(

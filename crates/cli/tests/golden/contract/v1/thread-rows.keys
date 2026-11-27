@@ -1,0 +1,29 @@
+more: boolean
+rows[].block: object
+rows[].fleet: string
+rows[].handoff: null
+rows[].issue: null
+rows[].issue: number
+rows[].key: string
+rows[].kind = "ask"
+rows[].kind = "config-card"
+rows[].kind = "decision"
+rows[].kind = "merged"
+rows[].kind = "rollout"
+rows[].kind = "run-card"
+rows[].kind = "said"
+rows[].kind = "secret-card"
+rows[].kind = "system"
+rows[].open: boolean
+rows[].prompt: null
+rows[].prompt: string
+rows[].push.body: string
+rows[].push.tag: string
+rows[].push.title: string
+rows[].push: null
+rows[].seq: number
+rows[].text: string
+rows[].to.id: string
+rows[].to.k = "thread"
+rows[].ts: number
+seq: number

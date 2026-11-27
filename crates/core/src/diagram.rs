@@ -59,10 +59,10 @@ pub fn charts(limits: &Limits, counts: Option<&BTreeMap<&str, usize>>) -> [Chart
     let mut p = String::from("flowchart TD\n");
     let mut links: Vec<(String, &str)> = vec![];
     for (i, (job, args)) in timer::JOBS.iter().enumerate() {
-        let every = if args.starts_with(&["drive"]) {
-            "fast_secs"
-        } else {
+        let every = if args.starts_with(&["tick"]) {
             "slow_secs"
+        } else {
+            "fast_secs"
         };
         let first = if i == 0 { "t0" } else { "d0" };
         writeln!(p, "    j{i}[\"{job}: drover {}\"] --> {first}", args.join(" ")).ok();
@@ -118,7 +118,7 @@ pub fn markdown(charts: &[Chart; 2], at: &str) -> String {
     for (c, title) in charts.iter().zip(["Issue states", "Timers and the drive pass"]) {
         write!(m, "\n## {title}\n\n```mermaid\n{}```\n", c.source).ok();
     }
-    m + &crate::baseline::doc() + include_str!("compact/workflow.md")
+    m + &crate::baseline::doc() + include_str!("reroot.md")
 }
 
 /// `drover diagram [--live] [fleet]`: default `[limits]`, or the config's and per-state counts with `--live`.

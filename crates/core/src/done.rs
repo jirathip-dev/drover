@@ -12,6 +12,8 @@ use std::time::Duration;
 /// The refusal code of a `turn done` whose head is unpushed or fails a done check.
 pub const CODE: &str = "DONE_CHECK";
 
+const BODY_LEGS: [&str; 2] = ["pr-body", "evidence"];
+
 type Checked = Option<(String, Option<(&'static str, String)>)>;
 
 /// `turn done`'s hard gate for `role`'s lane: the head it passed at (None: no open PR with an unreviewed head); a refusal is logged `done-refused` (code, why, head) and returned as `REFUSED <code>`.
@@ -41,7 +43,15 @@ fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64), role:
     let (Some(sp), branch) = (last_spawn(&events, &agent), crate::gate::branch_of(Some(&s), n)) else {
         return Ok(None);
     };
-    let fields = ["pr", "view", &branch, "-R", &f.repo, "--json", "body,headRefOid,state"];
+    let fields = [
+        "pr",
+        "view",
+        &branch,
+        "-R",
+        &f.repo,
+        "--json",
+        "body,headRefOid,state,statusCheckRollup",
+    ];
     let pr = json(r, "gh", &fields).unwrap_or_default();
     let head = pr.at("headRefOid").as_str().unwrap_or_default().to_string();
     if head.is_empty() || pr.at("state") != "OPEN" || s.reviewed(&head) {
@@ -79,23 +89,28 @@ fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64), role:
         }
         return refuse("PR_BODY", e);
     }
+    let legs = crate::gh::reds(&crate::gh::required(pr.at("statusCheckRollup"), &[]));
+    let legs: Vec<_> = legs
+        .into_iter()
+        .filter(|c| BODY_LEGS.contains(&c.name.as_str()))
+        .collect();
+    let k = (fleet, Some(n));
+    let max = f.ci_flaky_retries.unwrap_or(cfg.limits.ci_flaky_retries);
+    crate::gh::retry(ctx, r, &mut std::io::sink(), k, &events, (&f.repo, &head, max), &legs).ok();
     let limit = Duration::from_secs(cfg.limits.gate_check_minutes * 60);
     let pr = crate::gatekeeper::Pr {
         head: &head,
         body: text,
     };
-    let heavy = crate::heavy::Heavy::at(cfg, f, sp.str("host"));
-    let exe = if on.machine.is_some() { "drover" } else { &ctx.exe };
+    let heavy = match on.machine {
+        None => crate::heavy::Heavy::at(cfg, f, sp.str("host")),
+        Some(_) => crate::heavy::Heavy::default(),
+    };
     for c in checks(f, &on, Path::new(wt)) {
         let o = if c == crate::gatekeeper::CHECK {
             crate::gatekeeper::check(&on, Path::new(wt), &pr, &f.private_names, limit)
         } else {
-            on.run_for(
-                "sh",
-                &crate::heavy::Heavy::check(heavy.as_ref(), exe, &c, wt),
-                "",
-                limit,
-            )
+            on.run_for("sh", &heavy.check(&ctx.exe, &c, wt), "", limit)
         };
         let o = match o {
             Ok(o) if o.code == 0 => continue,
@@ -136,7 +151,7 @@ fn checks(f: &Fleet, on: &On, wt: &Path) -> Vec<String> {
         .collect()
 }
 
-/// `body` has `## For humans`, no "Generated with" line, and names `head` as `scripts/evidence-check.sh` does.
+/// `body` has `## For humans`, no "Generated with" line, and names `head`.
 pub fn body(
     body: &str,
     head: &str,

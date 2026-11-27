@@ -166,8 +166,8 @@ fn a_handover_fails_no_request_and_loses_no_live_event() {
     poller.join().unwrap();
     client.join().unwrap();
     let still = p.try_wait().unwrap();
-    let _ = p.kill();
-    let _ = p.wait();
+    p.kill().ok();
+    p.wait().ok();
 
     assert!(still.is_none(), "the supervised pid serves on (exec in place)");
     let log = log.lock().unwrap().clone();
@@ -271,8 +271,8 @@ fn a_serve_over_its_memory_limit_hands_over_with_no_failed_request() {
     stop.store(true, SeqCst);
     poller.join().unwrap();
     let still = p.try_wait().unwrap();
-    let _ = p.kill();
-    let _ = p.wait();
+    p.kill().ok();
+    p.wait().ok();
 
     let log = log.lock().unwrap().clone();
     let high = high();
@@ -329,8 +329,8 @@ fn a_serve_that_starts_over_its_memory_limit_logs_once_and_keeps_serving() {
     std::thread::sleep(Duration::from_millis(5_000));
     get(&addr).unwrap();
     let still = p.try_wait().unwrap();
-    let _ = p.kill();
-    let _ = p.wait();
+    p.kill().ok();
+    p.wait().ok();
     let high: Vec<Event> = read(&c.state)
         .unwrap()
         .iter()
@@ -388,7 +388,7 @@ fn exited(p: &mut std::process::Child, secs: u64) -> Option<std::process::ExitSt
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    let _ = p.kill();
+    p.kill().ok();
     None
 }
 
@@ -417,7 +417,8 @@ fn a_second_serve_on_a_port_its_own_build_holds_exits_0_once() {
     let log = lines(&mut second);
     let code = exited(&mut second, 30);
     let still = first.try_wait().unwrap();
-    let _ = (first.kill(), first.wait());
+    first.kill().ok();
+    first.wait().ok();
     let log = log.lock().unwrap().clone();
     assert_eq!(code.and_then(|s| s.code()), Some(0), "{log}");
     assert!(
@@ -515,7 +516,8 @@ fn a_serve_started_by_a_handover_hands_over_again_past_its_memory_limit() {
         std::thread::sleep(Duration::from_millis(50));
     }
     let Ok(pid) = drover::update::ask_handover(&sock, 60) else {
-        let _ = (p.kill(), p.wait());
+        p.kill().ok();
+        p.wait().ok();
         panic!("no handover: {}", log.lock().unwrap());
     };
     let t = Instant::now();
@@ -548,7 +550,8 @@ fn a_serve_started_by_a_handover_hands_over_again_past_its_memory_limit() {
     }
     std::thread::sleep(Duration::from_millis(1_000));
     let still = p.try_wait().unwrap();
-    let _ = (p.kill(), p.wait());
+    p.kill().ok();
+    p.wait().ok();
     let t = Instant::now();
     while !reader.is_finished() && t.elapsed() < Duration::from_secs(60) {
         std::thread::sleep(Duration::from_millis(50));
@@ -612,7 +615,8 @@ fn a_job_started_serve_takes_the_port_from_a_same_build_serve_it_does_not_own() 
     let (owner, ended) = (listening(&addr), job.try_wait().unwrap());
     let health = drover::update::serving(&addr, 20);
     let stray_gone = exited(&mut stray, 10);
-    let _ = (job.kill(), job.wait());
+    job.kill().ok();
+    job.wait().ok();
     let log = log.lock().unwrap().clone();
     assert!(
         ended.is_none(),

@@ -93,18 +93,9 @@ fn gone(
         return Ok(false);
     }
     let said = (exit.cause == Cause::Crash).then(said).flatten();
-    let refused = [&exit.note, &said]
-        .into_iter()
-        .flatten()
-        .any(|w| w.contains("ECONNREFUSED"));
-    let cause = if refused && exit.cause == Cause::Crash {
-        Cause::Refused
-    } else {
-        exit.cause
-    };
     d.put("state", json!("gone"))
         .put("code", json!(exit.code))
-        .put("cause", json!(cause.word()));
+        .put("cause", json!(exit.cause.word()));
     if let Some(n) = &exit.note {
         d.put("note", json!(n));
     }
@@ -114,7 +105,7 @@ fn gone(
     stamp(ctx, &events, (fleet, issue), agent, d)?;
     if exit.cause == Cause::Limit {
         let events = crate::events::working(&ctx.state)?;
-        if let Some(sp) = last_spawn(&events, agent) {
+        if let Some(sp) = last_spawn(&events, agent).filter(|sp| !crate::hosts::on_account(sp)) {
             let d = crate::hosts::hold_alert(&events, sp, "hit the usage limit");
             if !events
                 .iter()
@@ -136,6 +127,10 @@ pub fn on_event(ctx: &Ctx, cfg: &Config, w: &crate::shed::Wire, e: &shed_proto::
         return Ok(false);
     }
     pulse::hear(ctx, &e.name, &e.kind, e.replay)?;
+    if let (EventKind::Account { account, was, why }, Some(t)) = (&e.kind, e.labels.get("thread").filter(|_| !e.replay))
+    {
+        crate::orchestrator::account_moved(ctx, cfg, (&fleet, t), (account, was.as_deref()), why)?;
+    }
     let Some(issue) = issue else {
         return Ok(false);
     };

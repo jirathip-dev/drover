@@ -1,0 +1,35 @@
+[
+  {
+    "block": {
+      "blocks": [
+        {
+          "id": "m-14-t",
+          "markdown": "sendmeter #12 merged → ? ? (PR #?)",
+          "type": "text"
+        }
+      ],
+      "id": "m-14",
+      "kind": "sys",
+      "type": "card"
+    },
+    "fleet": "sendmeter",
+    "handoff": null,
+    "issue": 12,
+    "key": "merged-14",
+    "kind": "merged",
+    "open": false,
+    "prompt": null,
+    "push": {
+      "body": "sendmeter #12 merged → ? ? (PR #?)",
+      "tag": "merged-14",
+      "title": "sendmeter #12"
+    },
+    "seq": 14,
+    "text": "sendmeter #12 merged → ? ? (PR #?)",
+    "to": {
+      "id": "t1",
+      "k": "thread"
+    },
+    "ts": 999013
+  }
+]

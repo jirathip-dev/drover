@@ -81,25 +81,8 @@ pub fn brands() -> impl Iterator<Item = &'static str> {
     all().flat_map(|p| p.brands().iter().copied())
 }
 
-/// The token proxy's provider: the first that has one.
-pub fn proxied() -> Option<&'static Proxy> {
-    all().find_map(|p| p.proxy())
-}
-
 /// Effort levels a role may set (`effort = "…"`).
 pub const EFFORTS: &[&str] = &["none", "low", "medium", "high", "xhigh"];
-
-/// What the token proxy needs from the provider it fronts.
-pub struct Proxy {
-    pub upstream: &'static str,
-    pub base_url_env: &'static str,
-    pub auth_token_env: &'static str,
-    pub setup: &'static str,
-    pub headers: fn(&[Header]) -> Vec<Header>,
-}
-
-/// A forwarded HTTP header: its lowercase name and its value.
-pub type Header = (String, String);
 
 /// What a harness needs in a lane sandbox: folders it reads, folders it writes, hosts it reaches.
 pub struct Needs {
@@ -145,9 +128,6 @@ pub trait Provider: Sync {
     }
     fn brands(&self) -> &'static [&'static str] {
         &[]
-    }
-    fn proxy(&self) -> Option<&'static Proxy> {
-        None
     }
     fn efforts(&self) -> &'static [&'static str] {
         EFFORTS
