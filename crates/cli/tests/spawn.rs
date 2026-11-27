@@ -109,7 +109,7 @@ fn claude_role_dry_run_uses_synced_profile() {
     );
     assert_eq!(
         *r.calls.borrow(),
-        ["which shed", "shed help run", "shed agents --json"],
+        ["which shed", "shed agents --json", "shed help run"],
         "a dry run only reads"
     );
     assert!(sh.methods().is_empty(), "dry-run calls nothing");

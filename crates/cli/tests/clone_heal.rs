@@ -226,6 +226,12 @@ fn an_unhealable_clone_alerts_once_and_the_other_steps_still_run() {
 #[test]
 fn every_fetch_of_a_clone_runs_under_its_lock() {
     let r = repos("heal-lock");
+    let conf = std::fs::read_to_string(&r.c.config).unwrap();
+    std::fs::write(
+        &r.c.config,
+        conf.replace("[limits]\n", "[limits]\nfetch_fresh_secs = 0\n"),
+    )
+    .unwrap();
     let _sh = FakeShed::attached(&r.c);
     premerge(&r.c);
     ready(&r.c, &r.head);

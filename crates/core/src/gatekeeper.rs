@@ -2,7 +2,7 @@ use crate::hosts::On;
 use crate::hygiene::NAMES_ENV;
 use crate::runner::{argv, Out, Runner};
 use anyhow::Result;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 /// The wrapper's check as a lane runs it, and the done check's name.
@@ -13,11 +13,6 @@ const BODY: &str = "target/gatekeeper/pr-body.md";
 pub struct Pr<'a> {
     pub head: &'a str,
     pub body: &'a str,
-}
-
-/// The wrapper's path in the repo at `dir`.
-pub fn wrapper(dir: &Path) -> PathBuf {
-    dir.join(".gatekeeper/run")
 }
 
 /// Write `pr`'s body into `wt` on `on`'s host and run the wrapper once there, `names` on stdin as `DROVER_PRIVATE_NAMES`.

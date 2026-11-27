@@ -1,0 +1,1 @@
+- LANE_PROGRESSING: spawn --supersede: the live lane in the way showed progress (busy, a push, a turn end or a pane state change) inside `stall_minutes`; it names the lane and the age. `--why "<text>"` replaces it anyway, logged on the `supersede` event with `by`; drive's own respawns are never refused

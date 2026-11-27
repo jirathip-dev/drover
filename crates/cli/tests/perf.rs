@@ -1031,24 +1031,24 @@ fn a_fast_step_over_50k_worktree_files_walks_none_of_them() {
         }
     }
     let (fast, fast_ms, out) = walked(&c, &r, &["drive"]);
-    let (slow, slow_ms, slow_out) = walked(&c, &r, &["tick"]);
+    let (_, slow_ms, slow_out) = walked(&c, &r, &["housekeep", "--only", "budget"]);
+    let du = std::fs::read_to_string(c.state.with_file_name("worktrees.du")).unwrap();
+    let bytes: u64 = du.split_whitespace().next().unwrap().parse().unwrap();
     report(&format!(
-        "#949 perf (50,000 worktree files): drive {fast_ms} ms, {fast} entries walked · tick {slow_ms} ms, {slow} walked"
+        "#949 perf (50,000 worktree files): drive {fast_ms} ms, {fast} entries walked · housekeep {slow_ms} ms, {bytes} bytes summed"
     ));
     assert_eq!(fast, 0, "drive walked {fast} entries: {out}");
-    assert!(
-        slow >= 50_000,
-        "the tick's budget walked only {slow} entries: {slow_out}"
-    );
+    assert!(bytes >= 50_000, "summed {bytes} of 50,000 one-byte files: {slow_out}");
 }
 
 #[test]
-fn over_budget_at_the_last_slow_pass_a_fast_pass_starts_no_lane() {
+fn over_budget_at_the_last_housekeeping_a_fast_pass_starts_no_lane() {
     let (c, r, _sh) = disk_fixture("perf-held", "0.000001");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "1"]).0, 0);
     let wt = c.worktrees.join("old");
     std::fs::create_dir_all(&wt).unwrap();
     std::fs::write(wt.join("blob"), vec![0u8; 5000]).unwrap();
+    walked(&c, &r, &["housekeep", "--only", "budget"]);
     let (_, _, out) = walked(&c, &r, &["tick"]);
     assert!(
         out.contains("sendmeter #1 start: REFUSED DISK_BUDGET: worktrees"),

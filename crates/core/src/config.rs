@@ -323,7 +323,7 @@ pub struct Fleet {
     /// The only checks merge, `check` and `wait` look at (latest run of each); empty = all.
     #[serde(default)]
     pub required_checks: Vec<String>,
-    /// A label the PR needs for its full CI (e.g. `merge-ready`), kept on it exactly while a PASS stands at its head; unset = none.
+    /// A label the PR needs for its full CI, kept on it exactly while a PASS stands at its head; unset = `merge-ready`, `off` = none.
     pub merge_label: Option<String>,
     /// `always` catches every behind ready PR up with integration; unset/`needed`: only on a conflict or a strict rule.
     pub update_ready: Option<String>,
@@ -390,7 +390,7 @@ pub struct Fleet {
     pub deny_commands_add: Vec<Deny>,
     /// Fast checks `merge` runs on the PR merged into current integration; unset = none.
     pub premerge: Option<Vec<Premerge>>,
-    /// Commands `turn done` runs in the lane's worktree before any review; unset = `./.gatekeeper/run check` with `.gatekeeper/run`, else `drover arch-check` with `.drover/arch.toml`, `cargo fmt --check` with `Cargo.toml`.
+    /// Commands `turn done` runs in the lane's worktree before any review; unset = the light checks only, `drover arch-check` with `.drover/arch.toml` and `cargo fmt --check` with `Cargo.toml` (never `./.gatekeeper/run check`): CI is the one full run.
     pub done_checks: Option<Vec<String>>,
     /// `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
     pub land: Option<Land>,
@@ -735,6 +735,7 @@ pub struct Limits {
     pub runtime_down_failures: u64,
     pub runtime_down_minutes: u64,
     pub pass_max_secs: u64,
+    pub fetch_fresh_secs: u64,
     pub ssh_connect_secs: u64,
     pub ssh_quick_secs: u64,
     pub ssh_call_secs: u64,
@@ -752,6 +753,8 @@ pub struct Limits {
     pub notify_secs: u64,
     pub gate_check_minutes: u64,
     pub shed_read_millis: u64,
+    pub acp_judge_secs: u64,
+    pub acp_probe_seconds: u64,
     pub service_call_secs: u64,
     pub disk_probe_secs: u64,
     pub disk_hung_secs: u64,
@@ -877,6 +880,7 @@ impl Default for Limits {
             runtime_down_failures: 5,
             runtime_down_minutes: 30,
             pass_max_secs: 60,
+            fetch_fresh_secs: 30,
             ssh_connect_secs: 10,
             ssh_quick_secs: 5,
             ssh_call_secs: 20,
@@ -894,6 +898,8 @@ impl Default for Limits {
             notify_secs: 15,
             gate_check_minutes: 30,
             shed_read_millis: 300,
+            acp_judge_secs: 30,
+            acp_probe_seconds: 120,
             service_call_secs: 2,
             disk_probe_secs: 2,
             disk_hung_secs: 6,
@@ -1250,6 +1256,11 @@ impl Config {
             f.form_rounds.get_or_insert(c.limits.form_rounds);
             f.respawn_per_pass.get_or_insert(c.limits.respawn_per_pass);
             f.ci_flaky_retries.get_or_insert(c.limits.ci_flaky_retries);
+            f.merge_label = match f.merge_label.take().as_deref() {
+                None => Some("merge-ready".into()),
+                Some("off") => None,
+                Some(l) => Some(l.into()),
+            };
             (f.bad, f.pipeline, f.jobs) = (p.validate(name, &f.role), Some(p), jobs(name, &c.job, f)?);
         }
         for (name, f) in &mut c.fleet {
@@ -1285,7 +1296,7 @@ impl Config {
             for (role, r) in &mut f.role {
                 let id = r.agent.as_deref();
                 match (id.map(|a| (a, crate::providers::of_agent(a))), r.harness.is_empty()) {
-                    (Some((a, None)), _) => bail!("fleet.{name}.role.{role}: agent {a}: no harness adapter guards it"),
+                    (Some((_, None)), false) => r.harness.clear(),
                     (Some((_, Some(h))), true) => r.harness = h.into(),
                     (Some((a, Some(h))), false) if h != r.harness => {
                         bail!(
@@ -1300,7 +1311,10 @@ impl Config {
                 if role == "orch" || role.is_empty() || !role.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
                     bail!("fleet.{name}.role.{role}: a role name is letters, digits and `-`, not orch");
                 }
-                if !crate::providers::known().any(|h| h == r.harness) {
+                if r.agent.is_none() && r.harness.is_empty() {
+                    bail!("fleet.{name}.role.{role}: names no agent; set `agent = \"<shed agent id>\"`");
+                }
+                if r.agent.is_none() && !crate::providers::lane_names().contains(&r.harness.as_str()) {
                     bail!(
                         "fleet.{name}.role.{role}: harness must be one of {:?}",
                         crate::providers::lane_names()
@@ -1319,9 +1333,6 @@ impl Config {
                     }
                 }
             }
-        }
-        for name in c.fleet.keys() {
-            c.same_provider(name, text)?;
         }
         c.routes_ok().map(|()| c)
     }
@@ -1342,39 +1353,6 @@ impl Config {
             }
         }
         Ok(())
-    }
-
-    fn same_provider(&self, name: &str, text: &str) -> Result<()> {
-        let f = self.fleet.get(name).ok_or_else(|| anyhow!("unknown fleet '{name}'"))?;
-        let (Some(i), Some(v)) = (f.role.get("impl"), f.role.get("rev")) else {
-            return Ok(());
-        };
-        let run = self.shed_for(name).and_then(|b| b.acp);
-        let of = |r: &Role| r.agent.clone().or_else(|| run.clone());
-        let p = (of(i), of(v));
-        let p = (
-            p.0.as_deref().and_then(crate::providers::vendor_of_agent),
-            p.1.as_deref().and_then(crate::providers::vendor_of_agent),
-        );
-        if i.agent.is_none() && v.agent.is_none() || p.0.is_none() || p.0 != p.1 {
-            return Ok(());
-        }
-        let mut head = "";
-        let ok = text.lines().any(|l| {
-            let t = l.trim();
-            if t.starts_with('[') {
-                head = t;
-            }
-            head == format!("[fleet.{name}]") && t.starts_with("rev_same_provider") && t.contains('#')
-        });
-        if f.rev_same_provider == Some(true) && ok {
-            return Ok(());
-        }
-        let why = format!(
-            "fleet.{name}: rev runs on impl's provider {}; give rev another agent, or set rev_same_provider = true # <why>",
-            p.0.unwrap_or_default()
-        );
-        crate::gate::refused("REVIEW_SAME_PROVIDER", why)
     }
 
     /// Notifiers for `fleet`'s events: its own if any (plus the global ones with `notify_global`), else the global.

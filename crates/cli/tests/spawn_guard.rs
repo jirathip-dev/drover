@@ -579,3 +579,75 @@ fn a_rejected_wip_push_leaves_the_worktree_as_it_was() {
     assert!(!sh_git(&["-C", &w, "log", "--format=%s"]).contains("wip:"));
     assert!(out.contains("nothing committed, nothing pushed, pane kept"), "{out}");
 }
+
+fn progressing(name: &str, status: &str, at: u64) -> (drover::Ctx, FakeShed, Fake) {
+    let c = ctx(&tmpdir(name), CONFIG);
+    let w = wt(&c).to_string_lossy().into_owned();
+    let d0 = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12", "worktree": w, "pane": "sendmeter-impl-12"});
+    append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", d0)).unwrap();
+    append(
+        &c.state,
+        &Event::new(at, "sendmeter", Some(12), "pushed", json!({"sha": "abc"})),
+    )
+    .unwrap();
+    let (sh, r) = shed_happy(&c);
+    sh.lane("sendmeter-impl-12", status, &w);
+    (c, sh, r)
+}
+
+#[test]
+fn a_supersede_of_a_progressing_lane_is_refused_unless_it_says_why() {
+    for (status, at, age) in [("idle", 1_000_000 - 120, "2m"), ("working", 10, "0s")] {
+        let (c, sh, r) = progressing("supersede-progressing", status, at);
+        let out = assert_refused(&c, &sh, &r, &["--supersede"], "LANE_PROGRESSING");
+        assert!(
+            out.contains("sendmeter-impl-12") && out.contains(&format!("{age} ago")),
+            "{out}"
+        );
+        let (exit, out) = spawn(&c, &r, &["--supersede", "--why", "wrong brief"]);
+        assert_eq!(exit, 0, "{out}");
+        let ev = read(&c.state).unwrap();
+        let s = ev.iter().find(|e| e.kind == "supersede").expect("supersede logged");
+        assert_eq!(s.str("why"), Some("wrong brief"));
+        assert!(s.str("by").is_some_and(|b| !b.is_empty()), "{s:?}");
+        assert!(sh.has("sendmeter-impl-12"), "the new lane started");
+    }
+}
+
+#[test]
+fn a_dead_or_quiet_lane_supersedes_with_no_why() {
+    let (c, sh, r) = progressing("supersede-quiet", "idle", 1_000_000 - 31 * 60);
+    let (exit, out) = spawn(&c, &r, &["--supersede"]);
+    assert_eq!(exit, 0, "quiet past stall_minutes: {out}");
+    assert!(read(&c.state).unwrap().iter().any(|e| e.kind == "supersede"));
+    assert!(sh.has("sendmeter-impl-12"), "the new lane started");
+    let c = ctx(&tmpdir("supersede-dead"), CONFIG);
+    let w = wt(&c).to_string_lossy().into_owned();
+    let d0 = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12", "worktree": w});
+    append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", d0)).unwrap();
+    append(
+        &c.state,
+        &Event::new(999_990, "sendmeter", Some(12), "pushed", json!({"sha": "abc"})),
+    )
+    .unwrap();
+    let (sh, r) = shed_happy(&c);
+    let (exit, out) = spawn(&c, &r, &["--supersede"]);
+    assert_eq!(exit, 0, "a dead lane: {out}");
+    assert!(sh.has("sendmeter-impl-12"), "{sh:?}", sh = sh.methods());
+}
+
+#[test]
+fn drives_own_respawn_of_a_progressing_lane_is_not_refused() {
+    let (c, sh, r) = progressing("supersede-internal", "working", 10);
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let o = drover::spawn::Opts {
+        supersede: true,
+        ..Default::default()
+    };
+    let r = drover::shed::With(&r, cfg.shed().unwrap());
+    let mut out = Vec::new();
+    let res = drover::spawn::spawn(&c, &cfg, &r, &mut out, ("sendmeter", 12, "impl"), &o);
+    assert!(res.is_ok(), "{res:?} {}", String::from_utf8_lossy(&out));
+    assert!(read(&c.state).unwrap().iter().any(|e| e.kind == "supersede"));
+    assert!(sh.has("sendmeter-impl-12"));
+}

@@ -28,3 +28,15 @@ pub fn instant() -> Instant {
 pub fn sleep(d: Duration) {
     std::thread::sleep(d);
 }
+
+thread_local!(static DEADLINE: std::cell::Cell<Option<Instant>> = const { std::cell::Cell::new(None) });
+
+/// This thread's work ends in `d` (a pass's or a kick's `pass_max_secs`).
+pub fn end_in(d: Duration) {
+    DEADLINE.set(Some(Instant::now() + d));
+}
+
+/// The time left before this thread's deadline, if it has one.
+pub fn left() -> Option<Duration> {
+    DEADLINE.get().map(|t| t.saturating_duration_since(Instant::now()))
+}

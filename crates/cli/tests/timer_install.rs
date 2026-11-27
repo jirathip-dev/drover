@@ -26,8 +26,8 @@ fn timer_install_logs_who_ran_it() {
     let jobs = json!([
         "dev.drover.tick",
         "dev.drover.service",
-        "dev.drover.update",
-        "dev.drover.clean"
+        "dev.drover.housekeep",
+        "dev.drover.update"
     ]);
     assert_eq!((e.val("written"), e.val("reloaded")), (&jobs, &json!([])));
     assert!(e.str("thread").is_none());

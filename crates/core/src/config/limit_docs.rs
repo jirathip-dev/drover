@@ -81,7 +81,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "fast_secs",
         "the fast job (`drive`) starts every fleet's pass every this many seconds",
     ),
-    ("slow_secs", "the slow tick runs every this many seconds"),
+    ("slow_secs", "the slow tick and the housekeeping job run every this many seconds; each housekeeping chore's budget"),
     ("form_categories", "the finding tags a `FAIL (form-only)` may carry"),
     (
         "form_rounds",
@@ -161,6 +161,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "a fleet's pass ends itself here, `pass-slow` naming its step; a lock held past 2 × it logs `pass-stuck` and is taken over",
     ),
     (
+        "fetch_fresh_secs",
+        "a fleet clone's fetch of refspecs fetched this recently, their refs there, is skipped; a fetch waiting on the clone's lock gets the one before it",
+    ),
+    (
         "ssh_connect_secs",
         "every host ssh's `-oConnectTimeout`; the whole `ssh <host> true` probe's retry and `hosts refresh`'s probe",
     ),
@@ -203,6 +207,14 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "shed_read_millis",
         "how long drive's intake waits for shed's state changes",
+    ),
+    (
+        "acp_judge_secs",
+        "shed's judge denies a judged lane's tool call when `drover hook --acp` takes longer",
+    ),
+    (
+        "acp_probe_seconds",
+        "an agent's test run under shed's judge (before its first judged lane) gives up after this long",
     ),
     (
         "service_call_secs",

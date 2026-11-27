@@ -57,16 +57,26 @@ fn install_no_load_writes_without_loading_and_remove_deletes() {
     let c = ctx(&tmpdir("timer-install"), CONFIG);
     let _sh = FakeShed::attached(&c);
     let r = host(Fake::default());
+    let clean = job(&c, "dev.drover.clean");
+    std::fs::create_dir_all(clean.parent().unwrap()).unwrap();
+    std::fs::write(&clean, "old daily clean").unwrap();
     let (code, out) = run(&c, &r, &["timer", "install", "--no-load"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.starts_with("✓ wrote dev.drover.tick; load it: "), "{out}");
+    assert!(out.contains("✓ wrote dev.drover.housekeep; load it: "), "{out}");
+    assert!(
+        out.ends_with("✓ removed dev.drover.clean\n") && !clean.exists(),
+        "{out}"
+    );
+    let housekeep = std::fs::read_to_string(job(&c, "dev.drover.housekeep")).unwrap();
+    assert!(housekeep.contains("housekeep"), "{housekeep}");
     let text = std::fs::read_to_string(job(&c, "dev.drover.tick")).unwrap();
     let path = "/opt/claude/bin:/opt/homebrew/bin:/opt/drover/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
     assert!(text.contains(path) && text.contains("tick"), "{text}");
     assert!(!r.called("launchctl bootstrap") && !r.called("systemctl --user enable"));
     assert_eq!(
         run(&c, &r, &["timer", "install", "--no-load"]).1,
-        "= already dev.drover.tick\n= already dev.drover.service\n= already dev.drover.update\n= already dev.drover.clean\n"
+        "= already dev.drover.tick\n= already dev.drover.service\n= already dev.drover.housekeep\n= already dev.drover.update\n"
     );
     let service = std::fs::read_to_string(job(&c, "dev.drover.service")).unwrap();
     assert!(service.contains("service") && !service.contains("drive"), "{service}");
@@ -74,13 +84,13 @@ fn install_no_load_writes_without_loading_and_remove_deletes() {
     let (code, out) = run(&c, &r, &["timer", "remove"]);
     assert_eq!(
         (code, out.as_str()),
-        (0, "✓ removed dev.drover.tick\n✓ removed dev.drover.service\n✓ removed dev.drover.update\n✓ removed dev.drover.clean\n")
+        (0, "✓ removed dev.drover.tick\n✓ removed dev.drover.service\n✓ removed dev.drover.housekeep\n✓ removed dev.drover.update\n")
     );
     assert!(!job(&c, "dev.drover.tick").exists() && !job(&c, "dev.drover.service").exists());
     assert!(r.called("launchctl bootout") || r.called("systemctl --user disable --now dev.drover.tick.timer"));
     assert_eq!(
         run(&c, &r, &["timer", "remove"]).1,
-        "= no dev.drover.tick job\n= no dev.drover.service job\n= no dev.drover.update job\n= no dev.drover.clean job\n"
+        "= no dev.drover.tick job\n= no dev.drover.service job\n= no dev.drover.housekeep job\n= no dev.drover.update job\n"
     );
 }
 
@@ -108,7 +118,7 @@ fn install_loads_and_prints_the_command() {
             format!("systemctl --user enable --now dev.drover.{job}.{kind}")
         }
     };
-    let jobs = ["service", "update", "clean"];
+    let jobs = ["service", "housekeep", "update"];
     let r = jobs
         .iter()
         .fold(host(Fake::default()).reply(cmd, ""), |r, j| r.reply(&unit(j), ""));
@@ -124,7 +134,7 @@ fn install_loads_and_prints_the_command() {
 }
 
 #[test]
-fn tick_runs_check_then_drive_and_exits_zero_on_refusals() {
+fn tick_runs_drive_and_exits_zero_on_refusals() {
     let c = ctx(&tmpdir("timer-tick"), CONFIG);
     let _sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
@@ -134,7 +144,7 @@ fn tick_runs_check_then_drive_and_exits_zero_on_refusals() {
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("sendmeter #12 start: REFUSED HOST_BUSY"), "{out}");
-    for w in ["check.at", "drive-sendmeter.last"] {
+    for w in ["tick.at", "drive-sendmeter.last"] {
         assert_eq!(
             std::fs::read_to_string(c.state.with_file_name(w)).unwrap(),
             "1000000",
@@ -186,7 +196,7 @@ fn tick_failed_is_logged_at_most_once_an_hour() {
 }
 
 fn steps(out: &str) -> Vec<&str> {
-    out.lines().take(5).collect()
+    out.lines().take(6).collect()
 }
 
 #[test]
@@ -213,12 +223,13 @@ fn setup_twice_is_all_already_and_tailscale_absent_is_skipped() {
     let s = steps(&out);
     assert!(s[0].starts_with("✓ ") && s[0].contains("dev.drover.tick"), "{out}");
     assert!(s[1].starts_with("✓ ") && s[1].contains("dev.drover.service"), "{out}");
-    assert!(s[2].starts_with("✓ ") && s[2].contains("dev.drover.serve"), "{out}");
-    assert_eq!(s[3], "= tailscale serve skipped: tailscale is not on PATH");
-    assert_eq!(s[4], "✓ profiles synced");
+    assert!(s[2].starts_with("✓ ") && s[2].contains("dev.drover.housekeep"), "{out}");
+    assert!(s[3].starts_with("✓ ") && s[3].contains("dev.drover.serve"), "{out}");
+    assert_eq!(s[4], "= tailscale serve skipped: tailscale is not on PATH");
+    assert_eq!(s[5], "✓ profiles synced");
     assert!(
         out.lines()
-            .skip(5)
+            .skip(6)
             .any(|l| l.contains(" doctor") || l.contains(" host — ")),
         "{out}"
     );
@@ -234,12 +245,27 @@ fn setup_twice_is_all_already_and_tailscale_absent_is_skipped() {
 }
 
 #[test]
-fn setup_makes_a_missing_merge_label_once_then_says_already() {
-    let cfg = CONFIG.replace(
-        "integration = \"staging\"",
-        "integration = \"staging\"\nmerge_label = \"merge-ready\"",
-    );
-    let c = ctx(&tmpdir("timer-label"), &cfg);
+fn merge_label_parses_unset_to_merge_ready_off_to_none_and_a_name_to_itself() {
+    for (i, (line, want)) in [
+        ("", Some("merge-ready")),
+        ("merge_label = \"off\"\n", None),
+        ("merge_label = \"full-ci\"\n", Some("full-ci")),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let c = ctx(
+            &tmpdir(&format!("timer-label-parse-{i}")),
+            &CONFIG.replace("merge_label = \"off\"\n", line),
+        );
+        let cfg = drover::config::Config::load(&c.config).unwrap();
+        assert_eq!(cfg.fleet["sendmeter"].merge_label.as_deref(), want, "{line:?}");
+    }
+}
+
+#[test]
+fn setup_makes_the_default_merge_label_once_then_says_already() {
+    let c = ctx(&tmpdir("timer-label"), &CONFIG.replace("merge_label = \"off\"\n", ""));
     let _sh = FakeShed::attached(&c);
     let list = "gh label list --repo jirathip-dev/sendmeter --search merge-ready --json name --limit 100";
     let create = "gh label create merge-ready --repo jirathip-dev/sendmeter --force";
@@ -315,15 +341,15 @@ fn setup_adopts_a_serve_job_under_another_label() {
     );
     if MAC {
         assert_eq!(
-            steps(&out)[2],
+            steps(&out)[3],
             format!("= adopted {} (re-labelling is manual: docs/setup.md)", theirs.display())
         );
         assert!(!job(&c, "dev.drover.serve").exists());
     } else {
-        assert!(steps(&out)[2].contains("dev.drover.serve"), "{out}");
+        assert!(steps(&out)[3].contains("dev.drover.serve"), "{out}");
     }
     assert_eq!(
-        steps(&out)[3],
+        steps(&out)[4],
         "= tailscale serve skipped: [serve] tailscale_https_port is unset"
     );
 }
@@ -338,7 +364,7 @@ fn services_rows_go_green_amber_and_red() {
     let _sh = FakeShed::attached(&c);
     let stamp = |w: &str, ago: u64| std::fs::write(c.state.with_file_name(w), (c.now - ago).to_string()).unwrap();
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
-    stamp("check.at", 60);
+    stamp("tick.at", 60);
     stamp("drive-sendmeter.last", 60);
     std::fs::write(c.state.with_file_name("drive-fast.at"), format!("{} 2.1", c.now - 40)).unwrap();
     let fleet_disk = |gb: u64| {
@@ -397,7 +423,7 @@ fn services_rows_go_green_amber_and_red() {
     drover::events::append(&c.state, &e).unwrap();
     assert_eq!(rows(&c, &green)[4].2, "last kick 12s ago (push #2940)");
 
-    stamp("check.at", 700);
+    stamp("tick.at", 700);
     let amber = host(Fake::default())
         .reply("lsof ", "x")
         .reply("df -k /", &df(12))
@@ -496,7 +522,13 @@ fn drift_is_missing_outdated_or_loaded() {
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let up = host(Fake::default()).reply(PROBE, "");
     let drift = |r: &Fake| drover::timer::drift(&c, &cfg, r);
-    let both = |a, b| vec![("dev.drover.tick", a), ("dev.drover.service", b)];
+    let both = |a, b| {
+        vec![
+            ("dev.drover.tick", a),
+            ("dev.drover.service", b),
+            ("dev.drover.housekeep", a),
+        ]
+    };
     assert_eq!(drift(&up), both("missing", "missing"));
     assert_eq!(run(&c, &up, &["timer", "install", "--no-load"]).0, 0);
     assert_eq!(drift(&up), both("loaded", "loaded"));
@@ -618,7 +650,7 @@ fn install_run_by_the_local_bin_symlink_names_the_install_roots_binary() {
     c.exe = link.to_string_lossy().into();
     let (code, out) = run(&c, &host(Fake::default()), &["timer", "install", "--no-load"]);
     assert_eq!(code, 0, "{out}");
-    let text = std::fs::read_to_string(job(&c, "dev.drover.clean")).unwrap();
+    let text = std::fs::read_to_string(job(&c, "dev.drover.housekeep")).unwrap();
     let root = std::fs::canonicalize(&root).unwrap();
     assert!(text.contains(&format!("{}", root.display())), "{text}");
     assert!(!text.contains(&format!("{}", link.display())), "{text}");
@@ -632,17 +664,17 @@ fn doctor_marks_a_job_launchd_refuses_red() {
     std::fs::create_dir_all(&c.home).unwrap();
     let uid = std::fs::metadata(&c.home).unwrap().uid();
     let probe = if MAC {
-        format!("launchctl print gui/{uid}/dev.drover.clean")
+        format!("launchctl print gui/{uid}/dev.drover.update")
     } else {
-        "systemctl --user is-active dev.drover.clean.timer".into()
+        "systemctl --user is-active dev.drover.update.timer".into()
     };
     let refused = "job state = spawn failed\nlast exit reason = OS_REASON_CODESIGNING\n";
     let r = host(Fake::default()).reply(&probe, refused);
     let (_, out) = run(&c, &r, &["doctor"]);
-    let line = "✗ timer — dev.drover.clean spawn failed → drover timer install";
+    let line = "✗ timer — dev.drover.update spawn failed → drover timer install";
     assert!(out.lines().any(|l| l.starts_with(line)), "{out}");
     let (_, out) = run(&c, &host(Fake::default()), &["doctor"]);
-    assert!(!out.contains("dev.drover.clean spawn failed"), "{out}");
+    assert!(!out.contains("dev.drover.update spawn failed"), "{out}");
 }
 
 #[test]

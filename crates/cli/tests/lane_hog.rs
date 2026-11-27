@@ -50,7 +50,7 @@ fn pass(c: &drover::Ctx, r: &Fake, secs: u64) {
         ..c.clone()
     };
     run(&at, r, &["drive"]);
-    run(&at, r, &["tick"]);
+    run(&at, r, &["housekeep", "--only", "hogs"]);
 }
 
 #[test]

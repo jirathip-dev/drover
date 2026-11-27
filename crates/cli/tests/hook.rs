@@ -234,8 +234,6 @@ fn reviewers_are_read_only() {
         None
     );
     assert_eq!(call("rev", "Write", &json!({"file_path": "verdict.md"})), None);
-    let patch = json!({"command": "*** Begin Patch\n*** Update File: src/a.rs\n"});
-    assert!(call("rev", "apply_patch", &patch).unwrap().contains("read-only"));
 }
 
 #[test]
@@ -1443,14 +1441,6 @@ fn a_design_lane_writes_only_its_issues_design_paths() {
             json!({"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": "/w", "tool_input": ti}),
         )
     };
-    let patch = |lane: &str, f: &str| {
-        let p = format!("*** Begin Patch\n*** Update File: {f}\n@@\n-a\n+b\n*** End Patch\n");
-        let ti = json!({"command": p});
-        hook(
-            lane,
-            json!({"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "cwd": "/w", "tool_input": ti}),
-        )
-    };
     let design = "sendmeter:30:design";
     for f in [
         "/w/apple/design/x/NativeSurfaces.swift",
@@ -1470,8 +1460,6 @@ fn a_design_lane_writes_only_its_issues_design_paths() {
     ] {
         assert!(refused(edit(design, "Write", f)), "{f}");
     }
-    assert!(refused(patch(design, "apple/Sources/CooeeAPI/Client.swift")));
-    assert_eq!(patch(design, "apple/design/x/A.swift"), "");
     assert!(refused(edit(
         "sendmeter:31:design",
         "Write",

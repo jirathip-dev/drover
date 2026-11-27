@@ -411,14 +411,14 @@ fn the_known_fleet_gives_exact_metrics() {
     let o = run_world(seeds::KNOWN, seeds::known(), STEPS + 1000, None);
     assert!(o.failure.is_none(), "{}", o.report());
     let want = metrics::Metrics {
-        to_merge: vec![964, 1256],
+        to_merge: vec![962, 1252],
         spawns: 5,
         wasted: 1,
         supersedes: 1,
         lanes: 4,
         idle: 279,
         ci_wait: 600,
-        lock_wait: 1,
+        lock_wait: 0,
         serial: 0,
         host_busy: 0,
         caps: 0,
@@ -435,9 +435,9 @@ fn the_known_fleet_gives_exact_metrics() {
             ("ci_wait_min", 10.0),
             ("host_busy", 0.0),
             ("idle_lane_min", 4.65),
-            ("lock_wait_min", 0.02),
-            ("queue_to_merge_p50_min", 16.07),
-            ("queue_to_merge_p90_min", 20.93),
+            ("lock_wait_min", 0.0),
+            ("queue_to_merge_p50_min", 16.03),
+            ("queue_to_merge_p90_min", 20.87),
             ("review_rounds_per_merge", 1.0),
             ("serial_busy", 0.0),
             ("supersedes_per_lane", 0.25),
@@ -668,7 +668,7 @@ fn what_if() {
 
 fn fleet_toml(serial_max: u64) -> String {
     format!(
-        "[fleet.fx]\nrepo = \"o/fx\"\nlocal = \"/x\"\nintegration = \"staging\"\nflow = \"legacy\"\nserial_paths = [\"db/**\"]\nserial_max = {serial_max}\n"
+        "[fleet.fx]\nrepo = \"o/fx\"\nlocal = \"/x\"\nintegration = \"staging\"\nmerge_label = \"off\"\nflow = \"legacy\"\nserial_paths = [\"db/**\"]\nserial_max = {serial_max}\n"
     )
 }
 

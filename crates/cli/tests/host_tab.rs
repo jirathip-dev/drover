@@ -101,7 +101,7 @@ fn the_host_api_gives_each_provider_login_its_vendor_and_no_account() {
         v["vendors"],
         serde_json::json!({
             "accounts": [],
-            "setups": [{"name": "claude", "vendor": "anthropic"}, {"name": "codex", "vendor": "openai"}],
+            "setups": [{"name": "claude", "vendor": "anthropic"}],
         }),
         "gh is no provider's login: {v}"
     );
