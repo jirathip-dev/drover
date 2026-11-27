@@ -21,6 +21,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 mod fire;
+mod settle;
 mod stranded;
 mod sweep;
 mod unset;
@@ -834,33 +835,7 @@ pub fn clean_all(
     yes: bool,
 ) -> Result<usize> {
     let events = working(&ctx.state)?;
-    let parked: Vec<Event> = (crate::events::since(&ctx.state, &["clean-settled"], 0)?.into_iter())
-        .filter(|c| fleet.is_none_or(|f| f == c.fleet) && c.issue.is_some_and(|n| issue.is_none_or(|i| i == n)))
-        .map(|c| Event::new(c.ts, &c.fleet, c.issue, "spawn", Value::Object(c.data)))
-        .collect();
-    let last = |marks: &mut dyn Iterator<Item = &Event>| {
-        let mut m: BTreeMap<String, u64> = BTreeMap::new();
-        for c in marks {
-            let t = m.entry(c.str("worktree").unwrap_or_default().into()).or_default();
-            *t = (*t).max(c.ts);
-        }
-        m
-    };
-    let gone = last(&mut events.iter().filter(|c| c.kind == "clean"));
-    let settled = events.iter().filter(|c| c.kind == "clean-settled").chain(&parked);
-    let cleaned = last(
-        &mut events
-            .iter()
-            .filter(|c| c.kind == "clean")
-            .chain(settled.filter(|_| !orphans)),
-    );
-    let mut roots: BTreeMap<String, usize> = BTreeMap::new();
-    for c in parked.iter().filter(|_| !orphans) {
-        let wt = c.str("worktree").unwrap_or_default();
-        if gone.get(wt).is_none_or(|t| *t < c.ts) && Path::new(wt).exists() {
-            *roots.entry(root_of(wt)).or_default() += 1;
-        }
-    }
+    let (parked, mut settled) = settle::load(ctx, &events, (fleet, issue), orphans)?;
     let states = fold(&events);
     let agents = (crate::link::look(ctx, cfg, r, &mut std::io::sink(), true)?.sessions())
         .checked()
@@ -894,7 +869,7 @@ pub fn clean_all(
         .chain(parked.iter().filter(|_| orphans))
         .filter(|e| e.issue.is_some_and(|n| issue.is_none_or(|i| i == n)))
         .filter(|e| lane.is_none_or(|a| e.str("agent") == Some(a)))
-        .filter(|e| e.str("worktree").and_then(|w| cleaned.get(w)).is_none_or(|t| *t < e.ts));
+        .filter(|e| settled.fresh(e));
     let spawns = unset::unconfigured(cfg, out, &events, lane, spawns)?;
     let held = |e: &Event| {
         let away = e.str("host").filter(|_| e.str("machine").is_some());
@@ -905,7 +880,6 @@ pub fn clean_all(
         let root = crate::roots::skip(ctx, cfg, e).filter(|w| !(orphans && *w == "off-root"));
         held.then_some("host unreachable").or(root)
     };
-    let mut by_host: BTreeMap<(String, &str), (usize, usize)> = BTreeMap::new();
     let there = crate::hosts::present(r, spawns.iter().copied().filter(|e| held(e).is_none()));
     for e in spawns {
         let (Some(n), Some(wt)) = (e.issue, e.str("worktree")) else {
@@ -949,32 +923,10 @@ pub fn clean_all(
             if lane.is_some() {
                 return unsafe_lane(&format!("{why} (not cleaned)"));
             }
-            if verbose {
-                writeln!(out, "keep {shown}: {why} (not cleaned)")?;
-            }
-            if why == "off-root" {
-                *roots.entry(root_of(wt)).or_default() += 1;
-                if yes {
-                    let mut d = e.data.clone();
-                    d.insert("why".into(), why.into());
-                    emit(
-                        &ctx.state,
-                        cfg,
-                        Event::new(ctx.now, &e.fleet, Some(n), "clean-settled", Value::Object(d)),
-                    )?;
-                }
-                continue;
-            }
-            let host = away.unwrap_or("this host");
-            let why = match why {
-                "host unreachable" if cfg.hosts.get(host).is_some_and(|h| !h.enabled) => "host off",
-                "host unreachable" => "host offline",
-                w => w,
-            };
-            by_host.entry((host.into(), why)).or_default().0 += 1;
+            settled.hold((ctx, cfg, out), (e, away, why), (verbose, yes))?;
             continue;
         }
-        by_host.entry((away.unwrap_or("this host").into(), "")).or_default().0 += 1;
+        settled.checked(away, false);
         let gitdir = on.read(&Path::new(wt).join(".git"));
         let gitdir = gitdir
             .as_deref()
@@ -1056,7 +1008,7 @@ pub fn clean_all(
             writeln!(out, "keep {shown}: {reason}")?;
             continue;
         }
-        by_host.entry((away.unwrap_or("this host").into(), "")).or_default().1 += 1;
+        settled.checked(away, true);
         if !yes {
             writeln!(out, "would remove {shown} (pane {pane}, {}#{n} {why})", e.fleet)?;
             continue;
@@ -1081,16 +1033,8 @@ pub fn clean_all(
         writeln!(out, "removed {shown} ({}#{n} {why})", e.fleet)?;
         emit(&ctx.state, cfg, Event::new(ctx.now, &e.fleet, Some(n), "clean", d))?;
     }
-    for ((host, why), (n, done)) in by_host.iter().filter(|_| lane.is_none()) {
-        let did = if yes { "removed" } else { "would remove" };
-        match *why {
-            "" if *done == 0 => writeln!(out, "{host}: {n} lanes checked")?,
-            "" => writeln!(out, "{host}: {n} lanes checked, {done} {did}")?,
-            why => writeln!(out, "{host}: {n} lanes, {why} — not checked")?,
-        }
-    }
-    for (root, n) in roots.iter().filter(|_| lane.is_none()) {
-        writeln!(out, "orphan root {root}: {n} worktrees off-root; `drover clean --orphans --yes` saves them to wip/, then removes them")?;
+    if lane.is_none() {
+        settled.summary(out, yes)?;
     }
     let sheds = r.shed().filter(|_| lane.is_none()).map(term::Shed);
     for (b, t) in sheds.iter().flat_map(|b| {
@@ -1143,11 +1087,6 @@ pub fn clean_all(
     }
     anyhow::ensure!(tallies.1 == 0, "{} worktree(s) not removed; see above", tallies.1);
     Ok(tallies.0)
-}
-
-fn root_of(wt: &str) -> String {
-    let p = Path::new(wt);
-    p.parent().and_then(Path::parent).unwrap_or(p).display().to_string()
 }
 
 fn pr_head<'a>(events: &'a [Event], fleet: &str, n: u64) -> Option<&'a str> {
