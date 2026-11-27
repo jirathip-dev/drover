@@ -2,7 +2,7 @@
   "response": {
     "code": "ERROR",
     "job": null,
-    "message": "gh issue create: no number",
+    "message": "git -C /tmp/does-not-matter/sendmeter fetch -q origin +refs/heads/staging:refs/remotes/origin/staging failed (1): unscripted: git -C /tmp/does-not-matter/sendmeter fetch -q origin +refs/heads/staging:refs/remotes/origin/staging",
     "ok": false
   },
   "route": "POST /api/v1/lesson",

@@ -4,7 +4,7 @@ use crate::api::{
     ApprovalChoice, Ask, Block, Chat, ChatDefaults, ConductorAttach, Digest, Ev, Events, Fleet, Harness, Health,
     IssueView, Lane, LaneChat, LaneCounts, LessonFleet, LessonRun, ServeHealth,
 };
-use crate::api::{Handoff, HandoffChoice, HandoffFrom, LastLine, RepoThread, RepoThreads};
+use crate::api::{Handoff, HandoffChoice, HandoffFrom};
 use crate::api::{
     Lessons, Marks, NeedsTab, PendingStart, QueueTab, Queued, Reply, Repro, Roles, Row, SetupScreen, State, Verdict,
     WhyNote,
@@ -15,7 +15,7 @@ use anyhow::{bail, Context};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-const LANE_OPS: &[&str] = &["send", "menu", "act", "setup", "chat-about", "chat", "close"];
+const LANE_OPS: &[&str] = &["send", "menu", "act", "setup", "close"];
 
 const V1_PAIRED: &[&str] = &[
     "qset",
@@ -94,9 +94,7 @@ impl Server<'_> {
             _ if !self.allowed(ctx, head) => reply("403 Forbidden", "FORBIDDEN", "foreign Host or Origin"),
             (_, Some(x))
                 if busy(auth)
-                    && (lane.or(setup).is_some()
-                        || ["needs", "lanes", "chat", "shed"].contains(&x)
-                        || paired_op(x)) =>
+                    && (lane.or(setup).is_some() || ["needs", "lanes", "shed"].contains(&x) || paired_op(x)) =>
             {
                 reply("503 Service Unavailable", "BUSY", "board busy, retrying")
             }
@@ -108,8 +106,7 @@ impl Server<'_> {
                 ("200 OK", HTML, crate::lifeboat::page(ctx, &lanes, msg).into_bytes())
             }
             ("POST", Some("lifeboat")) if paired => {
-                let (msg, later) = crate::orchestrator::deferred(|| crate::lifeboat::act(ctx, &self.r, &fields(body)));
-                self.later(ctx, later);
+                let msg = crate::lifeboat::act(ctx, &self.r, &fields(body));
                 ("200 OK", HTML, crate::lifeboat::back(&super::enc(&msg)).into_bytes())
             }
             ("GET", Some("state")) => self.state(ctx).map_or_else(
@@ -161,39 +158,6 @@ impl Server<'_> {
             }
             ("GET", Some("needs")) => out("200 OK", &pending_cards(ctx, self.needs_tab(ctx, paired))),
             ("GET", Some("lanes")) => out("200 OK", &self.unsaved(ctx, self.lanes_tab(ctx, paired))),
-            ("GET", Some("chat")) => {
-                let (mut c, ev) = (
-                    self.chat_tab(ctx, paired && self.addr.is_some(), &f),
-                    working(&ctx.state).unwrap_or_default(),
-                );
-                c.get_mut("threads")
-                    .and_then(Value::as_array_mut)
-                    .into_iter()
-                    .flatten()
-                    .for_each(|t| handoffs(&ev, &mut t["page"]));
-                out("200 OK", &c)
-            }
-            ("GET", Some(x)) if x.starts_with("repo/") && x.ends_with("/threads") => {
-                let fleet = x[5..].strip_suffix("/threads").unwrap_or_default();
-                match Config::kept(ctx) {
-                    Ok(c) if fleet == "all" || c.fleet.contains_key(fleet) => {
-                        let ev = working(&ctx.state).unwrap_or_default();
-                        out("200 OK", &repo(&ev, fleet))
-                    }
-                    _ => reply("404 Not Found", "NOT_FOUND", "no such repo"),
-                }
-            }
-            ("GET", Some(t)) if t.starts_with("thread/") => {
-                let ev = working(&ctx.state).unwrap_or_default();
-                super::chat::older(ctx, &ev, &t[7..], &f).map_or_else(
-                    || reply("404 Not Found", "NOT_FOUND", "no such thread"),
-                    |p| {
-                        let mut p = serde_json::json!(p);
-                        handoffs(&ev, &mut p);
-                        out("200 OK", &p)
-                    },
-                )
-            }
             ("GET", Some("herd")) => self.herd(ctx, None).map_or_else(
                 |e| reply("500 Internal Server Error", "ERROR", shown(&e)),
                 |h| out("200 OK", &h),
@@ -235,12 +199,9 @@ impl Server<'_> {
             ("POST", Some(op)) if paired_op(op) && !paired => {
                 reply("401 Unauthorized", "UNPAIRED", "pair this device first")
             }
-            ("POST", Some(op @ ("send" | "menu" | "act" | "setup" | "chat-about"))) => {
-                let mut f = fields(body);
-                if op == "chat-about" {
-                    f = about(ctx, &f);
-                }
-                let path = ["/send", "/answer", "/act", "/setup", "/thread"]
+            ("POST", Some(op @ ("send" | "menu" | "act" | "setup"))) => {
+                let f = fields(body);
+                let path = ["/send", "/answer", "/act", "/setup"]
                     .get(LANE_OPS.iter().position(|o| *o == op).unwrap_or(0))
                     .copied()
                     .unwrap_or("/send");
@@ -265,7 +226,6 @@ impl Server<'_> {
                 }
             }
             ("POST", Some("timings")) => self.timings(ctx.now, body),
-            ("POST", Some("chat")) => done(self.chat_defaults(ctx, &fields(body))),
             ("POST", Some("close")) => done(self.close(ctx, &fields(body))),
             ("POST", Some("qset")) => done(qset(ctx, &fields(body))),
             (
@@ -313,8 +273,7 @@ impl Server<'_> {
             return j.map(|j| format!("{} · job {}", j.message, j.id));
         }
         super::jobs::ready(ctx, f)?;
-        let (res, later) = crate::orchestrator::deferred(|| self.work(ctx, f));
-        self.later(ctx, later);
+        let res = self.work(ctx, f);
         if let Err(e) = &res {
             self.refused_tap(ctx, f, e);
         }
@@ -335,25 +294,6 @@ impl Server<'_> {
             "{filed}{}",
             if confirmed { "" } else { " (lane prompt not confirmed)" }
         ))
-    }
-
-    fn chat_defaults(&self, ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<String> {
-        if f.get("mtime").map(String::as_str) != Some(&super::mtime(ctx)) {
-            return refused(
-                "STALE",
-                "fleet.toml changed since the page was rendered; reload and retry",
-            );
-        }
-        let wanted: Vec<_> = ["harness", "model", "effort"]
-            .into_iter()
-            .filter_map(|k| Some((k, f.get(k).filter(|v| !v.is_empty())?.clone())))
-            .collect();
-        if wanted.is_empty() {
-            return refused("BAD_VALUE", "set harness, model or effort");
-        }
-        let line = crate::orchestrator::chat(ctx, &self.r, &wanted)?;
-        self.kick.store(true, super::Relaxed);
-        Ok(line)
     }
 
     fn close(&self, ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<String> {
@@ -862,23 +802,6 @@ fn done(r: Result<String>) -> Res {
     )
 }
 
-fn about(ctx: &Ctx, f: &BTreeMap<String, String>) -> BTreeMap<String, String> {
-    let (fleet, n) = (
-        f.get("fleet").cloned().unwrap_or_default(),
-        f.get("issue").cloned().unwrap_or_default(),
-    );
-    let title = n.parse().ok().and_then(|n| gh::cached_title(ctx, &fleet, n));
-    let text = format!(
-        "Let's talk about #{n}{}",
-        title.map_or(String::new(), |t| format!(": {t}"))
-    );
-    BTreeMap::from([
-        ("op".into(), "new".into()),
-        ("repo".into(), fleet),
-        ("text".into(), text),
-    ])
-}
-
 fn roles(ctx: &Ctx, fleet: &str) -> Result<Roles> {
     let (cfg, events) = (Config::kept(ctx)?, working(&ctx.state)?);
     let fc = cfg.fleet(fleet)?;
@@ -1035,48 +958,6 @@ impl Server<'_> {
     }
 }
 
-fn handoffs(events: &[Event], page: &mut Value) {
-    let (id, sent) = (
-        page["id"].as_str().unwrap_or_default().to_string(),
-        crate::orchestrator::forwarded(events),
-    );
-    let msgs = page["msgs"].as_array_mut().map(std::mem::take).unwrap_or_default();
-    let want: std::collections::BTreeSet<_> = msgs.iter().filter_map(|m| m["seq"].as_u64()).collect();
-    let at: BTreeMap<_, _> = events
-        .iter()
-        .filter(|e| want.contains(&e.seq))
-        .map(|e| (e.seq, e))
-        .collect();
-    let got = |e: &Event| {
-        let to = |h: &&Event| h.kind == "thread-handoff" && h.str("to") == Some(&id) && h.str("from") == e.str("from");
-        events.iter().filter(|h| h.seq < e.seq).rfind(to).map(|h| {
-            let is = |c: &&Event| c.kind == "needs-decision" && c.fleet == h.fleet && c.str("id") == h.str("ask");
-            let mut h = handoff(events, events.iter().find(is).unwrap_or(h), false);
-            h.state = (if sent.contains(&e.seq) {
-                "forwarded"
-            } else {
-                "delivered"
-            })
-            .into();
-            h
-        })
-    };
-    let msgs = msgs.into_iter().map(|mut m| {
-        let e = m.at("seq").as_u64().and_then(|s| at.get(&s).copied());
-        let h = e.and_then(|e| match (m.at("kind").as_str().unwrap_or_default(), e.kind.as_str()) {
-            ("handoff", "thread-handoff") if e.str("ask").is_none() => Some(handoff(events, e, true)),
-            ("ask", "needs-decision") if e.data.get("handoff").is_some() => Some(handoff(events, e, true)),
-            ("msg", "thread-msg") => got(e),
-            _ => None,
-        });
-        if let Some(h) = h {
-            m.put("handoff", serde_json::json!(h));
-        }
-        m
-    });
-    page["msgs"] = Value::Array(msgs.collect());
-}
-
 pub(super) fn handoff(events: &[Event], o: &Event, folded: bool) -> Handoff {
     let card = o.kind == "needs-decision";
     let (h, from, id) = (
@@ -1137,55 +1018,6 @@ pub(super) fn handoff(events: &[Event], o: &Event, folded: bool) -> Handoff {
         error: fail.map(Into::into),
         folded,
         choices: choices.collect(),
-    }
-}
-
-fn repo(events: &[Event], fleet: &str) -> RepoThreads {
-    use crate::orchestrator::{archived, of, title, unread};
-    let ts = events.iter().filter(|t| t.kind == "thread-new" && t.fleet == fleet);
-    let mut rows: Vec<_> = ts
-        .map(|t| {
-            let id = t.str("thread").unwrap_or_default();
-            let msg = |e: &&Event| matches!(e.kind.as_str(), "thread-msg" | "needs-decision");
-            let last = of(events, id).filter(msg).rfind(|e| e.str("from") != Some("system"));
-            let line = last.map_or(String::new(), |e| {
-                let who = if e.str("from") == Some("owner") {
-                    "you"
-                } else {
-                    "conductor"
-                };
-                format!("{who}: {}", e.str("text").or(e.str("question")).unwrap_or_default())
-            });
-            let ts = last.map_or(t.ts, |e| e.ts);
-            (
-                id,
-                LastLine {
-                    line: line.lines().next().unwrap_or_default().into(),
-                    ts,
-                },
-            )
-        })
-        .collect();
-    rows.sort_by_key(|r| std::cmp::Reverse(r.1.ts));
-    let mut ongoing = true;
-    let threads = rows.into_iter().map(|(id, last)| {
-        let archived = archived(events, id);
-        let lane = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
-        let newest = ongoing && !archived;
-        ongoing &= !newest;
-        RepoThread {
-            id: id.into(),
-            title: title(events, id).into(),
-            last,
-            unread: unread(events, id),
-            awake: lane.is_some_and(|l| l.kind != "orchestrator-sleep"),
-            archived,
-            newest,
-        }
-    });
-    RepoThreads {
-        repo: fleet.into(),
-        threads: threads.collect(),
     }
 }
 

@@ -198,69 +198,21 @@ fn herd_and_roles_read_through_api_v1() {
 }
 
 #[test]
-fn set_takes_json_and_chat_writes_the_new_thread_defaults() {
+fn set_takes_json_and_the_thread_defaults_route_is_gone() {
     let (c, r) = v1_board("v1-chat");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let set = json!({"fleet": "sendmeter", "role": "rev", "model": "sonnet", "mtime": mtime(&s)});
     assert_eq!(post(&s, "set", &set, "").1, "OK");
     let roles = |s: &Server| req(s, "GET", "/api/v1/roles?fleet=sendmeter", "", "").1;
     assert_eq!(roles(&s)["config"]["roles"][2]["model"], "sonnet");
-    let chat = |m: &str, v: Value| {
-        let mut b = json!({"mtime": m});
-        b.as_object_mut().unwrap().extend(v.as_object().unwrap().clone());
-        b
-    };
-    let m = mtime(&s);
-    assert_eq!(
-        post(&s, "chat", &chat(&m, json!({"harness": "claude"})), "").1,
-        "UNPAIRED"
-    );
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    assert_eq!(
-        post(&s, "chat", &chat("1", json!({"harness": "claude"})), &ck).1,
-        "STALE"
-    );
-    assert_eq!(
-        post(&s, "chat", &chat(&m, json!({"model": "gpt-9"})), &ck).1,
-        "BAD_VALUE"
-    );
-    assert_eq!(
-        post(&s, "chat", &chat(&m, json!({"harness": "emacs"})), &ck).1,
-        "BAD_VALUE"
-    );
-    assert_eq!(post(&s, "chat", &chat(&m, json!({})), &ck).1, "BAD_VALUE");
-    let toml = std::fs::read_to_string(&c.config).unwrap();
-    assert!(!toml.contains("[chat]"), "a refusal writes nothing");
-    let (status, code, msg) = post(
-        &s,
-        "chat",
-        &chat(&m, json!({"harness": "claude", "model": "opus"})),
-        &ck,
-    );
-    assert_eq!(
-        (status, code.as_str(), msg.as_str()),
-        (200, "OK", "chat defaults: harness claude, model opus")
-    );
-    let after = roles(&s)["chat"].clone();
-    assert_eq!((&after["harness"], &after["model"]), (&json!("claude"), &json!("opus")));
-    assert!(
-        std::fs::read_to_string(&c.config).unwrap().starts_with(&toml),
-        "the rest of fleet.toml stays"
-    );
-    let e = kinds(&c, "set").pop().unwrap();
-    assert_eq!(
-        (e.str("role"), e.str("key"), e.str("new")),
-        (Some("chat"), Some("model"), Some("opus"))
-    );
-    let m = mtime(&s);
-    assert_eq!(post(&s, "chat", &chat(&m, json!({"effort": "high"})), &ck).1, "OK");
-    let toml = std::fs::read_to_string(&c.config).unwrap();
-    assert_eq!(toml.matches("[chat]").count(), 1, "{toml}");
-    assert_eq!(roles(&s)["chat"]["effort"], "high");
+    let (_, code, msg) = post(&s, "chat", &json!({"harness": "claude", "mtime": mtime(&s)}), &ck);
+    assert_ne!(code, "OK", "the thread defaults are gone with the threads: {msg}");
+    assert!(!std::fs::read_to_string(&c.config).unwrap().contains("[chat]"));
 }
 
 #[test]
-fn a_backlog_issue_gets_a_thread_or_closes() {
+fn a_backlog_issue_closes() {
     let sh = FakeShed::new();
     let cfg = format!(
         "{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\n\n\
@@ -287,21 +239,8 @@ fn a_backlog_issue_gets_a_thread_or_closes() {
     std::fs::write(cache.join("backlog-sendmeter-0.json"), bl.to_string()).unwrap();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let about = json!({"fleet": "sendmeter", "issue": 30});
-    assert_eq!(post(&s, "chat-about", &about.clone(), "").1, "UNPAIRED");
     assert_eq!(post(&s, "close", &about.clone(), "").1, "UNPAIRED");
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let (status, code, msg) = post(&s, "chat-about", &about.clone(), &ck);
-    assert_eq!((status, code.as_str()), (200, "OK"), "{msg}");
-    let t = msg.strip_suffix(" started").unwrap();
-    let said = kinds(&c, "thread-msg").pop().unwrap();
-    assert_eq!(
-        (said.str("thread"), said.str("text")),
-        (Some(t), Some("Let's talk about #30: Meter export"))
-    );
-    assert_eq!(
-        post(&s, "chat-about", &json!({"fleet": "nope", "issue": 30}), &ck).1,
-        "NO_ORCHESTRATOR"
-    );
     assert_eq!(
         post(&s, "close", &json!({"fleet": "sendmeter", "issue": 12}), &ck).1,
         "NOT_BACKLOG"

@@ -9,12 +9,10 @@ use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-const TABS: [&str; 10] = [
+const TABS: [&str; 8] = [
     "/screens/queue",
     "/screens/lanes",
     "/screens/events",
-    "/screens/threads",
-    "/screens/threads/t1",
     "/screens/cards",
     "/screens/scene",
     "/screens/fleets",

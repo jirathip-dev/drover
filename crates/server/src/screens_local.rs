@@ -1,5 +1,5 @@
 use super::super::{form, lock, shown, Config, Ctx, Result, Server};
-use super::{hosts::HOST_ACTIONS, page_places, permitted, THREAD_ACTIONS};
+use super::{hosts::HOST_ACTIONS, page_places, permitted};
 use crate::events::Json;
 use crate::runner::Runner;
 use serde_json::{json, Value};
@@ -22,7 +22,7 @@ impl Server<'_> {
         if secret {
             return crate::gate::refused("NOT_PERMITTED", "a secret is entered on a paired device only");
         }
-        if !permitted(name) && (!owner || !THREAD_ACTIONS.contains(&name) && !HOST_ACTIONS.contains(&name)) {
+        if !permitted(name) && (!owner || !HOST_ACTIONS.contains(&name)) {
             let why = format!("`{name}` is not in the manifest's actions");
             return crate::gate::refused("NOT_PERMITTED", why);
         }

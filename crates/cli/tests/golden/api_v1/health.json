@@ -6,31 +6,31 @@
     "routes": [
       {
         "count": 1,
-        "max": 7,
-        "p50": 7,
-        "p95": 7,
+        "max": 6,
+        "p50": 6,
+        "p95": 6,
         "route": "/api/v1/host"
       },
       {
         "count": 2,
-        "max": 3,
+        "max": 4,
         "p50": 0,
-        "p95": 3,
+        "p95": 4,
         "route": "/pair"
       },
       {
         "count": 1,
-        "max": 2,
-        "p50": 2,
-        "p95": 2,
-        "route": "/api/v1/chat-about"
+        "max": 3,
+        "p50": 3,
+        "p95": 3,
+        "route": "/api/v1/needs"
       },
       {
         "count": 1,
-        "max": 2,
-        "p50": 2,
-        "p95": 2,
-        "route": "/api/v1/needs"
+        "max": 3,
+        "p50": 3,
+        "p95": 3,
+        "route": "/api/v1/state"
       },
       {
         "count": 1,
@@ -55,13 +55,6 @@
       },
       {
         "count": 1,
-        "max": 1,
-        "p50": 1,
-        "p95": 1,
-        "route": "/api/v1/state"
-      },
-      {
-        "count": 1,
         "max": 0,
         "p50": 0,
         "p95": 0,
@@ -83,16 +76,16 @@
       "groups": [
         {
           "count": 7,
-          "max": 7,
+          "max": 6,
           "p50": 1,
-          "p95": 7,
+          "p95": 6,
           "route": "/api/v1 reads"
         },
         {
-          "count": 4,
-          "max": 3,
+          "count": 3,
+          "max": 4,
           "p50": 1,
-          "p95": 3,
+          "p95": 4,
           "route": "writes"
         }
       ],
@@ -101,7 +94,7 @@
       "phone_slow": null,
       "queued": 0,
       "rss_mb": 0,
-      "sha": "c0b79c4d0c41158942efb0bb8588abed7b10b357",
+      "sha": "",
       "slow": null,
       "started": 1000000
     },

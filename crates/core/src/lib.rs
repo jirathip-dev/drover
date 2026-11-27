@@ -234,9 +234,8 @@ type Export = fn(&Ctx, &dyn Runner, &std::path::Path, bool) -> Result<()>;
 /// `drover service` (api addr, board addr), set by the binary from the service crate.
 pub static SERVICE: std::sync::OnceLock<Service> = std::sync::OnceLock::new();
 type Service = fn(&Ctx, &str, Option<&str>) -> Result<()>;
-/// Which tab the full-screen app opens on: Threads (`drover chat`) or Board (`drover board`), with its thread or fleet.
+/// What the full-screen app opens on: the Board (`drover board`), with its fleet.
 pub enum Open {
-    Threads(Option<String>),
     Board(Option<String>),
 }
 /// The full-screen app, set by the binary from the chat crate; `Ok(false)`: stdout is no terminal, nothing was drawn.
@@ -393,7 +392,7 @@ fn owner_topic(text: &str) -> bool {
 pub fn ask(
     ctx: &Ctx,
     cfg: &Config,
-    r: &dyn Runner,
+    _: &dyn Runner,
     out: &mut dyn Write,
     (fleet, issue): (&str, Option<u64>),
     (q, opts): (&str, &[String]),
@@ -449,7 +448,7 @@ pub fn ask(
         .context("ask not logged")?;
     let id = ev.str("id").unwrap_or_default();
     if let Some(t) = routed {
-        if let Err(e) = crate::thread::route::lane_ask(ctx, cfg, r, t, &ev) {
+        if let Err(e) = crate::thread::route::lane_ask(ctx, cfg, t, &ev) {
             crate::thread::route::to_owner(ctx, cfg, t, &ev, None, &format!("orchestrator not reached: {e:#}"))?;
         }
     }
@@ -795,17 +794,8 @@ pub(crate) fn answer_with(
     let mins = cfg.limits.ask_default_minutes;
     let note = (by == "default").then(|| format!(" (default after {mins} min, nobody replied)"));
     let msg = format!("DECISION {id}: {text}{}", note.unwrap_or_default());
-    if let Some(t) = ask
-        .str("thread")
-        .filter(|t| orchestrator::attached(&events, t).is_some())
-    {
+    if let Some(t) = ask.str("thread") {
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {t}")?);
-    }
-    if let Some(t) = ask.str("thread").filter(|_| by != TYPED) {
-        let agent = orchestrator::say(ctx, cfg, r, (t, &msg, &[]), (by, true))?;
-        let q = ask.str("question").unwrap_or_default();
-        crate::thread::route::flow(ctx, cfg, t, &format!("answered {id}: {q} → {text}"))?;
-        return Ok(writeln!(out, "{fleet} {id}: {text} -> {agent}")?);
     }
     if design {
         return Ok(writeln!(out, "{fleet} {id}: {text}")?);

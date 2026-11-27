@@ -34,6 +34,11 @@ fn threads(name: &str) -> (drover::Ctx, u64) {
     (c, now)
 }
 
+fn ask(c: &drover::Ctx, now: u64, id: &str, q: &str) {
+    let d = json!({"id": id, "question": q, "options": ["yes", "no"], "recommend": 1, "kind": "owner"});
+    append(&c.state, &Event::new(now, "sendmeter", Some(7), "needs-decision", d)).unwrap();
+}
+
 fn get(s: &Server, now: u64, path: &str) -> Value {
     let res = s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), now);
     let res = String::from_utf8_lossy(&res);
@@ -52,12 +57,7 @@ fn a_screen_built_a_minute_later_is_the_same_screen_its_ages_tick_on_the_page() 
     drover::db::put(&c.state, "board", hour, &snap).unwrap();
     let r = OnShed::new(Fake::default());
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    for path in [
-        "/screens/queue",
-        "/screens/events",
-        "/screens/threads",
-        "/screens/threads/t2",
-    ] {
+    for path in ["/screens/queue", "/screens/events", "/screens/cards"] {
         for at in [hour + 100, hour + 300, hour + 3_000] {
             assert_eq!(
                 get(&s, at, path),
@@ -94,21 +94,15 @@ fn open(addr: &str, path: &str) -> Result<BufReader<std::net::TcpStream>, String
 }
 
 #[test]
-fn with_four_streams_open_a_thread_view_still_gets_a_new_message_within_3_s() {
+fn with_four_streams_open_the_cards_still_get_a_new_ask_within_3_s() {
     let (c, now) = threads("stream-fifth");
     let addr = serve(&c);
-    let held: Vec<_> = [
-        "/screens/queue",
-        "/screens/threads",
-        "/screens/events",
-        "/screens/threads/t3",
-    ]
-    .into_iter()
-    .map(|p| open(&addr, p).unwrap_or_else(|h| panic!("{p}: {h}")))
-    .collect();
-    let mut t2 = open(&addr, "/screens/threads/t2").unwrap_or_else(|h| panic!("a 5th stream is refused: {h}"));
-    let d = json!({"thread": "t2", "from": "orchestrator", "text": "the fifth stream hears this"});
-    append(&c.state, &Event::new(now, "sendmeter", None, "thread-msg", d)).unwrap();
+    let held: Vec<_> = ["/screens/queue", "/screens/lanes", "/screens/events", "/screens/fleets"]
+        .into_iter()
+        .map(|p| open(&addr, p).unwrap_or_else(|h| panic!("{p}: {h}")))
+        .collect();
+    let mut t2 = open(&addr, "/screens/cards").unwrap_or_else(|h| panic!("a 5th stream is refused: {h}"));
+    ask(&c, now, "q9", "the fifth stream hears this");
     let t0 = std::time::Instant::now();
     t2.get_ref()
         .set_read_timeout(Some(std::time::Duration::from_secs(3)))
@@ -118,7 +112,7 @@ fn with_four_streams_open_a_thread_view_still_gets_a_new_message_within_3_s() {
         line.clear();
         assert!(
             t2.read_line(&mut line).is_ok_and(|n| n > 0) && t0.elapsed().as_secs() < 3,
-            "the message reaches the thread's stream within 3 s"
+            "the ask reaches the cards stream within 3 s"
         );
     }
     drop(held);
@@ -130,7 +124,7 @@ fn a_dropped_stream_frees_its_slot_within_20_s() {
     let addr = serve(&c);
     let mut held = vec![];
     let refused = loop {
-        match open(&addr, "/screens/threads/t2") {
+        match open(&addr, "/screens/queue") {
             Ok(r) if held.len() < 100 => held.push(r),
             Ok(_) => panic!("100 streams from one device and none refused"),
             Err(h) => break h,
@@ -141,7 +135,7 @@ fn a_dropped_stream_frees_its_slot_within_20_s() {
     drop(held.pop());
     let t0 = std::time::Instant::now();
     let again = loop {
-        match open(&addr, "/screens/threads/t2") {
+        match open(&addr, "/screens/queue") {
             Ok(r) => break r,
             Err(h) => assert!(
                 t0.elapsed().as_secs() < 20,
@@ -168,10 +162,10 @@ fn data_until_ping(r: &mut BufReader<std::net::TcpStream>) -> Vec<Value> {
 }
 
 #[test]
-fn unrelated_events_send_no_stream_data_and_a_thread_read_reaches_only_the_threads_list() {
+fn unrelated_events_send_no_stream_data() {
     let (c, now) = threads("quiet-stream");
     let addr = serve(&c);
-    let mut streams: Vec<(&str, BufReader<_>)> = ["/screens/threads/t2", "/screens/queue", "/screens/threads"]
+    let mut streams: Vec<(&str, BufReader<_>)> = ["/screens/cards", "/screens/queue"]
         .into_iter()
         .map(|p| (p, open(&addr, p).unwrap()))
         .collect();
@@ -179,22 +173,11 @@ fn unrelated_events_send_no_stream_data_and_a_thread_read_reaches_only_the_threa
         let d = json!({"agent": format!("otherfleet-impl-{i}"), "state": "idle"});
         append(&c.state, &Event::new(now, "otherfleet", Some(i), "lane-state", d)).unwrap();
     }
-    append(
-        &c.state,
-        &Event::new(now, "sendmeter", None, "thread-read", json!({"thread": "t3"})),
-    )
-    .unwrap();
-    let mut sent: Vec<(&str, Vec<Value>)> = streams.iter_mut().map(|(p, r)| (*p, data_until_ping(r))).collect();
-    let (_, list) = sent.pop().unwrap();
+    let sent: Vec<(&str, Vec<Value>)> = streams.iter_mut().map(|(p, r)| (*p, data_until_ping(r))).collect();
     assert_eq!(
         sent,
-        [("/screens/threads/t2", vec![]), ("/screens/queue", vec![])],
-        "20 unrelated events and another thread's read send these screens nothing but a ping"
-    );
-    assert_eq!(list.len(), 1, "{list:?}");
-    assert!(
-        list[0]["ops"].to_string().contains("\"t3\"") && !list[0]["ops"].to_string().contains("\"new\""),
-        "the threads list drops t3's unread dot: {list:?}"
+        [("/screens/cards", vec![]), ("/screens/queue", vec![])],
+        "20 unrelated events send these screens nothing but a ping"
     );
 }
 
@@ -213,10 +196,14 @@ impl drover::runner::Runner for MidBuild {
     fn shed(&self) -> Option<drover::shed::Shed> {
         let building = std::backtrace::Backtrace::force_capture()
             .to_string()
-            .contains("threads_screen");
+            .contains("chat_cards");
         if building && !self.2.swap(true, std::sync::atomic::Ordering::SeqCst) {
-            let d = json!({"thread": "t3", "from": "orchestrator", "text": "landed mid-build"});
-            append(&self.1, &Event::new(drover::now(), "sendmeter", None, "thread-msg", d)).unwrap();
+            let d = json!({"id": "q8", "question": "landed mid-build", "options": ["yes"], "kind": "owner"});
+            append(
+                &self.1,
+                &Event::new(drover::now(), "sendmeter", Some(7), "needs-decision", d),
+            )
+            .unwrap();
         }
         self.0.shed()
     }
@@ -231,10 +218,10 @@ fn an_event_logged_while_the_stream_builds_its_first_screen_reaches_the_stream()
     std::thread::spawn(move || drover::serve::serve_on(&c, &r, l, false));
     let mut s = std::net::TcpStream::connect(&addr).unwrap();
     s.set_read_timeout(Some(std::time::Duration::from_secs(40))).unwrap();
-    write!(s, "GET /screens/threads/t3/stream HTTP/1.1\r\nHost: {addr}\r\n\r\n").unwrap();
+    write!(s, "GET /screens/cards/stream HTTP/1.1\r\nHost: {addr}\r\n\r\n").unwrap();
     let sent = data_until_ping(&mut BufReader::new(s));
     assert!(
         sent.iter().any(|d| d.to_string().contains("landed mid-build")),
-        "a reply logged during the first build shows before the next ping, not 30 s later: {sent:?}"
+        "an ask logged during the first build shows before the next ping, not 30 s later: {sent:?}"
     );
 }

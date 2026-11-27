@@ -18,8 +18,6 @@ const READS: &[&str] = &[
     "/api/v1/needs",
     "/api/v1/lanes",
     "/api/v1/shed",
-    "/api/v1/chat",
-    "/api/v1/repo/sendmeter/threads",
     "/api/v1/lane/sendmeter-impl-12",
     "/api/v1/herd",
     "/api/v1/roles?fleet=sendmeter",
@@ -115,7 +113,7 @@ fn each_route_groups_p95_stays_within_50ms_on_the_fixture_state() {
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     s.refresh(T);
     let mut screens = vec![];
-    for _ in 0..10 {
+    for _ in 0..11 {
         for p in READS {
             let t = Instant::now();
             assert!(get(&s, &cookie, p, T).starts_with("HTTP/1.1 200"), "{p}");

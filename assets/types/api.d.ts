@@ -44,9 +44,9 @@ export type Block = { "k": "prompt", text: string, } | { "k": "reply", markdown:
 export type Moment = { seq: number, ts: number, k?: string | null, f: string, n?: number | null, };
 
 /**
- * API v1's `needs`, the cards above every tab as this device sees them: the snapshot's time `snap` (0: none; the strip under the header shows its age once over 2 min), the open asks, each blocked lane's card, the `needs-human` issues, and `choosing` (`[chat·N]`). `rw`: the board takes forms (the answer boxes); `live`: and is no export; `paired`: the device may answer a lane or an issue; `pair`: the page offers Pair this phone.
+ * API v1's `needs`, the cards above every tab as this device sees them: the snapshot's time `snap` (0: none; the strip under the header shows its age once over 2 min), the open asks, each blocked lane's card and the `needs-human` issues. `rw`: the board takes forms (the answer boxes); `live`: and is no export; `paired`: the device may answer a lane or an issue; `pair`: the page offers Pair this phone.
  */
-export type NeedsTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, mtime: string, snap: number, choosing: number, asks: Array<NeedAsk>, blocked: Array<Blocked>, issues: Array<NeedIssue>, 
+export type NeedsTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, mtime: string, snap: number, asks: Array<NeedAsk>, blocked: Array<Blocked>, issues: Array<NeedIssue>, 
 /**
  * Fleet.toml fails to load: `config invalid: <error> (fleet.toml:<line>)`, the red banner above every tab.
  */
@@ -119,26 +119,6 @@ export type LaneNow = { title: string, w?: string | null, n?: string | null, t?:
 export type ShedRow = { host: string, error?: string | null, name?: string | null, runtime?: string | null, labels?: { [key in string]: string } | null, state?: string | null, last?: string | null, age?: string | null, };
 
 /**
- * API v1's `chat`, the [chat] tab: a card per repo (`all` first) with its open threads' rows (`?archived=1`: the archived ones too), and `?thread=<t>`'s view alone (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
- */
-export type ChatTab = { now: number, rw: boolean, error?: string | null, repos: Array<ChatRepo>, threads: Array<ThreadView>, };
-
-/**
- * A repo's card in colour `k`: its threads newest first, the archived ones apart; its empty thread's `harness` chip.
- */
-export type ChatRepo = { repo: string, k: string, rows: Array<ThreadRow>, archived: Array<ThreadRow>, harness: Chip, };
-
-/**
- * A composer chip: `name`'s current value `cur` (none: the default) and its choices `all`.
- */
-export type Chip = { name: string, cur?: string | null, all: Array<string>, };
-
-/**
- * A thread's row: unread, title, age, its `state` (choose, working, asleep, …), the threads it links to, the last line; the ids of the config proposals `waiting` for the owner.
- */
-export type ThreadRow = { id: string, title: string, age: string, unread: boolean, state: string, waiting: Array<string>, links: Array<Link>, line: string, };
-
-/**
  * API v1's `rows` and `thread/<id>/rows` (docs/rows.md): `seq` the newest row's; `more`: ask again from the last row's seq.
  */
 export type Rows = { seq: number, more: boolean, rows: Array<RowView>, };
@@ -154,7 +134,7 @@ export type RowView = { block: JsonValue, handoff?: Handoff | null, seq: number,
 export type RowData = { seq: number, ts: number, key: string, to: Target, kind: RowKind, fleet: string, issue?: number | null, text: string, open: boolean, prompt?: string | null, push?: Push | null, };
 
 /**
- * Where a row goes: a thread by id, a repo's desk thread, or the owner alone.
+ * Where a row goes: a chat by id, a repo's desk (its owner cards), or the owner alone.
  */
 export type Target = { "k": "thread", id: string, } | { "k": "desk", repo: string, } | { "k": "owner" };
 
@@ -169,31 +149,9 @@ export type RowKind = "ask" | "decision" | "handoff" | "run-card" | "config-card
 export type Push = { title: string, body: string, tag: string, };
 
 /**
- * A linked thread's chip: `from t5`, `continued in t6`.
+ * A card's content (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line; an orchestrator's answer, its `ask` and `open` while the owner may [change] it), `msg` (the owner's line), `ask` (the question; `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; `open` unless stale; once applied, `answer` by whom, when and its backup as `choice`), `secret` (why, `from` its name), `run` (a run card, `from` its id).
  */
-export type Link = { w: string, t: string, };
-
-/**
- * One thread: its bar (`ds`: fleet · harness · model · state), its last messages, the live line's `state`; working, the turn's start `since`, and the `queued` messages above the box; the config proposals `waiting`; its model and effort `chips`.
- */
-export type ThreadView = { id: string, title: string, ds: string, state: string, waiting: Array<string>, since?: number | null, queued: Array<QueuedMsg>, chips: Array<Chip>, page: ThreadPage, };
-
-/**
- * A message queued for the turn's end, by its id `q`.
- */
-export type QueuedMsg = { q: number, text: string, };
-
-/**
- * A page of a thread's messages; `older`: the seq to load the messages before, else the `started` line's time and conductor folder `dir`; the thread's `id`, and whether it is `archived` (opened read-only, [restore]).
- */
-export type ThreadPage = { id: string, archived: boolean, msgs: Array<Msg>, older?: number | null, started: number, dir: string, };
-
-/**
- * A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`, `signin` on `host`; a conductor's answer, its `ask` and `open` while the owner may [change] it), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question; `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; `open` unless stale; once applied, `answer` by whom, when and its backup as `choice`), `secret` (why, `from` its name), `resumed` (the session), `sleep`, `fold` (a finished turn's run of commands, `cmds`); `link` the thread it links to; `run` (a run card, `from` its id).
- */
-export type Msg = { seq: number, ts: number, kind: string, text: string, link?: Link | null, from: string, files: Array<FileRef>, retry: boolean, signin?: string | null, host: string, ask?: Ask | null, routine: boolean, answer?: Answered | null, open: boolean, cmds: Array<string>, handoff?: Handoff | null, run?: RunCard | null, };
-
-export type FileRef = { name: string, size: number, };
+export type Msg = { seq: number, ts: number, kind: string, text: string, from: string, ask?: Ask | null, routine: boolean, answer?: Answered | null, open: boolean, run?: RunCard | null, };
 
 /**
  * A decided ask: the option `n` chosen (none: an "other" answer), its text, by whom, when.
@@ -211,18 +169,6 @@ export type HandoffFrom = { agent: string, thread: string, repo: string, };
  * A pending handoff's row as the board's card shows it: option `n`, its `text`, the `thread` it delivers to (`new`: a new thread); picked by the paired `POST /api/v1/<op>` with `fleet`, `id`, `choice` = `n` and `mtime`.
  */
 export type HandoffChoice = { n: number, text: string, thread: string, op: string, fleet: string, id: string, };
-
-/**
- * API v1's `repo/<fleet>/threads`: the repo's conductor threads, newest-active first.
- */
-export type RepoThreads = { repo: string, threads: Array<RepoThread>, };
-
-/**
- * A conductor thread: its `last` line and time, `awake` (its conductor not asleep), `newest` on the ongoing one (the first not archived).
- */
-export type RepoThread = { id: string, title: string, last: LastLine, unread: boolean, awake: boolean, archived: boolean, newest: boolean, };
-
-export type LastLine = { line: string, ts: number, };
 
 /**
  * A run card as its thread shows it: what it runs, why, what it touches, where, its sha; open until `exp`, then `state` (`open`, `running`, `approved`, `denied`, `expired`) with `by`, the exit `code` and the output `tail`.

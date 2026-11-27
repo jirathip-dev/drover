@@ -47,7 +47,7 @@ fn card(events: &[Event], s: &IssueState, ep: &Episode, step: &Step, code: Optio
 pub fn escalate(
     pass: &Pass,
     cfg: &Config,
-    r: &dyn Runner,
+    _: &dyn Runner,
     (s, ep): (&IssueState, &Episode),
     step: &Step,
     code: Option<&str>,
@@ -82,7 +82,7 @@ pub fn escalate(
     let at = a.str("routed").map(String::from).or(to);
     let reached = match (&step.level, &at) {
         (Level::Orchestrator { .. }, Some(_)) if !new => Ok(()),
-        (Level::Orchestrator { .. }, Some(t)) => lane_ask(ctx, cfg, r, t, a).map(drop),
+        (Level::Orchestrator { .. }, Some(t)) => lane_ask(ctx, cfg, t, a).map(drop),
         (Level::Orchestrator { .. }, None) => Err(anyhow::anyhow!("no orchestrator thread")),
         _ => Ok(()),
     };

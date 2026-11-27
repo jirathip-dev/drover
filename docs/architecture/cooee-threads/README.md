@@ -2,7 +2,7 @@
 
 ## Summary
 
-Decision: drover cuts its thread store, its thread engine, its thread screens and `drover chat`. Chat lives only in
+Decision: drover cuts its thread store, its thread engine, its thread screens and drover chat. Chat lives only in
 a client: cooee's Orchestrator agent, or a terminal session, each loading drover's orchestrator rulebook as a
 profile and calling drover's CLI and `/api/v1`. Drover keeps asks, cards, the rulebook, the row and action contract,
 its web push, and its board, TUI and page, which answer asks and cards with taps. A short-lived judge lane, one per
@@ -82,7 +82,7 @@ escalated ask is an owner card. A routine ask nobody answers still takes its rec
 
 | Thing | Before (staging today) | After D4 |
 |---|---|---|
-| Orchestrator chat | drover threads (`thread new`, the page, `drover chat`), or a cooee chat attached | a client only: cooee's Orchestrator, or a terminal session |
+| Orchestrator chat | drover threads (`thread new`, the page, drover chat), or a cooee chat attached | a client only: cooee's Orchestrator, or a terminal session |
 | Messages, uploads, model and effort pick, running the chat agent | drover for its threads | the client |
 | Role text, brief, hook, permissions | drover's | drover's, served as profiles and by `orchestrator attach` |
 | Asks, cards, handoffs, system lines, merges, alerts | drover rows | the same rows, with the same keys |

@@ -22,7 +22,7 @@ pub fn role_prompt(role: &str) -> &'static str {
         "orchestrator" => concat!(
             include_str!("../roles/orchestrator/role.md"),
             "\n",
-            include_str!("../roles/orchestrator/thread.md")
+            include_str!("../roles/orchestrator/chat.md")
         ),
         "lesson" => include_str!("../roles/lesson.md"),
         "triage" => include_str!("../roles/triage.md"),

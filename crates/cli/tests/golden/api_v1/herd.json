@@ -6,27 +6,6 @@
         "lanes": [
           {
             "account": null,
-            "act": "idle",
-            "age": "0s",
-            "coat": "--c:#96685a;--d:#77524a;--m:#4a342c;--b:transparent",
-            "effort": null,
-            "gone": false,
-            "grow": "impl",
-            "harness": "claude",
-            "host": null,
-            "issue": null,
-            "model": "opus",
-            "name": "Let's talk about #30 · t1",
-            "role": "orchestrator",
-            "runtime": "shed-acp",
-            "shown": "unknown",
-            "state": "unknown",
-            "title": null,
-            "tone": "a",
-            "where": ""
-          },
-          {
-            "account": null,
             "act": "impl",
             "age": "100s",
             "coat": "--c:#bd8f4e;--d:#96703a;--m:#241a10;--b:#efe7dc",

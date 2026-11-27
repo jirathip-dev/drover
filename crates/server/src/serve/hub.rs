@@ -205,7 +205,6 @@ impl Hub {
         let out = text.map(|j| (e.rev, j));
         drop(m);
         self.built.notify_all();
-        s.mark_read(ctx, &k.path, k.paired);
         out
     }
 

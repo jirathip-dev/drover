@@ -35,7 +35,7 @@ pub struct Config {
     pub old_names: bool,
     /// The Telegram bridge is removed; a leftover `[telegram]` is a warning (`Config::warnings`).
     pub telegram: Option<toml::Value>,
-    /// `[chat]`, new threads' orchestrator defaults over the fleet's `role.orchestrator` (`orchestrator::defaults`).
+    /// `[chat]`: read by no code since the thread cut (#1773); kept so a fleet.toml that sets it still loads.
     pub chat: Chat,
     /// `[self_update]`, the release branch the live install follows and the optional staging serve.
     pub self_update: SelfUpdate,

@@ -72,7 +72,7 @@ fn api_v1_reads_and_live_answer_within_200ms_with_the_db_write_locked_and_gh_slo
     db.execute(old, [now - 7200]).unwrap();
     db.execute_batch("BEGIN IMMEDIATE; INSERT INTO leases VALUES ('drive', 1, 'h', 0, 0, '')")
         .unwrap();
-    let paths = ["state", "needs", "lanes", "queue", "herd", "chat"];
+    let paths = ["state", "needs", "lanes", "queue", "herd"];
     let (mut api, mut live, mut status) = (vec![], vec![], vec![]);
     for round in 0..4 {
         for p in paths.iter().map(|p| format!("/api/v1/{p}")).chain(["/live".into()]) {

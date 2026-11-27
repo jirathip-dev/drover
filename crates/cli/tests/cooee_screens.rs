@@ -961,10 +961,9 @@ fn parity_45_a_row_opens_its_issue_sheet_with_lit_stage_links_and_its_asking_thr
         json!({"text": "FAIL · aaaaaaa · 58m", "tone": "bad"})
     );
     let asked = get("/screens/issue?repo=sendmeter&issue=17");
-    let thread = find(&asked, "asked");
-    assert_eq!(
-        (&thread["title"], &thread["tap"]),
-        (&json!("asked in t9"), &json!({"thread": "t9"}))
+    assert!(
+        !asked.to_string().contains("asked in"),
+        "no link to a drover thread: {asked}"
     );
     like(&fix, "issue", false);
     like(&asked, "issue", false);
@@ -1188,59 +1187,6 @@ fn parity_47_the_backlog_sheet_filters_searches_and_queues_the_ticked_issues() {
         "{ids:?}"
     );
     assert_eq!(find(&q, "backlog-sendmeter")["title"], "backlog (1)");
-}
-
-const WAIT: &str = "const wait = async f => { for (let i = 0; i < 200; i++) { const v = f(); if (v) return v; await new Promise(r => setTimeout(r, 50)); } return null; }; const on = s => document.querySelector(s)?.closest('section.tab')?.hidden === false;";
-
-fn walk(url: &str, tab: Option<&str>, js: &str) -> String {
-    let mut w = webview();
-    if let Some(t) = tab {
-        w.env("DROVER_TAB", t);
-    }
-    let png = tmpdir("webkit-thread").join("page.png");
-    let late = format!("{WAIT} Object.defineProperty(window, 'late', {{ get: async () => {{ {js} }} }})");
-    let o = w.args([url, "390", "-", "x"]).arg(&png).arg(late).output().unwrap();
-    let out = String::from_utf8_lossy(&o.stdout).into_owned();
-    assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
-    out.split_whitespace().skip(2).collect::<Vec<_>>().join(" ")
-}
-
-#[test]
-fn parity_46_a_queue_rows_sheet_links_its_asking_thread_in_webkit_and_back_returns() {
-    if no_webkit() {
-        return;
-    }
-    let (c, _) = recorded("cooee-webkit-thread");
-    let ev = |n, kind: &str, d: Value| append(&c.state, &Event::new(T - 60, "sendmeter", n, kind, d)).unwrap();
-    ev(
-        None,
-        "thread-new",
-        json!({"thread": "t9", "title": "Split the PR", "harness": "claude"}),
-    );
-    let ask = json!({"id": "q8", "question": "Split the PR?", "options": ["split", "keep"], "thread": "t9"});
-    ev(Some(17), "needs-decision", ask);
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let base = format!("http://{}/", l.local_addr().unwrap());
-    let c2 = c.clone();
-    std::thread::spawn(move || drover::serve::serve_on(&c2, &working(), l, false));
-    let tap = "const row = await wait(() => document.querySelector('[data-id=\"q-sendmeter-17\"]')); if (!row) return [0, 0, 0, 0]; row.click();
-        const asked = await wait(() => document.querySelector('#sheet:not([hidden]) [data-id=\"asked\"]')); if (!asked) return [1, 0, 0, 0]; asked.click();
-        const open = await wait(() => location.hash === '#threads/t9' && on('.scr[data-id=\"thread-t9\"]')); history.back();
-        const back = await wait(() => location.hash === '#queue' && on('[data-id=\"q-sendmeter-17\"]'));
-        return [1, 1, open ? 1 : 0, back ? 1 : 0];";
-    assert_eq!(
-        walk(&base, Some("queue"), tap),
-        "1 1 1 1",
-        "row found, its issue sheet links the asking thread, the thread opened, back on the Queue"
-    );
-    let push = "const open = await wait(() => on('.scr[data-id=\"thread-t9\"]')); history.back();
-        const list = await wait(() => location.hash === '#threads' && on('.scr[data-id=\"threads\"]'));
-        return [open ? 1 : 0, list ? 1 : 0];";
-    assert_eq!(
-        walk(&format!("{base}#threads/t9"), None, push),
-        "1 1",
-        "a push's link opens t9; back is the list"
-    );
 }
 
 fn later_of(cards: &Value) -> Vec<&str> {

@@ -2,7 +2,7 @@
 
 ## Summary
 
-Decision: drover cuts its thread store, its thread engine, its thread screens and `drover chat`. Chat lives only in
+Decision: drover cuts its thread store, its thread engine, its thread screens and drover chat. Chat lives only in
 a client (cooee's Orchestrator agent or a terminal session) that loads drover's orchestrator rulebook as a profile
 and calls drover's CLI and `/api/v1`. Drover keeps asks, cards, the rulebook, the rows and actions, its push, and its
 board, TUI and page, which answer with taps. A short-lived judge lane per open lane ask or needs-human card does the
@@ -18,7 +18,7 @@ Read [README.md](README.md) first, then this, [shapes.md](shapes.md), [boundarie
 
 The owner chats in cooee, and cooee runs its own Orchestrator agent on drover's rulebook. Drover also runs a second
 chat engine for its own threads: a thread store, a session engine typing into agents through shed, thread screens and
-`drover chat`, about 2.3k lines that duplicate the client's job and cause #1598 when both engines touch one session.
+drover chat, about 2.3k lines that duplicate the client's job and cause #1598 when both engines touch one session.
 How does drover drop its chat while asks and cards still reach the chat that filed the work, the owner can still
 answer everything from drover's own board, TUI and page, and asks still get answered on the owner's behalf when the
 spec settles them?
@@ -74,7 +74,7 @@ spec settles them?
 ## Decision
 
 - **No drover threads.** From D3 drover makes no new thread; from D4 it has no thread store, engine, screens,
-  uploads or `drover chat`. `GET /api/v1/thread/<id>/rows` stays: rows are a function of the log, so old history
+  uploads or drover chat. `GET /api/v1/thread/<id>/rows` stays: rows are a function of the log, so old history
   stays readable by id.
 - **Client chats.** A chat is opened by a client with `orchestrator-attach {fleet, thread}`: cooee's Orchestrator, or
   a terminal through D2's CLI attach verb (a repo, optionally an old thread id), which logs the same attach and prints
@@ -176,7 +176,7 @@ Nothing in drover imports, calls or holds an address of cooee; the `/plugin/` ba
 | D2 | drover | clients: `deliver` skips an attached chat; attach takes `all`, `none`; the CLI attach verb; `said` and `--typed` reading it; `push` always set; the `.keys` of `said` and attach | D1 | #1598 |
 | #1610 | drover | handoffs to a repo are an open `desk` row at once, `land` deleted; [move] as `handoff-move` | D2 | #1610 |
 | D3 | drover | the freeze: `thread new` and [New] refused `THREADS_CUT`; lane asks routed to the judge, not to threads; attach adopts an archived thread id; each open thread's closing row | #1609, #1610, C1 released | |
-| D4 | drover | the cut: stop and archive every open thread, delete the store, engine, screens, uploads code, `drover chat` and the `thread` verbs but `handoff`; the note field on taps; the `thread-new` ban | D3 | |
+| D4 | drover | the cut: stop and archive every open thread, delete the store, engine, screens, uploads code, drover chat and the `thread` verbs but `handoff`; the note field on taps; the `thread-new` ban | D3 | |
 | D5 | drover | `GET /api/v1/manifest` and its `.keys`; `cooee-plugin.toml` generated from it | D2 | |
 | D6 | drover | push leaves core: `webpush.rs` and the pairing and devices parts of `devices.rs` move to drover-server (the page's push, sent by serve from events), with `/push/*`, `drover serve pair|approve|devices`, `drover push test` and the `alerts-off`, doctor and timer subscription lines; core keeps events, `[[notify]]`'s command hook and the file helpers; the `webpush` ban | D4 | |
 | #1608 | drover | cap raises within 5% are the judge's, a quiet row | #1609 | |
@@ -250,7 +250,7 @@ D1's `append_only` and `/plugin/` ban stay.
 | `crates/core/src/orchestrator.rs` | D2 adds a guard in `deliver`; D4 deletes about 900 lines ([owners.md](owners.md)) |
 | `crates/core/src/lib.rs` | #1609 and D3: a lane ask goes to the judge; `to_owner` takes no thread |
 | `crates/core/src/drive.rs`, `spawn.rs` | #1609: the judge spawn |
-| `crates/server/src/serve/chat.rs` | D4: the card builders move to `serve/cards.rs`, the rest is deleted |
+| crates/server/src/serve/chat.rs | D4: the card builders move to `serve/cards.rs`, the rest is deleted |
 | `cooee-plugin.toml` | D5: generated |
 | `.drover/rules.md` | line 13 widened by D2 and D4, none added |
 | `docs/rows.md` | the contract's page: D2, #1610 and D5 add their routes and actions |

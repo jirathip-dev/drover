@@ -241,7 +241,7 @@ pub fn open_rollout(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, 
     let filed = events.iter().rfind(|e| e.is("issue-filed", fleet, n));
     let filed = filed
         .and_then(|e| e.str("filed_in"))
-        .filter(|t| orchestrator::find(&events, t).is_ok());
+        .filter(|t| orchestrator::attached(&events, t).is_some());
     let to = filed.or_else(|| crate::thread::route::route(cfg, &events, fleet));
     let d = json!({"to": to, "snippet": snippet});
     emit(

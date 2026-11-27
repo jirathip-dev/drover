@@ -58,116 +58,45 @@ fn setup(name: &str) -> (drover::Ctx, FakeShed) {
 }
 
 #[test]
-fn orchestrators_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_closed() {
+fn orchestrator_starts_and_archived_threads_make_no_lane() {
     let (c, b) = setup("orchestrator-lanes");
-    let cfg0 = drover::config::Config::load(&c.config).unwrap();
-    let agents = drover::link::fresh(&c, &cfg0, &b.on(&Fake::default()))
+    let d = json!({"thread": "t8", "by": "migration"});
+    append(&c.state, &Event::new(900_400, "drover", None, "thread-archive", d)).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let agents = drover::link::fresh(&c, &cfg, &b.on(&Fake::default()))
         .unwrap()
         .sessions();
-    let cfg = drover::config::Config::load(&c.config).unwrap();
     let events = read(&c.state).unwrap();
     let st = drover::events::fold(&events);
     let lanes = drover::lanes::join(&cfg, None, &events, &st, &agents);
-    let row = |l: &drover::lanes::Lane| {
-        let s = |v: &Option<String>| v.clone().unwrap_or_default();
-        (
-            s(&l.fleet),
-            l.name.clone(),
-            l.role.clone(),
-            l.state.word(),
-            s(&l.model),
-            s(&l.thread),
-            l.issue,
-        )
-    };
-    let got: Vec<_> = lanes.iter().map(row).collect();
-    let r = |f: &str, n: &str, role: &str, st: &str, m: &str, t: &str, i| {
-        (f.into(), n.into(), role.into(), st.into(), m.into(), t.into(), i)
-    };
+    let mut got: Vec<_> = lanes
+        .iter()
+        .map(|l| (l.name.clone(), l.role.clone(), l.thread.clone()))
+        .collect();
+    got.sort();
+    let r = |n: &str, role: &str| (n.to_string(), role.to_string(), None);
     assert_eq!(
         got,
         [
-            r("drover", "drover-impl-5", "impl", "idle", "sonnet", "", Some(5)),
-            r(
-                "drover",
-                "Orchestrator-run design lanes · t6",
-                "orchestrator",
-                "idle",
-                "opus",
-                "t6",
-                None
-            ),
-            r("all", "Every repo · t7", "orchestrator", "working", "opus", "t7", None),
-            r("", "orchestrator-t99", "other", "idle", "", "", None),
-            r("", "side", "other", "idle", "", "", None),
-            r("drover", "Old chat · t8", "orchestrator", "asleep", "opus", "t8", None),
+            r("drover-impl-5", "impl"),
+            r("orchestrator-t6", "other"),
+            r("orchestrator-t7", "other"),
+            r("orchestrator-t99", "other"),
+            r("side", "other"),
         ]
     );
-    let groups = drover::lanes::group(&lanes, |l| l.since);
-    let names = |sec: &str, f: &str| -> Vec<String> {
-        let subs = &groups.iter().find(|g| g.0 == sec).unwrap().1;
-        subs.iter()
-            .find(|s| s.0 == f)
-            .unwrap()
-            .1
-            .iter()
-            .map(|l| l.name.clone())
-            .collect()
-    };
-    let idle: Vec<&str> = groups
-        .iter()
-        .find(|g| g.0 == "idle")
-        .unwrap()
-        .1
-        .iter()
-        .map(|s| s.0.as_str())
-        .collect();
-    assert_eq!(idle, ["drover", "Others"]);
-    assert_eq!(
-        names("idle", "drover"),
-        ["Orchestrator-run design lanes · t6", "Old chat · t8", "drover-impl-5"]
-    );
-    assert_eq!(names("working", "all repos"), ["Every repo · t7"]);
-    assert_eq!(names("idle", "Others"), ["orchestrator-t99", "side"]);
 }
 
 #[test]
-fn the_lanes_api_carries_orchestrator_rows_with_their_thread() {
+fn the_lanes_api_has_no_asleep_orchestrator_row() {
     let (c, b) = setup("orchestrator-lanes-page");
     let f = Fake::default();
     let r = b.on(&f);
     let s = Server::new(&c, &r, None);
     let v: serde_json::Value = serde_json::from_str(&api(&s, "", "", T, "lanes")).unwrap();
-    let repo = |sec: &str, f: &str| {
-        let secs = v["sections"].as_array().unwrap();
-        let sec = secs.iter().find(|x| x["name"] == sec).unwrap_or_else(|| panic!("{v}"));
-        let repos = sec["repos"].as_array().unwrap();
-        repos.iter().find(|r| r["name"] == f).unwrap_or_else(|| panic!("{sec}"))["lanes"].clone()
-    };
-    let drover = repo("idle", "drover");
-    let row = |name: &str| {
-        let all = drover.as_array().unwrap();
-        all.iter()
-            .find(|l| l["name"] == name)
-            .unwrap_or_else(|| panic!("{drover}"))
-            .clone()
-    };
-    assert_eq!(drover[0]["name"], "Orchestrator-run design lanes · t6");
-    assert_eq!(
-        (&drover[0]["role"], &drover[0]["thread"]),
-        (&json!("orchestrator"), &json!("t6"))
-    );
-    let old = row("Old chat · t8");
-    assert_eq!(
-        (&old["gone"], &old["thread"], &old["state"], &old["tone"]),
-        (&json!(true), &json!("t8"), &json!("asleep"), &json!("m")),
-        "asleep reads muted: {old}"
-    );
-    assert_eq!(repo("working", "all repos")[0]["thread"], "t7");
-    let others = repo("idle", "Others");
+    let text = v.to_string();
     assert!(
-        others.as_array().unwrap().iter().all(|l| l["thread"].is_null())
-            && others.to_string().contains("orchestrator-t99"),
-        "{others}"
+        !text.contains("Old chat") && !text.contains("\"asleep\"") && !text.contains("\"orchestrator\""),
+        "{v}"
     );
 }

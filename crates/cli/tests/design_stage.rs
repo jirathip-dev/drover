@@ -163,19 +163,11 @@ fn post(s: &Server, path: &str, body: &str, cookie: &str, now: u64) -> String {
     String::from_utf8_lossy(&s.respond(&r, now)).into_owned()
 }
 
-fn needs_and_ask(s: &Server, cookie: &str, now: u64) -> (Value, Value) {
+fn needs_and_ask(c: &drover::Ctx, s: &Server, cookie: &str, now: u64) -> (Value, Value) {
     let needs: Value = serde_json::from_str(&api(s, ADDR, cookie, now, "needs")).unwrap();
-    let chat: Value = chat_all(s, ADDR, cookie, now);
-    let msgs: Vec<Value> = chat["threads"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .flat_map(|t| t["page"]["msgs"].as_array().unwrap().clone())
-        .collect();
-    let ask = msgs
-        .into_iter()
-        .rfind(|m| m["ask"]["id"] == "q1")
-        .unwrap_or_else(|| panic!("no q1 in {chat}"));
+    let all = rows(c, s, now);
+    let ask = all.iter().rfind(|r| r["key"] == "ask-sendmeter-q1");
+    let ask = ask.unwrap_or_else(|| panic!("no q1 in {all:?}")).clone();
     (needs, ask)
 }
 
@@ -189,7 +181,7 @@ fn parity_69_the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     let r = fake(&c, HEAD);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
-    assert!(post(&s, "/thread", "op=new&repo=sendmeter&text=Design+first", &cookie, c.now).contains("t1"));
+    attach_chat(&c, "sendmeter", "t1");
     set_env("DROVER_THREAD", "t1");
     let q = run(
         &c,
@@ -205,7 +197,7 @@ fn parity_69_the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     drive(&c, &r);
     let ask = &kinds(&c, "needs-decision")[0];
     assert_eq!((ask.issue, ask.str("thread")), (Some(12), Some("t1")));
-    let (needs, ask) = needs_and_ask(&s, &cookie, c.now + 5);
+    let (needs, ask) = needs_and_ask(&c, &s, &cookie, c.now + 5);
     let card = &needs["asks"][0];
     assert!(
         card["ask"]["id"] == "q1" && card["ask"]["issue"] == 12 && card["pngs"][0] == "docs/design/meter/1440.png",
@@ -231,11 +223,11 @@ fn parity_69_the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     );
     assert!(res.starts_with("HTTP/1.1 303"), "{res}");
     assert_eq!(kinds(&c, "design-approved")[0].str("by"), Some("owner"));
-    let (needs, ask) = needs_and_ask(&s, &cookie, c.now + 15);
+    let (needs, ask) = needs_and_ask(&c, &s, &cookie, c.now + 15);
     assert_eq!(needs["asks"], json!([]), "{needs}");
     assert_eq!(
-        (&ask["open"], &ask["answer"]["choice"]),
-        (&json!(false), &json!("approve")),
+        (&ask["open"], &ask["kind"]),
+        (&json!(false), &json!("decision")),
         "{ask}"
     );
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "reject"]);
@@ -815,8 +807,7 @@ fn staged(name: &str, flag: &str) -> (drover::Ctx, std::path::PathBuf, RealGit, 
     let toml = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(&c.config, format!("{toml}{ARCHITECT}")).unwrap();
     synced(&c);
-    let t = run(&c, &Fake::default(), &["thread", "new", "sendmeter", "meter"]);
-    assert!(t.0 == 0 && t.1.contains("t1"), "{}", t.1);
+    attach_chat(&c, "sendmeter", "t1");
     set_env("DROVER_THREAD", "t1");
     let q = run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", flag]);
     std::env::remove_var("DROVER_THREAD");
@@ -874,11 +865,7 @@ fn an_architect_ask_quotes_the_summary_and_links_the_adr_folder_at_the_sha_and_a
     assert_eq!((ask.str("summary"), ask.str("link")), (Some(sum), Some(link.as_str())));
     let (code, asks) = run(&c, &r, &["asks", "sendmeter"]);
     assert!(code == 0 && asks.contains(sum) && asks.contains(&link), "{asks}");
-    let (code, thread) = run(&c, &r, &["thread", "show", "t1"]);
-    assert!(
-        code == 0 && thread.contains(&format!("asks q1: {sum}\n\n{link}")),
-        "{thread}"
-    );
+    assert_eq!(ask.str("thread"), Some("t1"));
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "split the sync"]).0, 0);
     c.now += 1000;
     drive(&c, &r);

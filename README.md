@@ -79,11 +79,9 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 - An orchestrator thread can live in cooee (#690).
 - The lifeboat page at `/api/v1/lifeboat` for when cooee is down (#757).
 - The phone page (`drover serve`) stays: it draws the same `/screens/` JSON cooee draws: Queue, Lanes, Events, the
-  Fleets sheet and the cards (#927), plus a Threads tab of its own (#1072); its links open in a new tab (#1085).
-- Threads: a tap or push opens the thread, `#threads/<id>` with back, and config, secret and run cards in a thread
-  (#1088); typed text, focus and scroll survive repaints, with per-thread drafts (#1084).
-- Threads at parity with the old chat: reading (#1086), the composer (#1087), two panes from 1000 px (#1118) and
-  an edge swipe back (#1170).
+  Fleets sheet and the cards (#927); its links open in a new tab (#1085).
+- Drover runs no chat (#1773): its thread store, engine, Threads tab and terminal chat are gone; a chat lives in a
+  client that attaches (`drover attach`, `POST /api/v1/orchestrator-attach`), and old threads stay readable by id.
 - Queue counts and repo chips (#1089), a row tap always opens the issue sheet (#1090) with PASS/FAIL per round
   (#1238), and done today opens today's merges (#1172).
 - Scene: the old Herd and its animations back as a full-page header toggle, kept per phone (#1305).

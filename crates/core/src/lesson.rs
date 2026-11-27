@@ -34,8 +34,8 @@ pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -
     s += "\n## The owner in orchestrator threads\n\n";
     let owner_msg = |e: &&&Event| {
         e.kind == "thread-msg"
-            && e.str("from").is_some_and(|f| f != "orchestrator")
-            && crate::orchestrator::link(e).is_none()
+            && e.str("from")
+                .is_some_and(|f| !matches!(f, "orchestrator" | "system") && !crate::orchestrator::is_id(f))
     };
     for e in recent.iter().filter(owner_msg) {
         let text = e.str("text").unwrap_or_default().replace('\n', "\n  ");

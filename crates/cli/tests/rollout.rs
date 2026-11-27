@@ -19,8 +19,7 @@ fn setup(name: &str, b: &FakeShed) -> drover::Ctx {
     c.exe = env!("CARGO_BIN_EXE_drover").into();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     for t in ["t1", "t2"] {
-        let (_, out) = run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Work"]);
-        assert_eq!(out, format!("{t}\n"));
+        attach_chat(&c, "sendmeter", t);
     }
     let spawn = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"});
     append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", spawn)).unwrap();
@@ -106,7 +105,7 @@ fn a_merged_rollout_is_one_row_in_the_filing_thread_waking_its_orchestrator() {
     let c = setup("rollout-filed", &b);
     filed_in(&c, "t1");
     let (t1, t2) = (rows(&c, "t1").len(), rows(&c, "t2").len());
-    let r = merge(&c, &b, BODY);
+    merge(&c, &b, BODY);
     let open = kinds(&c, "rollout-open");
     assert_eq!(open.len(), 1);
     assert_eq!((open[0].issue, open[0].str("to")), (Some(12), Some("t1")));
@@ -119,11 +118,10 @@ fn a_merged_rollout_is_one_row_in_the_filing_thread_waking_its_orchestrator() {
         new[0]
     );
     assert!(new[0].contains(SNIPPET) && new[0].contains("drover config propose t1 <file> --rollout 12"));
-    assert_eq!(rows(&c, "t2").len(), t2, "the newer thread gets nothing");
-    let sent = r.calls.borrow().join("\n");
+    assert_eq!(rows(&c, "t2").len(), t2, "the newer chat gets nothing");
     assert!(
-        sent.contains("orchestrator-t1") && sent.contains("swift = \"6.1\""),
-        "{sent}"
+        kinds(&c, "orchestrator-start").is_empty(),
+        "drover starts no chat session"
     );
 }
 

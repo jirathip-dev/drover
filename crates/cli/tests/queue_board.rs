@@ -187,22 +187,13 @@ fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
         (d.len(), d[0].str("choice"), d[0].str("by")),
         (1, Some("after #10"), Some("owner"))
     );
-    assert!(
-        sh.has("orchestrator-t6") && host.called("shed send orchestrator-t6"),
-        "{:?}",
-        host.calls.borrow()
-    );
-    let chat: Value = chat_all(&s, ADDR, &cookie, T);
-    let t = (chat["threads"].as_array().unwrap().iter())
-        .find(|t| t["id"] == "t6")
-        .unwrap_or_else(|| panic!("{chat}"));
-    let m = (t["page"]["msgs"].as_array().unwrap().iter())
-        .find(|m| m["ask"]["id"] == "q398")
-        .unwrap_or_else(|| panic!("{t}"));
+    let events = read(&c.state).unwrap();
+    let rows = drover::thread::rows(&events);
+    let d = rows.iter().rfind(|(_, r)| r.key == "ask-sendmeter-q398").unwrap();
     assert_eq!(
-        (&m["open"], &m["answer"]["choice"]),
-        (&json!(false), &json!("after #10")),
-        "{m}"
+        d.1.prompt.as_deref(),
+        Some("DECISION q398: after #10"),
+        "the chat's client types the decision in"
     );
     assert!(!api(&s, ADDR, "", T, "queue").contains("ship the bell now?"));
 }

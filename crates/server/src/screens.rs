@@ -12,7 +12,6 @@ use anyhow::Context;
 use blocks as k;
 use k::{Act, Confirm, Figure, Label, Shown, Tap, Tile, Time, Tone, Toned};
 use serde_json::Value;
-use std::sync::atomic::Ordering::Relaxed;
 
 #[path = "screens_lanes.rs"]
 mod lanes;
@@ -72,14 +71,8 @@ pub fn places() -> Value {
     serde_json::to_value(crate::manifest::manifest("").screens).unwrap_or_default()
 }
 
-/// The standalone page's places: the manifest's, then the Threads tab and the Hosts row (never the plugin's).
+/// The standalone page's places: the manifest's, then the Hosts row (never the plugin's).
 pub fn page_places() -> Value {
-    let threads = fields([
-        ("type", "header-strip".into()),
-        ("id", "threads".into()),
-        ("label", "Threads".into()),
-        ("screen", "/screens/threads".into()),
-    ]);
     let hosts = fields([
         ("type", "menu-row".into()),
         ("label", "Hosts".into()),
@@ -87,7 +80,7 @@ pub fn page_places() -> Value {
         ("screen", "/screens/hosts".into()),
     ]);
     let mut all = places().as_array().cloned().unwrap_or_default();
-    all.extend([Value::Object(threads), Value::Object(hosts)]);
+    all.push(Value::Object(hosts));
     Value::Array(all)
 }
 
@@ -95,20 +88,6 @@ pub fn page_places() -> Value {
 mod fleets;
 #[path = "screens_hosts.rs"]
 mod hosts;
-
-const THREAD_ACTIONS: [&str; 11] = [
-    "thread-new",
-    "thread-say",
-    "thread-retry",
-    "thread-archive",
-    "thread-restore",
-    "thread-queue",
-    "thread-steer",
-    "thread-unqueue",
-    "thread-stop",
-    "thread-model",
-    "thread-signin",
-];
 
 pub(super) fn ticking(t: u64, label: &str) -> Time {
     Time {
@@ -828,10 +807,6 @@ fn issue_sheet(
             sheet(format!("/screens/lanes/{}", r.lane)),
         ));
     }
-    if let Some((a, t)) = r.open.as_ref().and_then(|a| Some((a, a.thread.as_ref()?))) {
-        let title = format!("asked in {}", a.title.as_ref().filter(|s| !s.is_empty()).unwrap_or(t));
-        links.push(link("asked", &title, thread(t)));
-    }
     let links = links.into_iter().map(Kind::block).collect();
     blocks.push(section("links", "links", vec![rows_list("links-list", links)]));
     if !r.lanes.is_empty() {
@@ -1099,7 +1074,7 @@ fn ask_sheet(ctx: &Ctx, q: &Q) -> Option<k::Block> {
             who: String::new(),
             kind: (if routine { "routine" } else { "owner" }).into(),
             from: None,
-            pngs: super::chat::files_of(a)
+            pngs: super::cards::files_of(a)
                 .map(|f| f["name"].as_str().unwrap_or_default().into())
                 .collect(),
             thread: None,
@@ -1372,7 +1347,7 @@ fn events_screen(ctx: &Ctx, q: &Q) -> k::Block {
         }
         let s = |k: &str| e.data.get(k).and_then(Value::as_str).filter(|s| !s.is_empty());
         let repo = repos.get(&e.fleet);
-        r.tap = match (s("agent").filter(|_| k == "lane").or(s("thread")), e.pr.zip(repo)) {
+        r.tap = match (s("agent").filter(|_| k == "lane"), e.pr.zip(repo)) {
             (Some(t), _) => Some(thread(t)),
             (_, Some((pr, repo))) => Some(url(format!("https://github.com/{repo}/pull/{pr}"))),
             _ => None,
@@ -1511,9 +1486,6 @@ impl Server<'_> {
             ),
             "/screens/ask" => ask_sheet(ctx, q)?,
             "/screens/hosts" => return self.hosts_sheet(ctx),
-            p if p == "/screens/threads" || p.starts_with("/screens/threads/") => {
-                return self.threads_screen(ctx, &p[16..], q.get("before"), paired)
-            }
             _ => return None,
         };
         let snap = Some(self.snapshot().1.ts).filter(|t| *t > 0);
@@ -1912,31 +1884,11 @@ impl Server<'_> {
                 self.form_op(ctx, "card", &kv)?
             }
             "config-card" => self.form_op(ctx, "config", &[("id", s("id")), ("act", s("act"))])?,
-            "thread-signin" => crate::setup::start(ctx, &cfg, &self.r, &s("host"), &s("name"), "web")?,
-            n if THREAD_ACTIONS.contains(&n) || n == "secret-card" => {
-                let keys = [
-                    "text", "repo", "name", "act", "data", "q", "harness", "model", "effort", "req",
-                ];
+            "secret-card" => {
+                let keys = ["name", "act"];
                 let mut f: Q = keys.into_iter().map(|k| (k.into(), s(k))).collect();
-                f.extend([
-                    ("t".into(), s("thread")),
-                    ("n".into(), s("msg")),
-                    ("value".into(), s("text")),
-                ]);
-                f.insert("op".into(), n.strip_prefix("thread-").unwrap_or("secret").into());
-                let mut later = vec![];
-                let (res, more) = crate::conductor::deferred(|| super::chat::post(ctx, &self.r, &f, &mut later));
-                self.later(ctx, later.into_iter().chain(more));
-                self.kick.store(true, Relaxed);
-                let line = res?;
-                if n == "thread-new" {
-                    let id = line.split(' ').next().unwrap_or_default();
-                    let s = self
-                        .threads_screen(ctx, &format!("/{id}"), None, true)
-                        .context("no such thread")?;
-                    return Ok(Reply::screen(s, Some(line)));
-                }
-                line
+                f.extend([("t".into(), s("thread")), ("value".into(), s("text"))]);
+                super::cards::secret(ctx, &self.r, &f)?
             }
             "save-fleets" => self.save_fleets(ctx, &cfg, v)?,
             "remove-fleet" => {

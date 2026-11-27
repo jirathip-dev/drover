@@ -71,7 +71,7 @@
         "act": "idle",
         "coat": "",
         "data": {
-          "device": "iPhone e142"
+          "device": "iPhone 85d9"
         },
         "fleet": "drover",
         "glyph": "·",
@@ -91,84 +91,11 @@
         "act": "idle",
         "coat": "",
         "data": {
-          "harness": "claude",
-          "thread": "t1",
-          "title": "Let's talk about #30"
-        },
-        "fleet": "sendmeter",
-        "glyph": "·",
-        "imp": false,
-        "issue": null,
-        "k": null,
-        "plain": "sendmeter thread-new",
-        "pr": null,
-        "run": null,
-        "seq": 5,
-        "text": "thread-new",
-        "tone": "m",
-        "ts": 1000000,
-        "type": "thread-new"
-      },
-      {
-        "act": "idle",
-        "coat": "",
-        "data": {
-          "from": "owner",
-          "text": "Let's talk about #30",
-          "thread": "t1"
-        },
-        "fleet": "sendmeter",
-        "glyph": "·",
-        "imp": false,
-        "issue": null,
-        "k": null,
-        "plain": "sendmeter thread-msg",
-        "pr": null,
-        "run": null,
-        "seq": 6,
-        "text": "thread-msg",
-        "tone": "m",
-        "ts": 1000000,
-        "type": "thread-msg"
-      },
-      {
-        "act": "idle",
-        "coat": "--c:#8a5a33;--d:#6f4527;--m:#2e2019;--b:transparent",
-        "data": {
-          "account": "auto",
-          "agent": "orchestrator-t1",
-          "confirmed": true,
-          "effort": null,
-          "harness": "claude",
-          "model": "opus",
-          "pane": "orchestrator-t1",
-          "resumed": false,
-          "runtime": "shed-acp",
-          "thread": "t1"
-        },
-        "fleet": "sendmeter",
-        "glyph": "·",
-        "imp": false,
-        "issue": null,
-        "k": null,
-        "plain": "sendmeter orchestrator-start",
-        "pr": null,
-        "run": null,
-        "seq": 7,
-        "text": "orchestrator-start",
-        "tone": "m",
-        "ts": 1000000,
-        "type": "orchestrator-start"
-      },
-      {
-        "act": "idle",
-        "coat": "",
-        "data": {
           "host": "bazzite",
           "machine": "bazzite",
           "name": "claude B",
           "pane": "drover-setup-claude-B",
-          "via": "web iPhone e142"
+          "via": "web iPhone 85d9"
         },
         "fleet": "",
         "glyph": "·",
@@ -178,7 +105,7 @@
         "plain": " setup",
         "pr": null,
         "run": null,
-        "seq": 8,
+        "seq": 5,
         "text": "setup",
         "tone": "m",
         "ts": 1000000,
@@ -186,7 +113,7 @@
       }
     ],
     "refresh": false,
-    "seq": 8
+    "seq": 5
   },
   "route": "GET /api/v1/events",
   "schema": {

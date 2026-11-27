@@ -31,27 +31,27 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 12 | Appearance per phone: theme, colours, pixel or ascii style | — | open |
 | 13 | Settings sheet shell: section index, deep links, alert dot | — | open |
 | 14 | Report mode: tap an element, add a note, send | — | open |
-| 15 | Thread list per repo: unread dot, state, last line, badge | parity_15 | kept |
-| 16 | Start a thread by typing; auto title, then retitle | — | open |
-| 17 | Swipe to archive, 5 s undo, restore | — | open |
-| 18 | Message blocks: colours, markdown, system lines, folded tool runs | parity_18 | kept |
-| 19 | Fenced code blocks with a copy button | parity_19 | kept |
-| 20 | Several attachments per message, thumbnails, image viewer (#406) | parity_20 | kept |
-| 21 | Instant send: sending…/✓, red retry on failure | parity_21 | page-only |
-| 22 | Growing composer, pinned send, smart follow-scroll | — | open |
-| 23 | iOS keyboard: composer sits on keyboard, page never jumps | parity_r4 | kept |
-| 24 | Back button and edge swipe (#1170); side-by-side layout ≥1000 px (#403, #1118) | parity_24 | kept |
-| 25 | Working pill with timer and [stop]; reconnecting/offline states | — | open |
-| 26 | Queue or steer during a turn; edit or remove queued | parity_26 | page-only |
-| 27 | Per-thread drafts, picked files included | — | open #1084 |
-| 28 | Long-press menu: copy, copy as markdown, quote | parity_28 | kept |
-| 29 | Sticky thread header; last 30 messages, older on scroll (#408) | parity_29 | kept |
-| 30 | Choice rows in chat, "other" box, answered ✓ line | parity_15 | kept |
-| 31 | Conductor-answered asks keep [change] for 30 min | parity_32 | kept |
+| 15 | Thread list per repo: unread dot, state, last line, badge | parity_15 | dropped q3967 |
+| 16 | Start a thread by typing; auto title, then retitle | — | dropped q3967 |
+| 17 | Swipe to archive, 5 s undo, restore | — | dropped q3967 |
+| 18 | Message blocks: colours, markdown, system lines, folded tool runs | parity_18 | dropped q3967 |
+| 19 | Fenced code blocks with a copy button | parity_19 | dropped q3967 |
+| 20 | Several attachments per message, thumbnails, image viewer (#406) | parity_20 | dropped q3967 |
+| 21 | Instant send: sending…/✓, red retry on failure | parity_21 | dropped q3967 |
+| 22 | Growing composer, pinned send, smart follow-scroll | — | dropped q3967 |
+| 23 | iOS keyboard: composer sits on keyboard, page never jumps | parity_r4 | dropped q3967 |
+| 24 | Back button and edge swipe (#1170); side-by-side layout ≥1000 px (#403, #1118) | parity_24 | dropped q3967 |
+| 25 | Working pill with timer and [stop]; reconnecting/offline states | — | dropped q3967 |
+| 26 | Queue or steer during a turn; edit or remove queued | parity_26 | dropped q3967 |
+| 27 | Per-thread drafts, picked files included | — | dropped q3967 |
+| 28 | Long-press menu: copy, copy as markdown, quote | parity_28 | dropped q3967 |
+| 29 | Sticky thread header; last 30 messages, older on scroll (#408) | parity_29 | dropped q3967 |
+| 30 | Choice rows in chat, "other" box, answered ✓ line | parity_63 | kept |
+| 31 | Conductor-answered asks keep [change] for 30 min | parity_31 | kept |
 | 32 | Config-proposal card: diff, apply/discard, stale, waiting bar | parity_32 | kept |
-| 33 | Secret request card with masked input | parity_32 | kept |
-| 34 | Harness pick at thread start; model/effort chip in composer | parity_34 | page-only |
-| 35 | Handoff chips, flow-back lines, an old handoff card's error | parity_35 | kept |
+| 33 | Secret request card with masked input | parity_33 | kept |
+| 34 | Harness pick at thread start; model/effort chip in composer | parity_34 | dropped q3967 |
+| 35 | Handoff chips, flow-back lines, an old handoff card's error | parity_35 | dropped q3967 |
 | 36 | One repo at a time: chips, swipe, needs dot, [all] | — | open #1089 |
 | 37 | Fleet cards in their colour; paused folds; needs-you first | parity_37 | kept |
 | 38 | Blocked chains as a tree; chain collapsed to one row | parity_38 | kept |
@@ -62,13 +62,13 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 43 | Drive now, plus per-fleet drive result line with details | — | open |
 | 44 | Pipeline stage chips on each row | parity_44 | kept |
 | 45 | Issue card sections; its lanes newest first, tap opens sheet | parity_45 | kept |
-| 46 | "waiting: decision" with options; link to the asking thread | parity_46 | kept |
+| 46 | "waiting: decision" with options; link to the asking thread | parity_46 | dropped q3967 |
 | 47 | Backlog: search, filters, tick issues, [queue N] | parity_47 | kept |
 | 48 | Serial-group 🔒 tags (the legend sheet [?] half: dropped, owner decision #1392) | parity_48 | kept |
 | 49 | Lanes grouped by state, then by repo, newest first | parity_49 | kept |
 | 50 | Lane row: name and age, waiting reason, one-line "now:" | parity_50 | kept |
 | 51 | Parked, dead and host-offline states with plain reasons | — | open |
-| 52 | Conductor sessions listed as lanes; tap opens thread | — | open |
+| 52 | Conductor sessions listed as lanes; tap opens thread | — | dropped q3967 |
 | 53 | Non-drover agents get only [close pane] | parity_53 | kept |
 | 54 | iOS-style bottom sheet: drag, 3 snap heights, flick, no flash | parity_r25 | open |
 | 55 | Transcript as role blocks; rolling log; load more | — | open |
@@ -98,7 +98,7 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 79 | Provider sign-in terminal, add key, [use] to switch | — | open |
 | 80 | Fleets: per-repo config sheet with pipeline graph | parity_80 | kept |
 | 81 | Role model/effort pickers | parity_81 | kept |
-| 82 | Conductor role and new-thread chat defaults | — | open |
+| 82 | Conductor role and new-thread chat defaults | — | dropped q3967 |
 | 83 | Activity: time groups, kind glyphs, [important] filter, older | parity_83 | kept |
 | 84 | Notifiers list and Telegram bridge status | parity_84 | kept |
 | 85 | Real config load errors shown plainly | parity_85 | kept |
@@ -110,7 +110,7 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | R1 | A keychain read waits forever on an invisible macOS prompt | parity_r1 | kept |
 | R2 | A retired or unknown config key stops the whole service | parity_r2 | kept |
 | R3 | One 401 latches the page into "unpaired"; a DB hiccup reads as not paired | parity_r3 | kept |
-| R4 | iOS keyboard: composer gap, page jump, thread loses its place (#443) | parity_r4 | kept |
+| R4 | iOS keyboard: composer gap, page jump, thread loses its place (#443) | parity_r4 | dropped q3967 |
 | R5 | A full-screen loader hides the page on slow loads | parity_r5 | kept |
 | R6 | Requests do quadratic work over the whole event log | parity_r6 | kept |
 | R7 | Per-request live I/O (ssh, pane reads) on page loads | parity_r7 | kept |

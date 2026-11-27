@@ -47,7 +47,6 @@ shared = [
     "crates/core/src/waiting.rs",
     "crates/server/src/api.rs",
     "crates/server/src/serve.rs",
-    "crates/server/src/serve/chat.rs",
     "crates/server/src/serve/v1.rs",
     "crates/*/tests/**",
     "web/src/main.ts",
@@ -375,6 +374,12 @@ reason = "#1643: one module builds the gatekeeper command and reads its report"
 pattern = "/plugin/"
 paths = ["crates/*/src/**"]
 reason = "#1571: drover never calls cooee; it serves rows and actions in /api/v1"
+
+[[ban]]
+pattern = "thread-new"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/thread.rs"]
+reason = "#1571: drover makes no thread; chat lives in a client, and thread.rs only reads old events"
 
 [[ban]]
 pattern = "lesson::"

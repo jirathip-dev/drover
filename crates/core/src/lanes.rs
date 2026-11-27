@@ -4,7 +4,7 @@ use crate::runner::Runner;
 use crate::session::{stamp, Cause, Exit, Life, Seen, Session, Sessions, Status};
 use crate::Ctx;
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::Path;
 
 #[derive(Debug, Default, Clone)]
@@ -109,8 +109,6 @@ pub fn join(
 ) -> Vec<Lane> {
     let by_name = |n: &str| crate::events::last_spawn(events, n);
     let (mut out, mut seen) = (vec![], BTreeSet::new());
-    let starts = crate::events::of_kind(events, &["orchestrator-start"]).into_iter();
-    let mut cs: BTreeMap<&str, &Event> = starts.filter_map(|e| Some((e.str("agent")?, e))).collect();
     for a in sessions.live() {
         let mut l = Lane {
             name: a.name.clone(),
@@ -135,8 +133,6 @@ pub fn join(
                 }
                 continue;
             }
-        } else if let Some(e) = cs.remove(a.name.as_str()) {
-            l = orchestrator(events, e, l);
         } else {
             l.fleet = a.labels.get("fleet").filter(|f| cfg.fleet.contains_key(*f)).cloned();
             l.role = "other".into();
@@ -168,7 +164,6 @@ pub fn join(
             ));
         }
     }
-    out.extend(cs.into_values().map(|e| orchestrator(events, e, Lane::default())));
     for l in &mut out {
         let mark = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "lane-closed" | "lane-kept-dirty");
         let last = crate::events::of_agent(events, &l.name).into_iter().rfind(mark);
@@ -338,19 +333,6 @@ fn from_spawn(e: &Event, l: Lane) -> Lane {
         runtime: s("runtime").unwrap_or_else(|| "shed".into()),
         ..l
     }
-}
-
-fn orchestrator(events: &[Event], e: &Event, l: Lane) -> Lane {
-    let (id, mut l) = (e.str("thread").unwrap_or_default(), from_spawn(e, l));
-    let t = crate::events::of_kind(events, &["thread-new"])
-        .into_iter()
-        .find(|t| t.str("thread") == Some(id));
-    l.name = format!("{} · {id}", t.and_then(|t| t.str("title")).unwrap_or_default());
-    (l.role, l.thread) = ("orchestrator".into(), Some(id.into()));
-    if l.session.is_none() {
-        l.state = LaneState::Asleep;
-    }
-    l
 }
 
 /// Section order on the page; any other state (unknown) counts as idle.

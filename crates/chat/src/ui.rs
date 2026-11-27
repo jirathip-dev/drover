@@ -12,7 +12,6 @@ pub(crate) fn st(c: Color) -> Style {
 }
 
 pub(crate) const AMBER: Color = Color::Yellow;
-pub(crate) const PURPLE: Color = Color::Magenta;
 pub(crate) const GREY: Color = Color::DarkGray;
 pub(crate) const RED: Color = Color::Red;
 pub(crate) const BLUE: Color = Color::LightBlue;
@@ -81,44 +80,6 @@ pub(crate) fn boxed(rows: &[Vec<Seg>], w: usize, edge: Style, title: Option<Seg>
     out
 }
 
-pub(crate) fn text(t: &str, w: usize, style: Style) -> Lines {
-    let (mut out, mut fence, mut code) = (vec![], false, vec![]);
-    for l in t.lines() {
-        if l.trim_start().starts_with("```") {
-            if fence {
-                out.extend(boxed(&std::mem::take(&mut code), w, st(GREY), None));
-            }
-            fence = !fence;
-        } else if fence {
-            code.push(vec![seg(l, st(CODE))]);
-        } else {
-            out.extend(wrap(&[seg(l, style)], w, 0));
-        }
-    }
-    out.extend(
-        (!code.is_empty())
-            .then(|| boxed(&code, w, st(GREY), None))
-            .into_iter()
-            .flatten(),
-    );
-    out
-}
-
-pub(crate) fn edged(lines: Lines, c: Color) -> Lines {
-    let mark = |mut l: Line<'static>| {
-        l.spans.insert(0, Span::styled("┃ ", st(c)));
-        l
-    };
-    lines.into_iter().map(mark).collect()
-}
-
-pub(crate) fn clamp(t: &str, n: usize) -> String {
-    if t.chars().count() <= n {
-        return t.into();
-    }
-    t.chars().take(n.saturating_sub(1)).chain(['…']).collect()
-}
-
 pub(crate) fn ends(mut left: Lines, right: Vec<Span<'static>>, w: usize) -> Lines {
     let rw = Line::from(right.clone()).width();
     let gap = match left.as_slice() {
@@ -131,12 +92,6 @@ pub(crate) fn ends(mut left: Lines, right: Vec<Span<'static>>, w: usize) -> Line
         _ => left.push(Line::from([vec![fill], right].concat())),
     }
     left
-}
-
-pub(crate) fn bar(mut l: Line<'static>, w: usize) -> Line<'static> {
-    let fill = " ".repeat(w.saturating_sub(l.width()));
-    l.spans.push(Span::raw(fill));
-    l.style(Style::default().bg(BAR))
 }
 
 pub(crate) fn put(f: &mut Frame, area: Rect, lines: Lines) {

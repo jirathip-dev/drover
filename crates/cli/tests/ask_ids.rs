@@ -259,7 +259,7 @@ fn fifty_concurrent_asks_from_different_fleets_get_fifty_distinct_ids() {
 }
 
 #[test]
-fn two_events_for_one_ask_id_show_one_row_in_the_thread_and_on_the_board() {
+fn two_events_for_one_ask_id_show_one_row_on_the_board() {
     let c = ctx(&tmpdir("ask-ids-dup"), CONFIG);
     let ask = json!({"id": "q1411", "question": "Design for #254 is ready (04d48d7): approve, revise or reject?",
         "options": ["approve", "revise", "reject"], "recommend": null, "kind": "owner", "design": true, "thread": "t70"});
@@ -276,9 +276,6 @@ fn two_events_for_one_ask_id_show_one_row_in_the_thread_and_on_the_board() {
     };
     rewrite_log(&c.state, &log.into_iter().map(line).collect::<String>());
     assert_eq!(kinds(&c, "needs-decision").len(), 2);
-    let (code, out) = run(&c, &Fake::default(), &["thread", "show", "t70"]);
-    assert_eq!(code, 0, "{out}");
-    assert_eq!(out.matches("asks q1411").count(), 1, "{out}");
     let (code, out) = run(&c, &Fake::default(), &["asks", "sendmeter"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(out.matches("q1411").count(), 1, "{out}");
