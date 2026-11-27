@@ -174,7 +174,7 @@ fn a_live_orchestrator_moved_to_another_account_shows_one_row() {
         ev(2, "personal", Some("work"), "limit"),
         ev(3, "work", Some("personal"), "owner"),
     ] {
-        drover::session::stamp::on_event(&c, &cfg, &Wire::Socket(b.sock.clone()), &e).unwrap();
+        drover::session::stamp::on_event(&c, &cfg, &drover::runner::Real, &Wire::Socket(b.sock.clone()), &e).unwrap();
     }
     assert_eq!(
         rows(&c, "t1"),

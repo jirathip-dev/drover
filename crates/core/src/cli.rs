@@ -1,4 +1,4 @@
-use crate::config::{home, Config};
+use crate::config::Config;
 use crate::events::{emit, status_line, working, Event, Json};
 use crate::runner::{self, Runner};
 use crate::{
@@ -24,11 +24,16 @@ pub(crate) struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    #[command(about = "Switch a role's harness/model/profile/effort in fleet.toml; prints old -> new")]
+    #[command(about = "Switch a role's agent/harness/model/profile/effort in fleet.toml; prints old -> new")]
     Set {
         fleet: String,
         #[arg(help = "impl | rev | design")]
         role: String,
+        #[arg(
+            long,
+            help = "#1694: any agent id `shed agents` lists; one drover has no module for runs judged"
+        )]
+        agent: Option<String>,
         #[arg(long, help = providers::lane_names().join(" | "))]
         harness: Option<String>,
         #[arg(long, help = "Model name (ignored where the provider's profile owns the model)")]
@@ -613,6 +618,12 @@ enum Cmd {
         #[arg(help = "The lane's role; `rev` is read-only")]
         #[arg(long)]
         role: Option<String>,
+        #[arg(help = "#1694: judge one shed permission request (shed's `judge` policy) on stdin")]
+        #[arg(long)]
+        acp: bool,
+        #[arg(help = "An agent's test run: record each request in this folder and deny it")]
+        #[arg(long, requires = "acp")]
+        probe: Option<PathBuf>,
     },
     #[command(hide = true, about = "A provider's status line: the lane's fleet and issue")]
     Statusline,
@@ -1212,7 +1223,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Hosts {
             cmd: Some(c @ (HostsCmd::Report | HostsCmd::Watch)),
         } => crate::link::watch::answer(r, matches!(c, HostsCmd::Watch), stdin, out)?,
-        Cmd::Hook { role } => run_hook(ctx, r, out, stdin, role.as_deref() == Some("rev"))?,
+        Cmd::Hook { acp: true, probe, .. } => run_acp(ctx, r, out, stdin, probe.as_deref())?,
+        Cmd::Hook { role, .. } => run_hook(ctx, r, out, stdin, role.as_deref() == Some("rev"))?,
         Cmd::Statusline => crate::usage::statusline(&crate::config::env("DROVER_LANE").unwrap_or_default(), out),
         Cmd::LaneEvent { kind, data } => lane_event(ctx, &kind, serde_json::from_str(&data)?),
         Cmd::Heavy(a) => return heavy(ctx, r, a),
@@ -1317,12 +1329,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Set {
             fleet,
             role,
+            agent,
             harness,
             model,
             profile,
             effort,
         } => {
             let wanted = [
+                ("agent", agent),
                 ("harness", harness),
                 ("model", model),
                 ("profile", profile),
@@ -1505,8 +1519,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     ..
                 },
         } => {
-            for h in crate::providers::known() {
-                crate::providers::get(h).sync(ctx, &role, &role, &p, &usage_doc(), out)?;
+            for h in crate::providers::lanes() {
+                h.sync(ctx, &role, &role, &p, &usage_doc(), out)?;
             }
         }
         Cmd::Service { api, board } => (crate::SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
@@ -2152,7 +2166,13 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     let Ok(input) = serde_json::from_str::<serde_json::Value>(&buf) else {
         return fail_closed(ctx, out, &serde_json::Value::Null, "its input is not JSON");
     };
-    let term = crate::config::env("SHED").or_else(|| crate::config::env("BERTH"));
+    let both = crate::config::env("DROVER_GUARD").as_deref() == Some("both");
+    if both && (hook::after(&input) || !hook::pre_call(&input)) {
+        return Ok(());
+    }
+    let term = crate::config::env("SHED")
+        .or_else(|| crate::config::env("BERTH"))
+        .filter(|_| !both);
     if let (Some(name), Some(state)) = (term, hook::reported(&input)) {
         let w = r
             .shed()
@@ -2198,54 +2218,23 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         }
         return Ok(());
     }
-    let rules = match hook::lane_rules(ctx, &lane) {
-        Ok(r) => r,
+    let (policy, heavy) = match hook::policy(ctx, r, &lane, reviewer, input.at("cwd").as_str()) {
+        Ok(p) => p,
         Err(cause) => return fail_closed(ctx, out, &input, &cause),
-    };
-    let mut it = lane.split(':');
-    let (fleet, n) = (it.next().unwrap_or_default(), it.next().and_then(|n| n.parse().ok()));
-    let dir = |p: &PathBuf| p.parent().unwrap_or(p).to_string_lossy().into_owned();
-    let h = home();
-    let mut paths = vec![
-        dir(&ctx.config),
-        dir(&ctx.state),
-        h.join(".config/fleet-operations").to_string_lossy().into(),
-    ];
-    paths.extend(crate::config::env("DROVER_RULES"));
-    let orchestrator = crate::config::env("DROVER_LANE")
-        .is_some_and(|l| l.split(':').nth(2).is_some_and(crate::orchestrator::is_role));
-    let thread = crate::config::env("DROVER_THREAD").unwrap_or_default();
-    let cfg = Config::load(&ctx.config)
-        .ok()
-        .filter(|_| orchestrator && !thread.is_empty() && !thread.contains(['/', '.']));
-    let own = cfg.map(|cfg| {
-        crate::orchestrator::dir(ctx, &cfg, &thread)
-            .to_string_lossy()
-            .into_owned()
-    });
-    let heavy = rules.heavy;
-    let policy = hook::Policy {
-        branches: rules.branches,
-        paths,
-        reviewer: reviewer || rules.reviewer,
-        deny: rules.deny,
-        orchestrator,
-        own,
-        groups: rules.groups,
-        scratch: crate::config::env("DROVER_SCRATCH_TARGET").filter(|s| !s.is_empty()),
-        design: (lane.split(':').nth(2) == Some("design")).then(|| crate::design::scope(ctx, r, &input, fleet, n)),
-        hygiene: rules.hygiene,
     };
     let git = |d: &str, a: &[&str]| {
         runner::ok(r, "git", &[&["-C", d][..], a].concat())
             .ok()
             .map(|s| s.trim().to_string())
     };
-    if let Some(reason) = hook::decide(&input, &policy, &git) {
+    if let Some(reason) = hook::decide(&hook::call(&input), &policy, &git) {
         if policy.deny.iter().any(|d| d.reason() == reason) {
             lane_event(ctx, "hook-denied", json!({"rule": reason}));
         }
         writeln!(out, "{}", hook::deny_json(&input, &reason))?;
+        return Ok(());
+    }
+    if both {
         return Ok(());
     }
     if let Some(v) = heavy.and_then(|h| hook::heavy(&input, &h, &ctx.exe, &git)) {
@@ -2262,6 +2251,31 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         }
         lane_event(ctx, "thread-cmd", d);
     }
+    Ok(())
+}
+
+fn run_acp(
+    ctx: &Ctx,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    stdin: &mut dyn Read,
+    probe: Option<&std::path::Path>,
+) -> Result<()> {
+    let mut buf = String::new();
+    let got = stdin
+        .read_to_string(&mut buf)
+        .map_err(|e| format!("its input is unreadable ({e})"));
+    let reason = match got.and_then(|_| crate::acp::answer(ctx, r, &buf, probe)) {
+        Ok(reason) => reason,
+        Err(cause) => {
+            lane_event(ctx, "hook-failed-closed", json!({"cause": cause}));
+            Some(format!("REFUSED HOOK_FAILED_CLOSED: {cause}; fix it, or ask the owner"))
+        }
+    };
+    if let Some(why) = reason.as_ref().filter(|_| probe.is_none()) {
+        lane_event(ctx, "hook-denied", json!({"rule": why, "acp": true}));
+    }
+    writeln!(out, "{}", json!(crate::acp::Verdict::of(reason)))?;
     Ok(())
 }
 

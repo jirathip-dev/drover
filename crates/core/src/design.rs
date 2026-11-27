@@ -11,12 +11,12 @@ use std::path::Path;
 pub const OPTIONS: [&str; 3] = ["approve", "revise", "reject"];
 
 /// A design lane's hook scope: its worktree top (from the hook input's `cwd`) and its issue's design paths.
-pub fn scope(ctx: &Ctx, r: &dyn Runner, input: &Value, fleet: &str, n: Option<u64>) -> crate::hook::Design {
+pub fn scope(ctx: &Ctx, r: &dyn Runner, cwd: Option<&str>, fleet: &str, n: Option<u64>) -> crate::hook::Design {
     let here = std::env::current_dir()
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned();
-    let cwd = input["cwd"].as_str().unwrap_or(&here);
+    let cwd = cwd.unwrap_or(&here);
     let top = ok(r, "git", &["-C", cwd, "rev-parse", "--show-toplevel"]);
     let spec = n
         .and_then(|n| crate::gh::cached_spec(ctx, fleet, n))

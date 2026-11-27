@@ -82,7 +82,7 @@ fn an_exit_heard_on_shed_events_carries_the_same_last_words() {
         .events
         .push(json!({"seq": 1, "name": LANE, "labels": labels, "event": "exited", "code": 137}));
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    drover::session::stamp::intake(&at(&c, T), &cfg, &cfg.shed().unwrap().wire).unwrap();
+    drover::session::stamp::intake(&at(&c, T), &cfg, &drover::runner::Real, &cfg.shed().unwrap().wire).unwrap();
     let gone = logged(&c, "lane-state").pop().unwrap();
     assert_eq!(gone.str("state"), Some("gone"), "{gone:?}");
     let (code, out) = run(&at(&c, T + 60), &Fake::default(), &["check"]);

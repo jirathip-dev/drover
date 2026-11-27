@@ -753,6 +753,8 @@ pub struct Limits {
     pub notify_secs: u64,
     pub gate_check_minutes: u64,
     pub shed_read_millis: u64,
+    pub acp_judge_secs: u64,
+    pub acp_probe_seconds: u64,
     pub service_call_secs: u64,
     pub disk_probe_secs: u64,
     pub disk_hung_secs: u64,
@@ -896,6 +898,8 @@ impl Default for Limits {
             notify_secs: 15,
             gate_check_minutes: 30,
             shed_read_millis: 300,
+            acp_judge_secs: 30,
+            acp_probe_seconds: 120,
             service_call_secs: 2,
             disk_probe_secs: 2,
             disk_hung_secs: 6,
@@ -1287,7 +1291,7 @@ impl Config {
             for (role, r) in &mut f.role {
                 let id = r.agent.as_deref();
                 match (id.map(|a| (a, crate::providers::of_agent(a))), r.harness.is_empty()) {
-                    (Some((a, None)), _) => bail!("fleet.{name}.role.{role}: agent {a}: no harness adapter guards it"),
+                    (Some((_, None)), false) => r.harness.clear(),
                     (Some((_, Some(h))), true) => r.harness = h.into(),
                     (Some((a, Some(h))), false) if h != r.harness => {
                         bail!(
@@ -1302,7 +1306,10 @@ impl Config {
                 if role == "orch" || role.is_empty() || !role.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
                     bail!("fleet.{name}.role.{role}: a role name is letters, digits and `-`, not orch");
                 }
-                if !crate::providers::known().any(|h| h == r.harness) {
+                if r.agent.is_none() && r.harness.is_empty() {
+                    bail!("fleet.{name}.role.{role}: names no agent; set `agent = \"<shed agent id>\"`");
+                }
+                if r.agent.is_none() && !crate::providers::lane_names().contains(&r.harness.as_str()) {
                     bail!(
                         "fleet.{name}.role.{role}: harness must be one of {:?}",
                         crate::providers::lane_names()
@@ -1321,9 +1328,6 @@ impl Config {
                     }
                 }
             }
-        }
-        for name in c.fleet.keys() {
-            c.same_provider(name, text)?;
         }
         c.routes_ok().map(|()| c)
     }
@@ -1344,39 +1348,6 @@ impl Config {
             }
         }
         Ok(())
-    }
-
-    fn same_provider(&self, name: &str, text: &str) -> Result<()> {
-        let f = self.fleet.get(name).ok_or_else(|| anyhow!("unknown fleet '{name}'"))?;
-        let (Some(i), Some(v)) = (f.role.get("impl"), f.role.get("rev")) else {
-            return Ok(());
-        };
-        let run = self.shed_for(name).and_then(|b| b.acp);
-        let of = |r: &Role| r.agent.clone().or_else(|| run.clone());
-        let p = (of(i), of(v));
-        let p = (
-            p.0.as_deref().and_then(crate::providers::vendor_of_agent),
-            p.1.as_deref().and_then(crate::providers::vendor_of_agent),
-        );
-        if i.agent.is_none() && v.agent.is_none() || p.0.is_none() || p.0 != p.1 {
-            return Ok(());
-        }
-        let mut head = "";
-        let ok = text.lines().any(|l| {
-            let t = l.trim();
-            if t.starts_with('[') {
-                head = t;
-            }
-            head == format!("[fleet.{name}]") && t.starts_with("rev_same_provider") && t.contains('#')
-        });
-        if f.rev_same_provider == Some(true) && ok {
-            return Ok(());
-        }
-        let why = format!(
-            "fleet.{name}: rev runs on impl's provider {}; give rev another agent, or set rev_same_provider = true # <why>",
-            p.0.unwrap_or_default()
-        );
-        crate::gate::refused("REVIEW_SAME_PROVIDER", why)
     }
 
     /// Notifiers for `fleet`'s events: its own if any (plus the global ones with `notify_global`), else the global.
