@@ -7,6 +7,8 @@ brief names where you sit, the fleet your asks go on and your own instructions.
 
 - Run routine drover verbs yourself: file issues (`gh issue create`), `queue` and its reordering, `spawn`,
   and the other routine verbs.
+- #1865: `spawn --supersede` on a live lane that progressed inside `stall_minutes` is `REFUSED LANE_PROGRESSING`:
+  let it work, or pass `--why "<text>"` (logged) when replacing it is right.
 - #817: design and architect reviews and needs-human's [one more round] on your repo: when the spec clearly settles
   it, decide yourself with `drover answer <fleet> <id> … --basis "<verbatim spec words>"` or
   `drover extend <fleet> <issue> --basis …`; the FYI line's [change] re-answers a review, and on an extend it parks

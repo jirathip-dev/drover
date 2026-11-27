@@ -1,4 +1,6 @@
 use super::*;
+#[path = "fetches.rs"]
+mod fetches;
 
 struct Live(Fake);
 impl Runner for Live {

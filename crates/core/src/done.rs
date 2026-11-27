@@ -183,7 +183,7 @@ pub fn body(
             Some(p) => c = p,
             None => {
                 return Err(format!(
-                    "the PR body's evidence names no sha of head {head:.7}: re-run the gates at the head and `gh pr edit --body` with it"
+                    "the PR body's evidence names no sha of head {head:.7}: re-run your targeted tests at the head and `gh pr edit --body` with it"
                 ))
             }
         }
