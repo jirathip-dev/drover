@@ -701,6 +701,7 @@ pub fn scan_where(
     let listed = view.as_ref().map(crate::link::view::View::sessions).unwrap_or_default();
     let busy = |l: &str| agents.iter().any(|a| a.name == l && a.busy());
     let hung = crate::roots::hung_now(events);
+    let starts = crate::starts::line(cfg, events, ctx.now);
     let mine = |st: &crate::events::States| {
         st.values()
             .filter(|s| cfg.fleet.contains_key(&s.fleet) && !s.settled() && keep(s))
@@ -969,7 +970,7 @@ pub fn scan_where(
             };
         }
         if let Some((_, at)) = spawn
-            .then(|| crate::starts::place(cfg, events, ctx.now, (&s.fleet, s.issue)))
+            .then(|| crate::starts::place(&starts, (&s.fleet, s.issue)))
             .flatten()
         {
             w.what += &format!(" · {at}");
