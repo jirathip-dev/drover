@@ -1260,7 +1260,7 @@ pub(super) fn acp_numbered(events: &[crate::shed::proto::Logged]) -> Vec<(u64, B
                     .collect(),
                 answered: None,
             }),
-            E::Approved { option } => {
+            E::Approved { option, .. } => {
                 let open = out.iter_mut().rev().find_map(|b| match b {
                     Block::Approval { answered: a @ None, .. } => Some(a),
                     _ => None,

@@ -104,6 +104,52 @@ pub fn lane_rules(ctx: &crate::Ctx, lane: &str) -> Result<Rules, String> {
     })
 }
 
+/// Lane `fleet:issue:role`'s policy and heavy kinds, as both hook entries judge a call in `cwd` (`reviewer`: `--role rev`).
+pub fn policy(
+    ctx: &crate::Ctx,
+    r: &dyn crate::runner::Runner,
+    lane: &str,
+    reviewer: bool,
+    cwd: Option<&str>,
+) -> Result<(Policy, Option<Heavy>), String> {
+    let rules = lane_rules(ctx, lane)?;
+    let mut it = lane.split(':');
+    let (fleet, n) = (it.next().unwrap_or_default(), it.next().and_then(|n| n.parse().ok()));
+    let dir = |p: &PathBuf| p.parent().unwrap_or(p).to_string_lossy().into_owned();
+    let mut paths = vec![
+        dir(&ctx.config),
+        dir(&ctx.state),
+        crate::config::home()
+            .join(".config/fleet-operations")
+            .to_string_lossy()
+            .into(),
+    ];
+    paths.extend(crate::config::env("DROVER_RULES"));
+    let orchestrator = lane.split(':').nth(2).is_some_and(crate::orchestrator::is_role);
+    let thread = crate::config::env("DROVER_THREAD").unwrap_or_default();
+    let cfg = Config::load(&ctx.config)
+        .ok()
+        .filter(|_| orchestrator && !thread.is_empty() && !thread.contains(['/', '.']));
+    let own = cfg.map(|cfg| {
+        crate::orchestrator::dir(ctx, &cfg, &thread)
+            .to_string_lossy()
+            .into_owned()
+    });
+    let policy = Policy {
+        branches: rules.branches,
+        paths,
+        reviewer: reviewer || rules.reviewer,
+        deny: rules.deny,
+        orchestrator,
+        own,
+        groups: rules.groups,
+        scratch: crate::config::env("DROVER_SCRATCH_TARGET").filter(|s| !s.is_empty()),
+        design: (lane.split(':').nth(2) == Some("design")).then(|| crate::design::scope(ctx, r, cwd, fleet, n)),
+        hygiene: rules.hygiene,
+    };
+    Ok((policy, rules.heavy))
+}
+
 /// Lane spawn `sp` froze rules (a remote lane's) that fleet.toml now resolves otherwise: a respawn takes them.
 pub fn rules_stale(cfg: &Config, fleet: &str, sp: &crate::events::Event) -> bool {
     let (role, host) = (sp.str("role").unwrap_or_default(), sp.str("host").unwrap_or_default());
@@ -182,28 +228,72 @@ pub fn pre_call(input: &Value) -> bool {
     ev.is_empty() || dialects().any(|d| d.pre == ev)
 }
 
-/// Some(reason) denies a shell (`Bash`) or file-writing call; `git` runs git in a dir (its HEAD, its remote).
-pub fn decide(input: &Value, p: &Policy, git: &dyn Fn(&str, &[&str]) -> Option<String>) -> Option<String> {
-    let cur_branch = |d: &str| git(d, &["rev-parse", "--abbrev-ref", "HEAD"]);
-    let origin = |d: &str| git(d, &["remote", "get-url", "origin"]);
+/// One tool call as the rules see it, whoever sent it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Call {
+    Shell { cmd: String, cwd: String },
+    Write { files: Vec<String> },
+    Mode,
+    Free,
+}
+
+/// A lane keeps the permission mode it started in.
+pub const MODE_SWITCH: &str = "REFUSED MODE_SWITCH: a lane keeps the permission mode it started in";
+
+/// The files a write names: a patch text's own file lines, else the one path.
+pub fn patched(file: &str) -> Vec<String> {
+    let names: Vec<String> = (file.lines())
+        .filter_map(|l| l.strip_prefix("*** "))
+        .filter_map(|l| l.split_once(" File: ").map(|(_, f)| f).or(l.strip_prefix("Move to: ")))
+        .map(|f| f.trim().to_string())
+        .collect();
+    if file.starts_with("*** ") && !names.is_empty() {
+        names
+    } else {
+        vec![file.to_string()]
+    }
+}
+
+/// The call a hook-format `input` makes, from its `tool_name` and tool input.
+pub fn call(input: &Value) -> Call {
     let tool = input["tool_name"].as_str().unwrap_or_default();
     let ti = tool_input(input);
     if dialects().any(|d| d.shell == tool) {
-        let cmd = ti["command"].as_str().unwrap_or_default();
-        let cwd = input["cwd"].as_str().unwrap_or(".");
-        let leak = p
-            .hygiene
-            .as_ref()
-            .and_then(|c| crate::hygiene::gh_text(c, cmd, cwd, &origin));
-        return leak.or_else(|| bash(cmd, cwd, p, &cur_branch));
+        let cmd = ti["command"].as_str().unwrap_or_default().into();
+        return Call::Shell {
+            cmd,
+            cwd: input["cwd"].as_str().unwrap_or(".").into(),
+        };
     }
     if !dialects().any(|d| d.edits.contains(&tool)) {
-        return None;
+        return Call::Free;
     }
     let file = ["file_path", "notebook_path", "path", "patch", "command"]
         .iter()
         .find_map(|k| ti[k].as_str())
         .unwrap_or_default();
+    Call::Write { files: patched(file) }
+}
+
+/// Some(reason) denies a call; `git` runs git in a dir (its HEAD, its remote).
+pub fn decide(call: &Call, p: &Policy, git: &dyn Fn(&str, &[&str]) -> Option<String>) -> Option<String> {
+    let cur_branch = |d: &str| git(d, &["rev-parse", "--abbrev-ref", "HEAD"]);
+    let origin = |d: &str| git(d, &["remote", "get-url", "origin"]);
+    match call {
+        Call::Shell { cmd, cwd } => {
+            let leak = p
+                .hygiene
+                .as_ref()
+                .and_then(|c| crate::hygiene::gh_text(c, cmd, cwd, &origin));
+            leak.or_else(|| bash(cmd, cwd, p, &cur_branch))
+        }
+        Call::Write { files } => files.iter().find_map(|f| write(f, p)),
+        Call::Mode => Some(MODE_SWITCH.into()),
+        Call::Free => None,
+    }
+}
+
+fn write(file: &str, p: &Policy) -> Option<String> {
     if let Some(pp) = protected_path(file, p).filter(|_| !own_file(file, p)) {
         return Some(format!(
             "{file} is protected ({pp}); change it only through `drover` (e.g. `drover set`)"
@@ -218,25 +308,14 @@ pub fn decide(input: &Value, p: &Policy, git: &dyn Fn(&str, &[&str]) -> Option<S
 
 fn design_write(file: &str, p: &Policy) -> Option<String> {
     let d = p.design.as_ref()?;
-    let patched: Vec<&str> = (file.lines())
-        .filter_map(|l| l.strip_prefix("*** "))
-        .filter_map(|l| l.split_once(" File: ").map(|(_, f)| f).or(l.strip_prefix("Move to: ")))
-        .map(str::trim)
-        .collect();
-    let files = if file.starts_with("*** ") { patched } else { vec![file] };
-    let ok = |f: &&str| {
-        let f = resolve(f, &d.root);
-        let rel = Path::new(&f).strip_prefix(&d.root);
-        rel.is_ok_and(|rel| d.allow.iter().any(|a| rel.starts_with(a)))
-    };
-    let bad = files
-        .iter()
-        .find(|f| !ok(f))
-        .copied()
-        .or(files.is_empty().then_some(file))?;
+    let f = resolve(file, &d.root);
+    let rel = Path::new(&f).strip_prefix(&d.root);
+    if rel.is_ok_and(|rel| d.allow.iter().any(|a| rel.starts_with(a))) {
+        return None;
+    }
     let allow = d.allow.iter().map(|a| format!("{a}/")).collect::<Vec<_>>().join(", ");
     Some(format!(
-        "REFUSED DESIGN_PATH: a design lane writes only under {allow}, not {bad} (#868)"
+        "REFUSED DESIGN_PATH: a design lane writes only under {allow}, not {file} (#868)"
     ))
 }
 

@@ -41,9 +41,12 @@ fn fake() -> Fake {
 }
 
 fn tick(c: &drover::Ctx, now: u64, r: &Fake) -> String {
-    let (code, out) = run(&drover::Ctx { now, ..c.clone() }, r, &["tick"]);
+    let at = drover::Ctx { now, ..c.clone() };
+    let (code, out) = run(&at, r, &["housekeep", "--only", "jobs"]);
     assert_eq!(code, 0, "{out}");
-    out
+    let (code, more) = run(&at, r, &["tick"]);
+    assert_eq!(code, 0, "{more}");
+    out + &more
 }
 
 #[test]

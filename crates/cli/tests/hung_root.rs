@@ -91,6 +91,7 @@ fn a_root_whose_listing_never_returns_costs_one_probe_and_the_pass_goes_on() {
         Some(&*r.good.to_string_lossy()),
         "#12 takes the root that answers"
     );
+    assert_eq!(run(&r.c, &f, &["housekeep", "--only", "check"]).0, 0);
     let alerts = hung_alerts(&r.c);
     assert_eq!(alerts.len(), 1, "{alerts:#?}");
     assert_eq!(alerts[0].str("root"), Some(&*r.dead.to_string_lossy()));

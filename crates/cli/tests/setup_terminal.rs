@@ -126,7 +126,7 @@ fn the_board_starts_by_name_types_unlogged_and_shows_the_screen() {
         .unwrap();
     let setups = bazzite["setups"].to_string();
     assert!(
-        setups.contains("\"claude B\"") && setups.contains("\"codex\""),
+        setups.contains("\"claude B\"") && setups.contains("\"claude\""),
         "{setups}"
     );
 }

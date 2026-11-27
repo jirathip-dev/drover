@@ -1420,7 +1420,7 @@ impl<'a> Server<'a> {
                 &self.r,
                 &mut out,
                 Some(&fleet),
-                (None, Some(agent), false, false, false, false),
+                (None, Some(agent), false, false, false),
                 yes,
             )?),
             "close" => crate::check::close(ctx, &cfg, &self.r, &mut out, agent, None)?,
@@ -3237,10 +3237,7 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
         model: r.model.clone(),
         effort: r.effort.clone(),
         efforts: strs(crate::providers::get(&r.harness).efforts()),
-        model_default: crate::providers::get(&r.harness)
-            .model_default()
-            .unwrap_or(&r.harness)
-            .into(),
+        model_default: r.harness.clone(),
         effort_default: l.effort.clone().unwrap_or_else(|| "none".into()),
         accounts: vec![],
         mcp: r.mcp.clone(),

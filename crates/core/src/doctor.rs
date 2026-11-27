@@ -162,6 +162,25 @@ fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) 
     rows.extend(crate::hygiene::doctor(ctx, cfg, r));
 }
 
+fn housekeep(ctx: &Ctx, cfg: &Config, rows: &mut Vec<String>) {
+    let last = crate::housekeep::last(ctx);
+    let fresh = last
+        .as_ref()
+        .is_some_and(|(at, secs, _)| ctx.now <= at + secs + crate::timer::stuck_secs(cfg));
+    let line = last.map_or("housekeep — never ran".into(), |(at, secs, late)| {
+        let late = if late.is_empty() {
+            String::new()
+        } else {
+            format!(" · past budget: {}", late.join(", "))
+        };
+        format!(
+            "housekeep — ran {} ago, took {secs} s{late}",
+            crate::events::age(ctx.now.saturating_sub(at))
+        )
+    });
+    row(rows, fresh, '✗', &format!("{line} → drover timer install"));
+}
+
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     config_rows(ctx, cfg, r, rows);
     let line = crate::drive::spawns_line(ctx, cfg, r, &crate::events::working(&ctx.state).unwrap_or_default());
@@ -355,7 +374,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     let line = format!("push — {subs} subscriptions, notifier {notifier} → turn alerts on; add a webpush [[notify]]");
     row(rows, subs > 0 && notifier, '!', &line);
     let running = crate::timer::running(ctx, cfg);
-    for (what, file) in [("check", "check.at"), ("drive", "drive-fast.at")] {
+    for (what, file) in [("tick", "tick.at"), ("drive", "drive-fast.at")] {
         let stamp = std::fs::read_to_string(ctx.state.with_file_name(file));
         let at: Option<u64> = stamp.ok().and_then(|t| t.split_whitespace().next()?.parse().ok());
         let age = at.map_or("never".into(), |at| crate::events::age(ctx.now.saturating_sub(at)));
@@ -367,6 +386,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line = format!("watchdog {what} — {ran} → drover timer install");
         row(rows, fresh || running.is_some(), '✗', &line);
     }
+    housekeep(ctx, cfg, rows);
     let stuck = crate::timer::stuck_step(ctx, cfg);
     let line = stuck.as_ref().map_or("tick step — advancing".into(), |(step, secs)| {
         let age = crate::events::age(*secs);
@@ -540,6 +560,30 @@ fn serve_plists(ctx: &Ctx) -> Vec<std::path::PathBuf> {
     found
 }
 
+fn agent_row(ctx: &Ctx, cfg: &Config, events: &[crate::Event], id: &str, version: &str) -> String {
+    let mine = |e: &&crate::Event| e.str("acp") == Some(id);
+    let rounds = (events.iter().filter(mine)).filter(|e| e.kind == "spawn" && e.str("guard") != Some("hooked"));
+    let unasked: u64 = (events.iter().filter(mine))
+        .filter(|e| e.kind == "acp-unasked")
+        .filter_map(|e| e.data.get("n")?.as_u64())
+        .sum();
+    match crate::acp::probe::latest(events, id, version) {
+        Some((w, _)) if w == "guarded" => {
+            format!(
+                "✓ agent {id} {version} — guarded, {} judged rounds, {unasked} unasked",
+                rounds.count()
+            )
+        }
+        Some((w, why)) => {
+            if let Err(e) = crate::acp::probe::retest(ctx, cfg, id) {
+                crate::stderr!("drover doctor: {e:#}");
+            }
+            format!("✗ agent {id} {version} — {w}: {why} → no lane starts on it; the next spawn tests it again")
+        }
+        None => format!("! agent {id} {version} — not tested yet; its first judged spawn tests it"),
+    }
+}
+
 fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     let path = crate::timer::job_path(ctx, cfg, r);
     let find = |b: &str| path.split(':').map(|d| Path::new(d).join(b)).find(|p| p.is_file());
@@ -547,7 +591,8 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         || "✗ shed — not on the timer's PATH → drover timer install from a shell where `which shed` finds it".into(),
         |p| format!("✓ shed — {} on the timer's PATH", p.display()),
     ));
-    let ids: BTreeSet<String> = cfg.fleet.keys().filter_map(|n| cfg.shed_for(n)?.acp).collect();
+    let named = crate::agents::named(cfg);
+    let ids: BTreeSet<String> = named.keys().cloned().collect();
     if !ids.is_empty() {
         rows.push(if crate::spawn::shed_meta(r) {
             "✓ shed run --meta — ACP lanes get their provider's session options".into()
@@ -559,12 +604,27 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             )
         });
     }
+    if named.values().any(|g| *g != crate::acp::Guard::Hooked) {
+        rows.push(crate::acp::ready(ctx, r).map_or_else(
+            |w| format!("✗ shed judge — {w}"),
+            |()| "✓ shed judge — judged lanes start under `shed run --policy judge`".into(),
+        ));
+    }
+    let catalog = crate::agents::Catalog::read(r).unwrap_or_default();
+    let events = crate::events::working(&ctx.state).unwrap_or_default();
     for id in ids {
-        let adapter = crate::shed::adapter(r, &id).ok().flatten().unwrap_or_default();
-        let Some(cmd) = adapter.first() else {
-            rows.push(format!("✗ shed agent {id} — not installed → shed agents add {id}"));
+        let agent = catalog.get(&id);
+        let Some(i) = agent.and_then(|a| a.installed.as_ref()) else {
+            let fix = agent
+                .and_then(|a| a.install.clone())
+                .unwrap_or_else(|| format!("shed agents add {id}"));
+            rows.push(format!("✗ shed agent {id} — not installed → {fix}"));
             continue;
         };
+        if named.get(&id).is_some_and(|g| *g != crate::acp::Guard::Hooked) {
+            rows.push(agent_row(ctx, cfg, &events, &id, &i.version));
+        }
+        let Some(cmd) = i.cmd.first() else { continue };
         let found = if cmd.contains('/') {
             Path::new(cmd).is_file()
         } else {
