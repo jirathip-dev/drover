@@ -651,11 +651,12 @@ pub fn startable(events: &[Event], fleet: &str) -> Vec<String> {
 pub fn skipped(
     events: &[Event],
     st: &States,
-    f: Option<&Fleet>,
+    cfg: Option<&crate::config::Config>,
     fleet: &str,
     (n, ctx): (u64, &crate::Ctx),
     slots: &str,
 ) -> Option<(String, String)> {
+    let f = cfg.and_then(|c| c.fleet.get(fleet));
     let s = |e: &&Event| e.kind == "driven" && e.fleet == fleet && e.issue == Some(n) && e.str("step") == Some("start");
     let is = st.get(&(fleet.to_string(), n)).filter(|s| s.state == "queued")?;
     let free = view(events, st, fleet)
@@ -707,6 +708,9 @@ pub fn skipped(
         _ => why.to_string(),
     };
     let ago = age(now.saturating_sub(e.ts));
+    if let Some((k, at)) = cfg.and_then(|c| crate::starts::place(c, events, now, (fleet, n))) {
+        return Some((format!("line {k} {code}"), format!("{code} ({why}) · {ago} ago · {at}")));
+    }
     Some((format!("skip {code}"), format!("{code} ({why}) · {ago} ago")))
 }
 
@@ -754,7 +758,7 @@ pub fn board(
     let row = |pos: String, n: u64, last: Option<String>| {
         let s = st.get(&(fleet.to_string(), n));
         let f = cfg.and_then(|c| c.fleet.get(fleet));
-        let skip = skipped(events, &st, f, fleet, (n, ctx), slots).map(|s| s.0);
+        let skip = skipped(events, &st, cfg, fleet, (n, ctx), slots).map(|s| s.0);
         let lane: String = s
             .and_then(|s| s.lane.clone())
             .or(skip)

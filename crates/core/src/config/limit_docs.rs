@@ -128,10 +128,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "a spawn marker older than this is stale",
     ),
     (
-        "admit_wait_secs",
-        "a spawn's admission waits this long for another admission on its host before `SPAWN_PENDING`",
-    ),
-    (
         "acp_start_minutes",
         "an ACP lane with no event back this long after its first turn is a failed start",
     ),
