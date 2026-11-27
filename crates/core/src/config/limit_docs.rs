@@ -53,7 +53,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ("effort", "default reasoning effort for roles that set none"),
     (
         "ask_default_minutes",
-        "a routine ask unanswered this long takes its recommended option",
+        "a routine ask filed before #1813 unanswered this long takes its recommended option",
     ),
     (
         "ask_expire_hours",

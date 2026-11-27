@@ -98,20 +98,11 @@ and restores the terminal. The lane hook refuses it (`OWNER_ONLY`).
   The thread shows the ask with its options, the recommended one first. `drover answer <fleet> <id> <n>` (the
   tap later) logs the decision, adds `DECISION <id>: <text>` to the thread and types it into the orchestrator.
   `--thread` with an unknown thread refuses `NO_SUCH_THREAD`.
-- **Lane asks (#541):** an `ask` from an impl, rev, fix or design lane (no `--thread`) goes to its repo's orchestrator
-  thread first: `[fleet.<n>] ask_thread = "t6"`, else the repo's most recently active thread (archived ones never).
-  It is logged `routed` (no push) and typed into that orchestrator (woken as by `say`) as a system line the board hides;
-  it stays open on the board and the issue card. No thread (or the orchestrator not reached: `ask-owner`), the owner
-  gets it as before. #1491: a lane ask still open with no thread is routed to the repo's next new thread (the one
-  opened from it, or any): its system line is logged there, so that thread's orchestrator answers it as below, and an
-  owner line in it answers it `--typed`. The orchestrator answers with `drover answer <fleet> <id> <n> --basis "<quote | q<id>>"`, logged
-  `by: orchestrator-<thread>` with its `basis`, and only if the ask is a lane ask on its repo, its question and choice
-  name no owner topic (the `OWNER_TOPIC` words), and the basis is 3+ words found verbatim in the issue's spec
-  (Amendments included) or an answered decision id. An ask routed to no thread is `REFUSED OWNER_ASK: <id> was
-  routed to no thread`. Else `REFUSED OWNER_ASK: <why>; ask the owner`, and the ask is
-  logged `ask-owner` in the thread: a choice row (the orchestrator's pick recommended) that pushes like an ask. Each
-  orchestrator answer posts `answered <id> for #<n>: <choice>, because <basis>` with [change] for 30 min (no push); the
-  owner's pick there re-sends `DECISION <id>: <choice>` to the lane, `by: owner`, replacing it.
+- **Lane asks (#1813, replacing #541's routing):** an `ask` from an impl, rev, fix or design lane goes straight to the
+  owner as a card with the lane's recommendation, never to an orchestrator thread. A lane's ask that names no owner
+  topic (the owner words of `IN_SCOPE`) is `REFUSED IN_SCOPE`, nothing logged: the lane decides it and notes the choice
+  in its PR body under `## Decisions`. An orchestrator's `drover answer … --basis` on a lane ask is
+  `REFUSED OWNER_ASK: <id> was routed to no thread`; asks routed before #1813 still answer as they did.
 - **Amendments (#574):** `drover amend <fleet> <issue> --basis q<id> "<text>"` (orchestrators and the owner; the lane
   hook refuses it for impl, rev and design lanes) writes an owner's decision into the spec: it appends
   `- **Amendment (<YYYY-MM-DD>)**: <text>` to the issue body's `## Amendments` section (made once, at the end), logs `amend`

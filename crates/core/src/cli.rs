@@ -182,9 +182,6 @@ enum Cmd {
         #[arg(help = "The recommended option's number")]
         #[arg(long, value_name = "N")]
         recommend: Option<usize>,
-        #[arg(help = "routine (defaults to --recommend after [limits].ask_default_minutes) | owner (always waits)")]
-        #[arg(long, default_value = "owner", value_parser = ["routine", "owner"])]
-        kind: String,
         #[arg(help = "Ask in this orchestrator thread: its options become choice rows, the answer goes back into it")]
         #[arg(long, value_name = "ID")]
         thread: Option<String>,
@@ -218,7 +215,7 @@ enum Cmd {
         fleet: String,
         issue: u64,
         text: String,
-        #[arg(help = "The ask the owner answered (or a routine ask's default) on this issue that decided it")]
+        #[arg(help = "The ask the owner answered (or an old routine ask's default) on this issue that decided it")]
         #[arg(long, value_name = "ID")]
         basis: String,
     },
@@ -1608,12 +1605,18 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     question: Some(question),
                     options,
                     recommend: n,
-                    kind,
                     thread,
                     ..
                 } => {
-                    let (at, how) = (lane(&issue)?, (n, kind.as_str(), thread.as_deref()));
-                    crate::ask(ctx, &cfg, r, out, (&fleet, at), (&question, &options), how)?;
+                    let at = lane(&issue)?;
+                    crate::ask(
+                        ctx,
+                        &cfg,
+                        out,
+                        (&fleet, at),
+                        (&question, &options),
+                        (n, thread.as_deref()),
+                    )?;
                     at.inspect(|n| kick(&fleet, *n, "ask"));
                 }
                 Cmd::Answer {
