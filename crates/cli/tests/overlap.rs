@@ -765,6 +765,12 @@ fn cap_check_warns_within_reach_of_the_cap() {
 #[test]
 fn check_emits_cap_near_once_per_integration_sha() {
     let (_d, seed, c, cfg) = repos("cap-near");
+    let conf = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(
+        &c.config,
+        conf.replace("[limits]\n", "[limits]\nfetch_fresh_secs = 0\n"),
+    )
+    .unwrap();
     let sh = FakeShed::attached(&c);
     let put = |files: &[(&str, &str)]| {
         for (f, t) in files {

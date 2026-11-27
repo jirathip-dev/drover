@@ -42,7 +42,7 @@ pub fn fetch(ctx: &Ctx, r: &dyn Runner, dir: &Path, args: &[&str]) -> Result<Str
         return Ok(String::new());
     }
     let res = fetched(ctx, r, dir, args)?;
-    let now = crate::clock::wall();
+    let now = crate::clock::now();
     done.retain(|_, t| now.saturating_sub(*t) < secs);
     done.insert(spec, now);
     crate::db::put(&ctx.state, &key, now, &done).ok();
@@ -59,13 +59,13 @@ fn specs(args: &[&str]) -> String {
 }
 
 fn fresh(r: &dyn Runner, dir: &Path, (done, secs): (&BTreeMap<String, u64>, u64), spec: &str) -> bool {
-    let now = crate::clock::wall();
+    let now = crate::clock::now();
     let recent = |s: &str| done.get(s).is_some_and(|t| now.saturating_sub(*t) < secs);
     let one = spec
         .split_once(':')
         .filter(|(src, dst)| !spec.contains(' ') && !dst.contains('*') && !src.contains("wip/"));
     let all = || done.keys().any(|k| k.starts_with(ALL) && recent(k));
-    let there = |dst: &str| dst.contains('*') || git(r, dir, &["rev-parse", "--verify", "-q", dst]).is_ok();
+    let there = |dst: &str| dst.contains('*') || git(r, dir, &["rev-parse", "--verify", "--quiet", dst]).is_ok();
     let dsts = || spec.split(' ').filter_map(|s| s.split_once(':')).all(|(_, d)| there(d));
     !spec.is_empty() && (recent(spec) || one.is_some() && all()) && dsts()
 }
