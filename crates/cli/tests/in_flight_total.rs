@@ -18,7 +18,7 @@ fn fleet(f: &str) -> String {
 
 fn setup(name: &str, limits: &str) -> drover::Ctx {
     let fleets: String = ["a", "b", "c"].map(fleet).concat();
-    let cfg = format!("{fleets}[limits]\nreview_rounds = 3\nmax_parallel_spawns = 0\nstray_roots = []\n{limits}\n");
+    let cfg = format!("{fleets}[limits]\nmax_parallel_spawns = 0\nstray_roots = []\n{limits}\n");
     let c = common::ctx(&tmpdir(name), &cfg);
     SHED.with(|s| s.attach(&c));
     c

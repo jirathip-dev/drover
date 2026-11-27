@@ -682,8 +682,12 @@ impl Role {
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct Limits {
-    pub review_rounds: u32,
-    pub update_rounds: u32,
+    /// Retired (#1809): read only so doctor can say no round limit is left.
+    #[serde(skip_serializing)]
+    pub review_rounds: Option<u32>,
+    /// Retired (#1809), as `review_rounds`.
+    #[serde(skip_serializing)]
+    pub update_rounds: Option<u32>,
     pub stall_minutes: u64,
     pub silent_minutes: u64,
     pub ci_start_minutes: u64,
@@ -822,8 +826,8 @@ pub const ORCHESTRATOR_CHANGE_MINUTES: u64 = 30;
 impl Default for Limits {
     fn default() -> Self {
         Limits {
-            review_rounds: 3,
-            update_rounds: 3,
+            review_rounds: None,
+            update_rounds: None,
             stall_minutes: 30,
             silent_minutes: 10,
             ci_start_minutes: 10,
@@ -1060,7 +1064,21 @@ impl Config {
             .limits
             .load_per_cpu
             .map(|_| ("[limits] load_per_cpu", load.to_string()));
-        acct.into_iter().chain(tg).chain(old).chain(load).chain(jobs).collect()
+        let rounds = "retired (#1809): no round limit; an issue goes needs-human only when stuck; delete it";
+        let rounds = [
+            ("[limits] review_rounds", self.limits.review_rounds),
+            ("[limits] update_rounds", self.limits.update_rounds),
+        ]
+        .into_iter()
+        .filter(|k| k.1.is_some())
+        .map(move |k| (k.0, rounds.to_string()));
+        acct.into_iter()
+            .chain(tg)
+            .chain(old)
+            .chain(load)
+            .chain(rounds)
+            .chain(jobs)
+            .collect()
     }
 
     /// `[limits]` with host `machine`'s (`None`: the main host) `min_cpu_idle`, `min_free_mem_gb` and `swapout_rate` over them.
@@ -1222,7 +1240,7 @@ impl Config {
             let mut p = f
                 .pipeline
                 .take()
-                .unwrap_or_else(|| crate::pipeline::Pipeline::builtin(&c.limits, f.role.contains_key("verify")));
+                .unwrap_or_else(|| crate::pipeline::Pipeline::builtin(f.role.contains_key("verify")));
             let head = format!("[[fleet.{name}.pipeline.stage]]");
             let lines = text
                 .lines()
@@ -1230,9 +1248,6 @@ impl Config {
                 .filter(|l| l.1.split_whitespace().collect::<String>() == head);
             for (s, (i, _)) in p.stage.iter_mut().zip(lines) {
                 s.line = i + 1;
-            }
-            for g in p.stage.iter_mut().filter(|s| s.kind == "gate" && s.rounds.is_none()) {
-                g.rounds = Some(c.limits.update_rounds);
             }
             f.form_categories
                 .get_or_insert_with(|| c.limits.form_categories.clone());

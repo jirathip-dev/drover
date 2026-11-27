@@ -31,7 +31,7 @@ stateDiagram-v2
     impl --> review : pushed, no-change
     impl --> ready : no-change
     review --> merged : merged-outside
-    review --> needs_human : pr-closed
+    review --> needs_human : pr-closed, record
     review --> ready : record
     review --> fix : record
     fix --> merged : merged-outside
@@ -39,7 +39,7 @@ stateDiagram-v2
     fix --> review : pushed, no-change
     fix --> ready : no-change
     ready --> merged : merged-outside, merge
-    ready --> needs_human : pr-closed
+    ready --> needs_human : pr-closed, ci-red, conflict
     ready --> review : next-check
     ready --> fix : merge, ci-red, conflict
     blocked --> merged : merged-outside
@@ -98,8 +98,6 @@ flowchart TD
     d2 -.- k_ci_stuck_minutes(["ci_stuck_minutes = 30"])
     d2 -.- k_ci_flaky_retries(["ci_flaky_retries = 1"])
     d2 -.- k_gate_check_minutes(["gate_check_minutes = 30"])
-    d2 -.- k_review_rounds(["review_rounds = 3"])
-    d2 -.- k_update_rounds(["update_rounds = 3"])
     d2 -.- k_job_max(["job_max = 4"])
     d3 -.- k_max_parallel_spawns(["max_parallel_spawns = 6"])
     d3 -.- k_start_max(["start_max = 2"])

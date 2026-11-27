@@ -1,4 +1,4 @@
-use crate::config::{Limits, Role};
+use crate::config::Role;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -12,12 +12,13 @@ pub struct Stage {
     /// outcome -> a stage, `merge` or `park`; `<build>:update` is an update round.
     #[serde(default)]
     pub next: BTreeMap<String, String>,
-    /// A check's review rounds, a gate's update rounds; out of rounds goes to park.
-    pub rounds: Option<u32>,
+    /// Retired (#1809): no round limit; an old fleet.toml's `rounds` is read and ignored.
+    #[serde(default, rename = "rounds")]
+    pub retired_rounds: serde::de::IgnoredAny,
     /// The fleet.toml line of its `[[…stage]]` header; 0 for the built-in pipeline.
     #[serde(skip)]
     pub line: usize,
-    /// The check whose round count this one's FAILs park on (the built-in verify: rev's).
+    /// The check whose round count this one's FAILs add to (the built-in verify: rev's).
     #[serde(skip)]
     pub share: Option<String>,
 }
@@ -60,44 +61,36 @@ fn goes(outcome: &str) -> Option<&'static [&'static str]> {
     }
 }
 
-fn stage(name: &str, kind: &str, role: Option<&str>, rounds: Option<u32>, next: &[(&str, &str)]) -> Stage {
+fn stage(name: &str, kind: &str, role: Option<&str>, next: &[(&str, &str)]) -> Stage {
     Stage {
         name: name.into(),
         kind: kind.into(),
         role: role.map(String::from),
         next: next.iter().map(|(o, t)| ((*o).into(), (*t).into())).collect(),
-        rounds,
+        retired_rounds: serde::de::IgnoredAny,
         line: 0,
         share: None,
     }
 }
 
 impl Pipeline {
-    /// Today's loop: `[limits] review_rounds` on rev, `update_rounds` on the gate; with a `verify` role, rev's PASS goes to a verify check whose FAILs count against rev's rounds.
-    pub fn builtin(l: &Limits, verify: bool) -> Pipeline {
+    /// Today's loop, with no round limit: with a `verify` role, rev's PASS goes to a verify check whose FAILs add to rev's round count.
+    pub fn builtin(verify: bool) -> Pipeline {
         let pass = if verify { "verify" } else { "gates" };
         let mut v = stage(
             "verify",
             "check",
             Some("verify"),
-            Some(l.review_rounds),
             &[("PASS", "gates"), ("FAIL", "impl")],
         );
         v.share = Some("rev".into());
         let mut stage = vec![
-            stage("impl", "build", Some("impl"), None, &[("push", "rev")]),
-            stage(
-                "rev",
-                "check",
-                Some("rev"),
-                Some(l.review_rounds),
-                &[("PASS", pass), ("FAIL", "impl")],
-            ),
+            stage("impl", "build", Some("impl"), &[("push", "rev")]),
+            stage("rev", "check", Some("rev"), &[("PASS", pass), ("FAIL", "impl")]),
             stage(
                 "gates",
                 "gate",
                 None,
-                Some(l.update_rounds),
                 &[("ok", "merge"), ("ci_red", "impl"), ("conflict", "impl:update")],
             ),
         ];
@@ -157,12 +150,6 @@ impl Pipeline {
         }
     }
 
-    /// The gate's update rounds (`conflict → <build>:update`).
-    pub fn update_limit(&self) -> u32 {
-        let g = self.stage.iter().find(|s| s.kind == "gate");
-        g.and_then(|g| g.rounds).unwrap_or(u32::MAX)
-    }
-
     /// The first gate stage (CI red and conflicts route from it).
     pub fn gate(&self) -> &str {
         self.stage
@@ -199,33 +186,6 @@ impl Pipeline {
             }
         }
         seen
-    }
-
-    fn unlimited_cycle(&self, gone: &BTreeSet<String>) -> Option<Vec<String>> {
-        fn dfs<'a>(
-            p: &'a Pipeline,
-            n: &'a str,
-            path: &mut Vec<&'a str>,
-            free: &dyn Fn(&str) -> bool,
-        ) -> Option<Vec<String>> {
-            if let Some(i) = path.iter().position(|x| *x == n) {
-                return Some(path.iter().skip(i).chain([&n]).map(|s| (*s).to_string()).collect());
-            }
-            path.push(n);
-            for (_, _, t) in p.edges().filter(|e| e.0 == n && free(e.2)) {
-                if let Some(c) = dfs(p, t, path, free) {
-                    return Some(c);
-                }
-            }
-            path.pop();
-            None
-        }
-        let free = |n: &str| {
-            self.get(n)
-                .is_some_and(|s| (s.kind != "check" || s.rounds.is_none()) && !gone.contains(n))
-        };
-        let names = self.stage.iter().map(|s| s.name.as_str()).filter(|n| free(n));
-        names.into_iter().find_map(|n| dfs(self, n, &mut vec![], &free))
     }
 
     /// Every broken rule, in the board's order (docs/pipeline.md); empty = valid. The built-in one is not checked.
@@ -299,21 +259,6 @@ impl Pipeline {
                 s,
                 format!("stage {} can't reach an end{nor}: every path loops back", s.name),
             );
-        }
-        let mut gone = BTreeSet::new();
-        while let Some(c) = self.unlimited_cycle(&gone) {
-            let on = c
-                .iter()
-                .find(|n| self.get(n).is_some_and(|s| s.kind == "check"))
-                .or(c.first())
-                .unwrap_or(&first.name);
-            let s = self.get(on).unwrap_or(first);
-            bad(
-                "no limit",
-                s,
-                format!("loop {} has no round limit: set rounds on {on}", c.join(" → ")),
-            );
-            gone.extend(c);
         }
         for s in &self.stage {
             let want = outcomes(&s.kind);

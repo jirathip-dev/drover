@@ -927,7 +927,7 @@ fn a_remote_review_is_read_over_ssh_and_recorded() {
     let dir = tmpdir("hosts-rev");
     std::fs::write(
         dir.join("verdict.md"),
-        "FAIL\n- blocking [code] a.rs:1\n  Proof: spec\n  > AC 1\n",
+        "FAIL\n- blocking [ac] a.rs:1\n  Proof: spec\n  > AC 1\n",
     )
     .unwrap();
     let rev = dir.to_str().unwrap();

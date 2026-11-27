@@ -332,6 +332,23 @@ impl Heavy {
         }
     }
 
+    /// Fleet `f`'s heavy kinds under host `host`'s slot limits (None or unknown: the main host's).
+    pub fn at(cfg: &crate::config::Config, f: &crate::config::Fleet, host: Option<&str>) -> Heavy {
+        let main = || cfg.hosts.values().find(|h| h.machine.is_none());
+        Self::of(f, host.and_then(|n| cfg.hosts.get(n)).or_else(main))
+    }
+
+    /// `run` as a check's `sh -c` argv in `wt` at background priority: on the `cargo` route when `gated`, else in a slot of the kind it matches.
+    pub fn check(&self, exe: &str, run: &str, wt: &str) -> Vec<String> {
+        let line = match self.kind(run) {
+            _ if self.gated(run) => self.wrap(exe, GATE_KIND, run, Some(wt)),
+            Some(kind) => self.wrap(exe, kind, run, None),
+            None => run.to_string(),
+        };
+        let sh = format!("renice -n 19 -p $$ >/dev/null 2>&1; cd \"$0\" && {line}");
+        crate::runner::argv(&["-c", &sh, wt])
+    }
+
     /// The first kind with a pattern matching one of `cmd`'s commands (leading `VAR=value` words, quoted text, comments and here-doc bodies skipped).
     pub fn kind(&self, cmd: &str) -> Option<&str> {
         let line = Line::parse(cmd);
