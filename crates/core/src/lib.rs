@@ -5,7 +5,9 @@ macro_rules! stderr {
 
 pub mod access;
 pub mod accounts;
+pub mod acp;
 pub mod action;
+pub mod agents;
 pub mod amend;
 pub mod arch;
 pub mod autonomy;
@@ -300,7 +302,7 @@ pub fn set(
     let cfg = Config::parse(&text)?;
     let cur = cfg.fleet(fleet)?.role(role)?.clone();
     if wanted.is_empty() {
-        bail!("nothing to set: pass --harness, --model, --profile or --effort");
+        bail!("nothing to set: pass --agent, --harness, --model, --profile or --effort");
     }
     if let Some((k, v)) = wanted
         .iter()
@@ -326,6 +328,7 @@ pub fn set(
     for (key, val) in wanted {
         let old = match key {
             "harness" => Some(cur.harness.clone()),
+            "agent" => cur.agent.clone(),
             "model" => cur.model.clone(),
             "profile" => cur.profile.clone(),
             _ => cur.effort.clone(),

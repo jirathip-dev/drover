@@ -128,6 +128,7 @@ flowchart TD
     other -.- k_db_retry_millis(["db_retry_millis = 10"])
     other -.- k_notify_secs(["notify_secs = 15"])
     other -.- k_shed_read_millis(["shed_read_millis = 300"])
+    other -.- k_acp_judge_secs(["acp_judge_secs = 30"])
     other -.- k_service_call_secs(["service_call_secs = 2"])
     other -.- k_disk_probe_secs(["disk_probe_secs = 2"])
     other -.- k_disk_hung_secs(["disk_hung_secs = 6"])

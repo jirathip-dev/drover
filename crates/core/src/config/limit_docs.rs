@@ -209,6 +209,14 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "how long drive's intake waits for shed's state changes",
     ),
     (
+        "acp_judge_secs",
+        "shed's judge denies a judged lane's tool call when `drover hook --acp` takes longer",
+    ),
+    (
+        "acp_probe_seconds",
+        "an agent's test run under shed's judge (before its first judged lane) gives up after this long",
+    ),
+    (
         "service_call_secs",
         "a call to the running service's socket times out after this long",
     ),

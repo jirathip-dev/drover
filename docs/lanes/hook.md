@@ -12,6 +12,17 @@ doesn't load, or from a lane whose fleet isn't in it is denied `REFUSED HOOK_FAI
 or ask the owner`. Each logs `hook-failed-closed` (lane and cause, never the command), alerted once per cause an
 hour. Its rules come from the binary and the loaded fleet.toml only, never from a file in the lane's worktree.
 
+### ACP mode (#1694)
+
+`drover hook --acp` is shed's judge for a judged lane ([agents](agents.md)): one permission request on stdin
+(`name`, `labels`, `cwd`, `tool_call`, `options`), one verdict on stdout (`{"decision": "allow"|"deny", "reason"}`).
+It maps the ACP `toolCall` onto the same rules: an `execute` is a shell call (`rawInput.command`, `cmd` or `script`,
+a string or an argv list; its own absolute `cwd` or `workdir`, else the request's); an `edit`, `delete` or `move` is
+a write of every path its `locations`, path fields or patch text name; a `switch_mode` is denied `MODE_SWITCH`;
+`read`, `search`, `think` and `fetch` are allowed; `other` reads as a shell call or a write when it carries one.
+It fails closed: input that is not a request, no `tool_call`, an `execute` with no readable command, a write with no
+path, no `DROVER_LANE` or a fleet.toml that does not load is denied `HOOK_FAILED_CLOSED`.
+
 ### Kicks (#304)
 
 The same hook runs on Claude `PostToolUse` (Bash) and `Stop`: a

@@ -1024,8 +1024,9 @@ fn start(
         return on_hold(ctx, cfg, r, (t, events), &h, a);
     }
     let aid = shed.acp.clone().context(crate::config::NO_RUNTIME)?;
-    let acp = match crate::spawn::acp_cmd(ctx, r, &p, &aid, None) {
-        Ok(cmd) => cmd,
+    let catalog = crate::agents::Catalog::read(r)?;
+    let acp = match crate::spawn::acp_cmd(ctx, r, &p, (&aid, crate::acp::Guard::Hooked, &catalog), None) {
+        Ok((cmd, _)) => cmd,
         Err(e) => {
             if e.downcast_ref::<crate::gate::Refusal>().is_some() {
                 log(

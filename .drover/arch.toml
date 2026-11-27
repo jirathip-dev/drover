@@ -385,3 +385,28 @@ reason = "#1756: the job mechanism names no job; a job is an entry in roles/jobs
 pattern = "hotspots::"
 paths = ["crates/core/src/jobs.rs"]
 reason = "#1756: the job mechanism names no job; a job is an entry in roles/jobs/ or the fleet's config"
+
+[[ban]]
+pattern = "antigravity"
+paths = ["crates/*/src/**", "web/src/**"]
+reason = "#1694: an agent is a row of shed's list; no code names one"
+comments = true
+ignore_case = true
+
+[[ban]]
+pattern = "tool_call"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/acp/**"]
+reason = "#1694: an ACP toolCall is read in core::acp only; the rules take a hook::Call"
+
+[[ban]]
+pattern = "--judge"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/term.rs", "crates/core/src/acp/**"]
+reason = "#1694: only term builds a judged start, from acp::command"
+
+[[ban]]
+pattern = "\"agents\", \"--json\""
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/agents.rs"]
+reason = "#1694: shed's agent list is read in core::agents only"
