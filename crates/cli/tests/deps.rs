@@ -57,13 +57,13 @@ fn deps_files_queues_and_spawns_a_deps_lane_and_never_a_second_while_one_is_open
 }
 
 #[test]
-fn tick_files_one_advisory_issue_with_the_tools_output_and_deps_monthly_where_not_off() {
+fn housekeeping_files_one_advisory_issue_with_the_tools_output_and_deps_monthly_where_not_off() {
     let c = ctx(&tmpdir("deps-tick"), &(CONFIG.to_string() + OFF + QUIET));
     let _sh = FakeShed::attached(&c);
     let old = c.state.with_file_name("deps-sendmeter");
     std::fs::create_dir_all(&old).unwrap();
     let tick = |now: u64, r: &Fake| {
-        let (code, out) = run(&drover::Ctx { now, ..c.clone() }, r, &["tick"]);
+        let (code, out) = run(&drover::Ctx { now, ..c.clone() }, r, &["housekeep"]);
         assert_eq!(code, 0, "{out}");
         let calls = r.calls.borrow();
         calls

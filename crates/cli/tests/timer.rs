@@ -57,16 +57,26 @@ fn install_no_load_writes_without_loading_and_remove_deletes() {
     let c = ctx(&tmpdir("timer-install"), CONFIG);
     let _sh = FakeShed::attached(&c);
     let r = host(Fake::default());
+    let clean = job(&c, "dev.drover.clean");
+    std::fs::create_dir_all(clean.parent().unwrap()).unwrap();
+    std::fs::write(&clean, "old daily clean").unwrap();
     let (code, out) = run(&c, &r, &["timer", "install", "--no-load"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.starts_with("✓ wrote dev.drover.tick; load it: "), "{out}");
+    assert!(out.contains("✓ wrote dev.drover.housekeep; load it: "), "{out}");
+    assert!(
+        out.ends_with("✓ removed dev.drover.clean\n") && !clean.exists(),
+        "{out}"
+    );
+    let housekeep = std::fs::read_to_string(job(&c, "dev.drover.housekeep")).unwrap();
+    assert!(housekeep.contains("housekeep"), "{housekeep}");
     let text = std::fs::read_to_string(job(&c, "dev.drover.tick")).unwrap();
     let path = "/opt/claude/bin:/opt/homebrew/bin:/opt/drover/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
     assert!(text.contains(path) && text.contains("tick"), "{text}");
     assert!(!r.called("launchctl bootstrap") && !r.called("systemctl --user enable"));
     assert_eq!(
         run(&c, &r, &["timer", "install", "--no-load"]).1,
-        "= already dev.drover.tick\n= already dev.drover.fast\n= already dev.drover.update\n= already dev.drover.clean\n"
+        "= already dev.drover.tick\n= already dev.drover.fast\n= already dev.drover.housekeep\n= already dev.drover.update\n"
     );
     let fast = std::fs::read_to_string(job(&c, "dev.drover.fast")).unwrap();
     let every = if MAC {
@@ -82,13 +92,13 @@ fn install_no_load_writes_without_loading_and_remove_deletes() {
     let (code, out) = run(&c, &r, &["timer", "remove"]);
     assert_eq!(
         (code, out.as_str()),
-        (0, "✓ removed dev.drover.tick\n✓ removed dev.drover.fast\n✓ removed dev.drover.update\n✓ removed dev.drover.clean\n")
+        (0, "✓ removed dev.drover.tick\n✓ removed dev.drover.fast\n✓ removed dev.drover.housekeep\n✓ removed dev.drover.update\n")
     );
     assert!(!job(&c, "dev.drover.tick").exists() && !job(&c, "dev.drover.fast").exists());
     assert!(r.called("launchctl bootout") || r.called("systemctl --user disable --now dev.drover.tick.timer"));
     assert_eq!(
         run(&c, &r, &["timer", "remove"]).1,
-        "= no dev.drover.tick job\n= no dev.drover.fast job\n= no dev.drover.update job\n= no dev.drover.clean job\n"
+        "= no dev.drover.tick job\n= no dev.drover.fast job\n= no dev.drover.housekeep job\n= no dev.drover.update job\n"
     );
 }
 
@@ -115,7 +125,7 @@ fn install_loads_and_prints_the_command() {
             format!("systemctl --user enable --now dev.drover.{job}.timer")
         }
     };
-    let jobs = ["fast", "update", "clean"];
+    let jobs = ["fast", "housekeep", "update"];
     let r = jobs
         .iter()
         .fold(host(Fake::default()).reply(cmd, ""), |r, j| r.reply(&unit(j), ""));
@@ -625,7 +635,7 @@ fn install_run_by_the_local_bin_symlink_names_the_install_roots_binary() {
     c.exe = link.to_string_lossy().into();
     let (code, out) = run(&c, &host(Fake::default()), &["timer", "install", "--no-load"]);
     assert_eq!(code, 0, "{out}");
-    let text = std::fs::read_to_string(job(&c, "dev.drover.clean")).unwrap();
+    let text = std::fs::read_to_string(job(&c, "dev.drover.housekeep")).unwrap();
     let root = std::fs::canonicalize(&root).unwrap();
     assert!(text.contains(&format!("{}", root.display())), "{text}");
     assert!(!text.contains(&format!("{}", link.display())), "{text}");
@@ -639,17 +649,17 @@ fn doctor_marks_a_job_launchd_refuses_red() {
     std::fs::create_dir_all(&c.home).unwrap();
     let uid = std::fs::metadata(&c.home).unwrap().uid();
     let probe = if MAC {
-        format!("launchctl print gui/{uid}/dev.drover.clean")
+        format!("launchctl print gui/{uid}/dev.drover.update")
     } else {
-        "systemctl --user is-active dev.drover.clean.timer".into()
+        "systemctl --user is-active dev.drover.update.timer".into()
     };
     let refused = "job state = spawn failed\nlast exit reason = OS_REASON_CODESIGNING\n";
     let r = host(Fake::default()).reply(&probe, refused);
     let (_, out) = run(&c, &r, &["doctor"]);
-    let line = "✗ timer — dev.drover.clean spawn failed → drover timer install";
+    let line = "✗ timer — dev.drover.update spawn failed → drover timer install";
     assert!(out.lines().any(|l| l.starts_with(line)), "{out}");
     let (_, out) = run(&c, &host(Fake::default()), &["doctor"]);
-    assert!(!out.contains("dev.drover.clean spawn failed"), "{out}");
+    assert!(!out.contains("dev.drover.update spawn failed"), "{out}");
 }
 
 #[test]

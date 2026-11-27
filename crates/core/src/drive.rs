@@ -688,19 +688,6 @@ fn quiet(ctx: &Ctx, fleet: &str) -> bool {
     queue::replay(&queued, fleet).iter().all(|i| issues.contains(&i.issue))
 }
 
-/// The tick's slow chores beside the passes: the disk budget, lanes hogging the CPU, then each fleet's backlog.
-pub fn chores(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    if let Err(e) = crate::check::budget(ctx, cfg, r, out) {
-        writeln!(out, "budget: {e:#}")?;
-    }
-    crate::check::hogs(ctx, cfg, r, out).unwrap_or_else(|e| crate::stderr!("drover: lane-hog: {e:#}"));
-    for name in cfg.fleet.keys().filter(|n| crate::reroot::drives(ctx, cfg, r, n, out)) {
-        crate::gh::backlog(ctx, r, cfg.fleet(name)?, name)
-            .unwrap_or_else(|e| crate::stderr!("drover: {name} backlog: {e:#}"));
-    }
-    Ok(())
-}
-
 /// `drover drive`: with a fleet, its pass under its own `pass_max_secs` deadline; without, every fleet's pass started.
 pub fn job(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: Option<&str>) -> Result<()> {
     let Some(f) = fleet else { return start(ctx, cfg, r, out) };
@@ -1975,31 +1962,6 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         go &= !stop(code);
     }
     res.and(crate::pending::stalled(ctx, cfg, fleet))
-        .and(clean_merged(ctx, cfg, r, out, &events, fleet))
-}
-
-fn clean_merged(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
-    events: &[Event],
-    fleet: &str,
-) -> Result<()> {
-    let st = fold(events);
-    let merged = |e: &&Event| {
-        e.issue
-            .is_some_and(|n| st.get(&(fleet.into(), n)).is_some_and(IssueState::done))
-    };
-    let left = (events.iter())
-        .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && e.fleet == fleet)
-        .filter(merged)
-        .filter(|e| !crate::hosts::held(ctx, cfg, e));
-    if KICK.get().is_none() && !crate::hosts::present(r, left).is_empty() {
-        let c = (fleet, None, "clean");
-        act(ctx, cfg, r, out, events, c, &["clean", fleet, "--yes"])?;
-    }
-    Ok(())
 }
 
 fn catch_up(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
@@ -2116,9 +2078,6 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
         let head = gh::cached_pr(ctx, fleet, n).at("headRefOid").clone();
         let d = json!({"step": step, "error": error, "head": head});
         append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "spawn-error", d))?;
-    }
-    if step == "clean" && code.is_none() && !text.contains("removed ") {
-        return Ok(None);
     }
     let outcome = match code {
         None if kicks && issue.is_some() => "pending",

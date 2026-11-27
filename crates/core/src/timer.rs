@@ -12,39 +12,18 @@ pub const TICK: &str = "dev.drover.tick";
 pub const FAST: &str = "dev.drover.fast";
 /// The build's own jobs (label, args); `install` derives each one's interval from its args. `drover service`, kept alive; it runs the fast step itself (and the board with `--board`).
 pub const SERVICE: &str = "dev.drover.service";
-pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive"])];
+/// The housekeeping job: check, clean, reclaim and the chores, beside the drive passes, never inside one.
+pub const HOUSEKEEP: &str = "dev.drover.housekeep";
+pub const JOBS: [(&str, &[&str]); 3] = [(TICK, &["tick"]), (FAST, &["drive"]), (HOUSEKEEP, &["housekeep"])];
 /// The tick's steps in order (`tick.step` names the running one) and the `[limits]` keys that time them.
-pub const TICK_STEPS: [(&str, &[&str]); 8] = [
-    (
-        "check",
-        &[
-            "stall_minutes",
-            "ask_default_minutes",
-            "ask_waiting_minutes",
-            "ask_expire_hours",
-            "outbox_stale_minutes",
-            "acp_start_minutes",
-            "idle_reap_minutes",
-            "done_close_minutes",
-            "idle_merged_minutes",
-        ],
-    ),
-    ("drive", &[]),
-    ("clean", &[]),
-    ("trim", &[]),
-    ("jobs", &[]),
-    ("soak", &[]),
-    ("hotspots", &[]),
-    ("compact", &[]),
-];
-/// Drover's own install every 5 min and the daily scheduled clean; `setup` and `timer` write them.
+pub const TICK_STEPS: [(&str, &[&str]); 1] = [("drive", &[])];
+/// Drover's own install every 5 min; `setup` and `timer` write it.
 pub const UPDATE: &str = "dev.drover.update";
+/// The old daily clean job, folded into housekeeping: `timer install` removes it.
 pub const CLEAN: &str = "dev.drover.clean";
 /// The optional read-only staging serve (`[self_update] staging_serve`), from its own install root.
 pub const STAGING: &str = "dev.drover.serve-staging";
-pub const MORE: [(&str, &[&str]); 2] = [(UPDATE, &["self-update"]), (CLEAN, &["clean", "--scheduled"])];
-/// The `every` of a job that runs daily at 03:30 (launchd `StartCalendarInterval`, systemd `OnCalendar`).
-pub const DAILY: u64 = 86_400;
+pub const MORE: [(&str, &[&str]); 1] = [(UPDATE, &["self-update"])];
 const MAC: bool = cfg!(target_os = "macos");
 const FIX: &str = "drover timer install";
 const ABANDON: &str = "<key>AbandonProcessGroup</key><true/>";
@@ -64,8 +43,6 @@ pub fn files(ctx: &Ctx, label: &str, argv: &[&str], path: &str, every: u64, mac:
         } else {
             serve
         };
-        let at = "StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>30</integer></dict>";
-        let when = if every == DAILY { at } else { when };
         let dest = format!("Library/LaunchAgents/{label}.plist");
         (strings, when, include_str!("../assets/job.plist"), dest)
     } else {
@@ -81,13 +58,7 @@ pub fn files(ctx: &Ctx, label: &str, argv: &[&str], path: &str, every: u64, mac:
     let fill = |s: String, (k, v): &(&str, &str)| s.replace(k, v).replace("{secs}", &secs);
     let text = kv.iter().fold(template.replace("{when}", when), fill);
     let timer = ctx.home.join(format!(".config/systemd/user/{label}.timer"));
-    let mut unit = include_str!("../assets/job.timer").replace("{secs}", &secs);
-    if every == DAILY {
-        unit = unit.replace(
-            "OnActiveSec=0\nOnUnitActiveSec=86400",
-            "OnCalendar=*-*-* 03:30:00\nPersistent=true",
-        );
-    }
+    let unit = include_str!("../assets/job.timer").replace("{secs}", &secs);
     let timer = (every > 0 && !mac).then_some((timer, unit));
     std::iter::once((ctx.home.join(dest), text)).chain(timer).collect()
 }
@@ -223,7 +194,6 @@ fn expect(ctx: &Ctx, cfg: &Config, label: &str, args: &[&str], path: &str) -> Ve
         _ if !every => 0,
         "drive" => cfg.limits.fast_secs,
         "self-update" => 300,
-        "clean" => DAILY,
         _ => cfg.limits.slow_secs,
     };
     let exe = std::fs::canonicalize(&ctx.exe).map_or(ctx.exe.clone(), |p| p.to_string_lossy().into());
@@ -332,25 +302,15 @@ pub fn install(ctx: &Ctx, cfg: &Config, r: &dyn Runner, label: &str, args: &[&st
 /// `drover timer install|remove|status`.
 pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: (&str, &str, bool)) -> Result<i32> {
     let (action, label, load) = cmd;
-    let both = [(label, JOBS[0].1), JOBS[1], MORE[0], MORE[1]];
+    let both = [(label, JOBS[0].1), JOBS[1], JOBS[2], MORE[0]];
     let line = match action {
         "install" => {
             let lines = both.map(|(l, args)| (l, install(ctx, cfg, r, l, args, load)));
             installed(ctx, cfg, &lines)?;
-            lines.map(|l| l.1).join("\n")
+            let lines = lines.map(|l| l.1).into_iter().chain([remove(ctx, r, CLEAN)]);
+            lines.filter(|l| !l.starts_with("= no ")).collect::<Vec<_>>().join("\n")
         }
-        "remove" => both
-            .map(|(label, _)| {
-                exec(r, &ctl(ctx, label, true)[2]).ok();
-                let files = files(ctx, label, &[], "", 1, MAC);
-                let gone = files.iter().filter(|f| std::fs::remove_file(&f.0).is_ok()).count();
-                if gone > 0 {
-                    format!("✓ removed {label}")
-                } else {
-                    format!("= no {label} job")
-                }
-            })
-            .join("\n"),
+        "remove" => both.map(|(label, _)| remove(ctx, r, label)).join("\n"),
         _ => {
             let up = exec(r, &ctl(ctx, label, true)[0]).is_ok();
             let on = if up { "loaded" } else { "not loaded" };
@@ -360,6 +320,19 @@ pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: 
     };
     writeln!(out, "{line}")?;
     Ok(i32::from(line.contains('✗')))
+}
+
+fn remove(ctx: &Ctx, r: &dyn Runner, label: &str) -> String {
+    let files = files(ctx, label, &[], "", 1, MAC);
+    if files.iter().any(|f| f.0.exists()) {
+        exec(r, &ctl(ctx, label, true)[2]).ok();
+    }
+    let gone = files.iter().filter(|f| std::fs::remove_file(&f.0).is_ok()).count();
+    if gone > 0 {
+        format!("✓ removed {label}")
+    } else {
+        format!("= no {label} job")
+    }
 }
 
 fn installed(ctx: &Ctx, cfg: &Config, lines: &[(&str, String)]) -> Result<()> {
@@ -383,22 +356,6 @@ fn alert(ctx: &Ctx, cfg: &Config, events: &[Event], kind: &str, item: &str, reas
     }
     let d = serde_json::json!({"key": item, "reason": reason});
     emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d))
-}
-
-fn compact_daily(ctx: &Ctx, out: &mut dyn Write) -> Result<()> {
-    let at = ctx.state.with_file_name("compact.at");
-    let last = std::fs::read_to_string(&at)
-        .ok()
-        .and_then(|s| s.trim().parse::<u64>().ok());
-    if last.is_some_and(|t| ctx.now < t + 86_400) {
-        return Ok(());
-    }
-    std::fs::write(&at, ctx.now.to_string())?;
-    match crate::db::compact(&ctx.state, ctx.now) {
-        Ok((gone, moved)) => writeln!(out, "compact: {gone} heartbeats deleted, {moved} events archived")?,
-        Err(e) => writeln!(out, "compact: {e:#}")?,
-    }
-    Ok(())
 }
 
 fn skipped(ctx: &Ctx, cfg: &Config, pass: &crate::hosts::Pass) -> Result<()> {
@@ -433,6 +390,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         std::fs::write(&at, format!("{since} {}", since + t0.elapsed().as_secs())).ok();
     };
     write();
+    std::fs::write(ctx.state.with_file_name("tick.at"), ctx.now.to_string()).ok();
     let loaded = crate::check::config(ctx);
     let (stop, rx) = std::sync::mpsc::channel::<()>();
     let every = std::time::Duration::from_secs(crate::config::limits().tick_beat_secs);
@@ -447,44 +405,8 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let mut pass = crate::hosts::Pass::new(r, Some((mark.clone(), ctx.now))).sparing(off, log);
     pass.until = crate::clock::instant().checked_add(std::time::Duration::from_secs(budget));
     let res = loaded.as_ref().map_err(|e| anyhow::anyhow!("{e:#}")).and_then(|cfg| {
-        pass.step("check");
-        crate::check::check(ctx, cfg, &pass, out)?;
         pass.step("drive");
-        let driven = drive::chores(ctx, cfg, &pass, out).and(drive::start(ctx, cfg, &pass, out));
-        let over = pass.over();
-        if over {
-            writeln!(
-                out,
-                "tick: past its {budget} s budget; skipped: clean, jobs, soak, hotspots, compact"
-            )?;
-        }
-        let at = ctx.state.with_file_name("clean.at");
-        let last = std::fs::read_to_string(&at)
-            .ok()
-            .and_then(|s| s.trim().parse::<u64>().ok());
-        if !over && last.is_none_or(|t| ctx.now >= t + 3600) {
-            pass.step("clean");
-            std::fs::write(&at, ctx.now.to_string()).ok();
-            if let Err(e) = crate::check::clean_all(ctx, cfg, &pass, out, None, (None, None, false, false), true) {
-                writeln!(out, "clean: {e:#}")?;
-            }
-        }
-        pass.step("trim");
-        let until = pass.until.take();
-        crate::check::trim_hosts(ctx, cfg, &pass, out)?;
-        pass.until = until;
-        if over {
-            return driven;
-        }
-        pass.step("jobs");
-        crate::jobs::tick(ctx, cfg, &pass, out)?;
-        pass.step("soak");
-        crate::soak::nightly(ctx, cfg, &pass)?;
-        pass.step("hotspots");
-        crate::hotspots::daily(ctx, cfg, &pass, out)?;
-        pass.step("compact");
-        compact_daily(ctx, out)?;
-        driven
+        drive::start(ctx, cfg, &pass, out)
     });
     for m in pass.late() {
         writeln!(out, "tick: {m}: over budget; skipped for the rest of this pass")?;
@@ -570,6 +492,10 @@ fn repair(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Result<(
             alert(ctx, cfg, events, "timer-repair-failed", label, &line)?;
         }
     }
+    if remove(ctx, r, CLEAN).starts_with('✓') {
+        let d = serde_json::json!({"label": CLEAN, "was": "folded into housekeeping"});
+        emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "timer-repaired", d))?;
+    }
     Ok(())
 }
 
@@ -622,13 +548,16 @@ pub fn setup(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, load: bool) -> Resu
     };
     let tick = install(ctx, &cfg, r, TICK, &["tick"], load);
     let fast = install(ctx, &cfg, r, FAST, &["drive"], load);
-    let [update, clean] = MORE.map(|(l, args)| install(ctx, &cfg, r, l, args, load));
+    let housekeep = install(ctx, &cfg, r, HOUSEKEEP, &["housekeep"], load);
+    let update = install(ctx, &cfg, r, UPDATE, MORE[0].1, load);
+    let clean = remove(ctx, r, CLEAN);
     let labels = cfg
         .fleet
         .values()
         .filter_map(|f| Some(crate::gh::ensure_label(r, f, f.merge_label.as_deref()?)));
-    let rows: Vec<_> = [tick, fast, board, tailscale, sync, update, clean]
+    let rows: Vec<_> = [tick, fast, housekeep, board, tailscale, sync, update, clean]
         .into_iter()
+        .filter(|l| !l.starts_with("= no "))
         .chain(labels)
         .chain(cfg.fleet.keys().flat_map(|n| crate::setup::hygiene(ctx, &cfg, r, n)))
         .collect();
@@ -685,7 +614,7 @@ fn ago(now: u64, t: Option<u64>) -> String {
 }
 
 fn tick_row(ctx: &Ctx, events: &[Event]) -> (&'static str, String) {
-    let stamp = std::fs::read_to_string(ctx.state.with_file_name("check.at")).unwrap_or_default();
+    let stamp = std::fs::read_to_string(ctx.state.with_file_name("tick.at")).unwrap_or_default();
     let ran = stamp.trim().parse::<u64>().ok();
     let newer = |e: &&Event| ran.is_none_or(|t| e.ts >= t);
     let failed = crate::events::of_kind(events, &["tick-failed"])

@@ -33,7 +33,7 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `transcript_days` | `30` | a lane's agent keeps its transcripts this many days |
 | `deny_commands` | `assets/deny_commands.toml` | commands the lane hook refuses (default: containers) |
 | `fast_secs` | `60` | the fast job (`drive`) starts every fleet's pass every this many seconds |
-| `slow_secs` | `300` | the slow tick runs every this many seconds |
+| `slow_secs` | `300` | the slow tick and the housekeeping job run every this many seconds; each housekeeping chore's budget |
 | `form_categories` | `["trailer", "stale-baseline", "docs-fresh", "migration-redate", "infra"]` | the finding tags a `FAIL (form-only)` may carry |
 | `form_rounds` | `3` | form-only FAILs per issue that don't count as a review round |
 | `import_max_age_hours` | `24` | a remote host's asks older than this are never imported |
