@@ -260,18 +260,6 @@ fn make(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, (harness, orch): Opt2,
         d.put("req", json!(r));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, repo, None, "thread-new", d))?;
-    if role(cfg, repo).is_ok() {
-        let waiting = |a: &&Event| {
-            a.kind == "needs-decision"
-                && a.fleet == repo
-                && a.data.get("lane_ask").is_some()
-                && crate::thread::route::routed_to(&events, a).is_none()
-                && events::closed(&events, a).is_none()
-        };
-        for a in events.iter().filter(waiting) {
-            crate::thread::route::route_row(ctx, cfg, &id, a)?;
-        }
-    }
     Ok(id)
 }
 

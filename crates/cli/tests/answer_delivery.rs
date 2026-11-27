@@ -28,7 +28,7 @@ fn lane_ask(c: &drover::Ctx) {
         "ask",
         "sendmeter",
         "36",
-        "Split it?",
+        "Cut the scope?",
         "--option",
         "yes",
         "--option",
