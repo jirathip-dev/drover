@@ -134,7 +134,7 @@ fn install_loads_and_prints_the_command() {
 }
 
 #[test]
-fn tick_runs_check_then_drive_and_exits_zero_on_refusals() {
+fn tick_runs_drive_and_exits_zero_on_refusals() {
     let c = ctx(&tmpdir("timer-tick"), CONFIG);
     let _sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
@@ -144,7 +144,7 @@ fn tick_runs_check_then_drive_and_exits_zero_on_refusals() {
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("sendmeter #12 start: REFUSED HOST_BUSY"), "{out}");
-    for w in ["check.at", "drive-sendmeter.last"] {
+    for w in ["tick.at", "drive-sendmeter.last"] {
         assert_eq!(
             std::fs::read_to_string(c.state.with_file_name(w)).unwrap(),
             "1000000",
@@ -196,7 +196,7 @@ fn tick_failed_is_logged_at_most_once_an_hour() {
 }
 
 fn steps(out: &str) -> Vec<&str> {
-    out.lines().take(5).collect()
+    out.lines().take(6).collect()
 }
 
 #[test]
@@ -223,12 +223,13 @@ fn setup_twice_is_all_already_and_tailscale_absent_is_skipped() {
     let s = steps(&out);
     assert!(s[0].starts_with("✓ ") && s[0].contains("dev.drover.tick"), "{out}");
     assert!(s[1].starts_with("✓ ") && s[1].contains("dev.drover.service"), "{out}");
-    assert!(s[2].starts_with("✓ ") && s[2].contains("dev.drover.serve"), "{out}");
-    assert_eq!(s[3], "= tailscale serve skipped: tailscale is not on PATH");
-    assert_eq!(s[4], "✓ profiles synced");
+    assert!(s[2].starts_with("✓ ") && s[2].contains("dev.drover.housekeep"), "{out}");
+    assert!(s[3].starts_with("✓ ") && s[3].contains("dev.drover.serve"), "{out}");
+    assert_eq!(s[4], "= tailscale serve skipped: tailscale is not on PATH");
+    assert_eq!(s[5], "✓ profiles synced");
     assert!(
         out.lines()
-            .skip(5)
+            .skip(6)
             .any(|l| l.contains(" doctor") || l.contains(" host — ")),
         "{out}"
     );
@@ -325,15 +326,15 @@ fn setup_adopts_a_serve_job_under_another_label() {
     );
     if MAC {
         assert_eq!(
-            steps(&out)[2],
+            steps(&out)[3],
             format!("= adopted {} (re-labelling is manual: docs/setup.md)", theirs.display())
         );
         assert!(!job(&c, "dev.drover.serve").exists());
     } else {
-        assert!(steps(&out)[2].contains("dev.drover.serve"), "{out}");
+        assert!(steps(&out)[3].contains("dev.drover.serve"), "{out}");
     }
     assert_eq!(
-        steps(&out)[3],
+        steps(&out)[4],
         "= tailscale serve skipped: [serve] tailscale_https_port is unset"
     );
 }
@@ -348,7 +349,7 @@ fn services_rows_go_green_amber_and_red() {
     let _sh = FakeShed::attached(&c);
     let stamp = |w: &str, ago: u64| std::fs::write(c.state.with_file_name(w), (c.now - ago).to_string()).unwrap();
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
-    stamp("check.at", 60);
+    stamp("tick.at", 60);
     stamp("drive-sendmeter.last", 60);
     std::fs::write(c.state.with_file_name("drive-fast.at"), format!("{} 2.1", c.now - 40)).unwrap();
     let fleet_disk = |gb: u64| {
@@ -407,7 +408,7 @@ fn services_rows_go_green_amber_and_red() {
     drover::events::append(&c.state, &e).unwrap();
     assert_eq!(rows(&c, &green)[4].2, "last kick 12s ago (push #2940)");
 
-    stamp("check.at", 700);
+    stamp("tick.at", 700);
     let amber = host(Fake::default())
         .reply("lsof ", "x")
         .reply("df -k /", &df(12))
@@ -506,7 +507,13 @@ fn drift_is_missing_outdated_or_loaded() {
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let up = host(Fake::default()).reply(PROBE, "");
     let drift = |r: &Fake| drover::timer::drift(&c, &cfg, r);
-    let both = |a, b| vec![("dev.drover.tick", a), ("dev.drover.service", b)];
+    let both = |a, b| {
+        vec![
+            ("dev.drover.tick", a),
+            ("dev.drover.service", b),
+            ("dev.drover.housekeep", a),
+        ]
+    };
     assert_eq!(drift(&up), both("missing", "missing"));
     assert_eq!(run(&c, &up, &["timer", "install", "--no-load"]).0, 0);
     assert_eq!(drift(&up), both("loaded", "loaded"));

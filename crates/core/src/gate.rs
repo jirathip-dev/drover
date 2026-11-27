@@ -750,7 +750,7 @@ pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>) -> Result<String, Re
     Ok(head)
 }
 
-/// The merge commit reads like a changelog: `<title> (#PR)`, then the PR body's `## For humans` lines, a facts line and the commits' `Cap:` trailers. Returns (subject, body, whether the summary was there).
+/// The merge commit reads like a changelog: `<title> (#PR)`, then the PR body's `## For humans` lines, and a facts line. Returns (subject, body, whether the summary was there).
 pub fn merge_message(pr: &Value, issue: u64, rounds: u32, sha: &str) -> (String, String, bool) {
     let title = pr["title"].as_str().unwrap_or_default().trim();
     let strip = |open: &str, close: char| {
@@ -773,13 +773,6 @@ pub fn merge_message(pr: &Value, issue: u64, rounds: u32, sha: &str) -> (String,
         .sum();
     let s = if rounds == 1 { "" } else { "s" };
     let facts = format!("Closes #{issue} · {rounds} review round{s} · src {src:+} · PASS {sha:.7}");
-    let commits = pr["commits"].as_array().into_iter().flatten();
-    let lines = commits.filter_map(|c| c["messageBody"].as_str()).flat_map(str::lines);
-    let caps: Vec<&str> = lines
-        .map(str::trim)
-        .filter(|l| crate::overlap::cap_trailer(l))
-        .collect();
-    let facts = [&[facts.as_str()][..], &caps].concat().join("\n");
     let body = if human.is_empty() {
         facts
     } else {
@@ -804,7 +797,7 @@ fn premerge(
     head: &str,
 ) -> Result<Result<Option<u64>, Refusal>> {
     let f = cfg.fleet(fleet)?;
-    let checks = premerge_checks(ctx, f, &f.local_path());
+    let checks = premerge_checks(f);
     let rules = std::fs::read_to_string(crate::repo_path(&f.local_path().join(".drover/rules.md"))).unwrap_or_default();
     if checks.is_empty() && crate::lesson::checks(&rules).iter().all(|c| c.active) {
         return Ok(Ok(None));
@@ -821,7 +814,6 @@ fn premerge(
         scratch(r, &dir, &wt, &base)?;
         let clean = git(r, &wt, &["merge", "--no-ff", "--no-edit", head]).is_ok();
         let t = crate::clock::instant();
-        let checks = premerge_checks(ctx, f, &wt);
         let fail = clean
             .then(|| run_checks(r, (&heavy, &ctx.exe), &wt, &base, &checks))
             .flatten();
@@ -846,10 +838,7 @@ fn premerge(
     )))
 }
 
-pub(crate) fn premerge_checks(ctx: &Ctx, f: &Fleet, tree: &Path) -> Vec<Check> {
-    let has = f.local_path().join("ci/cap.toml").exists();
-    let own = || format!("{} cap-check --config ci/cap.toml", ctx.exe);
-    let cap = has.then(|| Premerge::Cmd(crate::gatekeeper::cap(tree).unwrap_or_else(own)));
+pub(crate) fn premerge_checks(f: &Fleet) -> Vec<Check> {
     let check = |p| match p {
         Premerge::Cmd(run) => Check {
             name: run.clone(),
@@ -858,8 +847,7 @@ pub(crate) fn premerge_checks(ctx: &Ctx, f: &Fleet, tree: &Path) -> Vec<Check> {
         },
         Premerge::Named(c) => c,
     };
-    let all = f.premerge.clone().unwrap_or(cap.into_iter().collect());
-    all.into_iter().map(check).collect()
+    f.premerge.clone().unwrap_or_default().into_iter().map(check).collect()
 }
 
 pub(crate) fn scratch(r: &dyn Runner, dir: &Path, wt: &Path, rev: &str) -> Result<()> {

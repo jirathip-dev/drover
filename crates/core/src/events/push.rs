@@ -25,7 +25,6 @@ pub const LEGACY: &[&str] = &[
     "wip-blocked",
     "spawn-failing",
     "host-busy",
-    "cap-near",
     "orphan-issue",
     "config-warning",
     "keychain-locked",

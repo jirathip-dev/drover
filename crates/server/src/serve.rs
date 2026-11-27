@@ -1420,7 +1420,7 @@ impl<'a> Server<'a> {
                 &self.r,
                 &mut out,
                 Some(&fleet),
-                (None, Some(agent), false),
+                (None, Some(agent), false, false, false),
                 yes,
             )?),
             "close" => crate::check::close(ctx, &cfg, &self.r, &mut out, agent, None)?,
@@ -2100,12 +2100,6 @@ impl<'a> Server<'a> {
                 let at = p.str("at").unwrap_or("?");
                 card.notes
                     .push(format!("landing paused: {} red since {at}", fc.integration));
-            }
-            let cap = gh::cached(ctx, "cap", f, 0).unwrap_or_default();
-            let left = cap.at("cap").as_i64().zip(cap.at("lines").as_i64()).map(|(c, n)| c - n);
-            if let Some(l) = left.filter(|l| *l < cap.at("warn").as_i64().unwrap_or(500)) {
-                card.notes
-                    .push(format!("cap-near: {l} lines of headroom on {}", fc.integration));
             }
             d.fleets.push(card);
         }
@@ -3224,10 +3218,6 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
     let path = ctx.config.display().to_string();
     let home = crate::config::home().display().to_string();
     let l = &cfg.limits;
-    let line_cap = std::fs::read_to_string(fc.local_path().join("ci/cap.toml"))
-        .ok()
-        .and_then(|t| t.parse::<toml::Table>().ok())
-        .and_then(|t| t.get("fleet")?.get(fleet)?.get("line_cap")?.as_integer());
     let notify = |n: &[crate::config::Notify]| {
         let on = |n: &crate::config::Notify| {
             if n.on.is_empty() {
@@ -3286,7 +3276,6 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
         ask_minutes: l.ask_default_minutes,
         max_impl: fc.max_impl,
         max_rev: fc.max_rev,
-        line_cap,
         serial: (fc.serial.iter())
             .map(|g| format!("🔒{} {} at a time: {}", g.name, g.max, g.paths.join(", ")))
             .collect(),

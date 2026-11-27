@@ -970,7 +970,7 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
         };
         let s = m.entry((e.fleet.clone(), n)).or_insert_with(new);
         match (e.kind.as_str(), e.str("worktree")) {
-            ("clean", Some(w)) => drop(s.worktrees.remove(w)),
+            ("clean" | "clean-settled", Some(w)) => drop(s.worktrees.remove(w)),
             ("spawn", w) => s.worktrees.extend(w.or(e.str("agent")).map(String::from)),
             (k, Some(w)) if k.starts_with("spawn") => drop(s.worktrees.insert(w.into())),
             _ => {}

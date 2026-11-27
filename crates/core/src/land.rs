@@ -419,11 +419,7 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
             crate::gate::scratch(r, &dir, &wt, &from)?;
             git(r, &wt, &["merge", "--no-edit", &into]).is_ok()
         };
-        let checks = if clean {
-            crate::gate::premerge_checks(ctx, f, &wt)
-        } else {
-            vec![]
-        };
+        let checks = if clean { crate::gate::premerge_checks(f) } else { vec![] };
         let fail = crate::gate::run_checks(r, (&heavy, &ctx.exe), &wt, &into, &checks);
         let res = if !clean {
             crate::drive::update_lane(ctx, cfg, r, out, &events, fleet, s.issue).map(drop)
