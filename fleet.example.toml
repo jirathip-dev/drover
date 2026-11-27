@@ -67,6 +67,7 @@ merge_label = "merge-ready"   # the full CI runs only with this label; drover ad
 # notify_global = true   # also send this fleet's events to the global [[notify]]
 # port_range = "41000-41999"   # DROVER_PORT's range (the default)
 # premerge = ["cargo check --locked"]   # merge runs these on the PR merged with current integration (STAGING_WOULD_BREAK); unset = none
+# #1812: drover has no line cap: an old `cap_script`, `line_cap` or cap-script `premerge` entry still loads, and drover never reads the cap
 # required_checks = ["quality"]   # gate/check/wait look only at these (latest run each); unset = all checks
 # sandbox = "srt"   # #782 spike: start each lane's agent inside sandbox-runtime (`srt` on PATH); off by default (docs/spikes/lane-sandbox.md)
 # serial_paths = ["supabase/migrations/**"]   # the old form of one [[fleet.web.serial]] group named serial_label (default "db"), serial_max at a time
