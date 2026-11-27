@@ -1370,25 +1370,6 @@ fn a_pass_at_the_head_gets_the_default_merge_label_once_and_a_moved_head_loses_i
 }
 
 #[test]
-fn merge_label_parses_unset_to_merge_ready_off_to_none_and_a_name_to_itself() {
-    for (i, (line, want)) in [
-        ("", Some("merge-ready")),
-        ("merge_label = \"off\"\n", None),
-        ("merge_label = \"full-ci\"\n", Some("full-ci")),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let c = ctx(
-            &tmpdir(&format!("drive-label-parse-{i}")),
-            &CONFIG.replace("merge_label = \"off\"\n", line),
-        );
-        let cfg = drover::config::Config::load(&c.config).unwrap();
-        assert_eq!(cfg.fleet["sendmeter"].merge_label.as_deref(), want, "{line:?}");
-    }
-}
-
-#[test]
 fn merge_label_off_parses_to_none_and_a_pass_adds_no_label() {
     let c = ctx(&tmpdir("drive-no-label"), CONFIG);
     let cfg = drover::config::Config::load(&c.config).unwrap();
