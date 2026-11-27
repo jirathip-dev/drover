@@ -733,6 +733,7 @@ fn deadline(ctx: &Ctx, cfg: &Config, fleet: &str) -> std::sync::mpsc::Sender<()>
         .ok();
         let d = json!({"secs": secs, "step": step.trim(), "ended": true});
         append(&state, &Event::new(crate::now(), &fleet, None, "pass-slow", d)).ok();
+        crate::runner::kill_running();
         crate::runner::exit(124);
     });
     end
