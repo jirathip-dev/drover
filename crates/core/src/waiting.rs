@@ -916,8 +916,19 @@ pub fn scan_where(
             (w.who, w.next_cmd, w.promise) = ("none", None, None);
             w.what = format!("lane unknown: {m}'s shed listing unreadable");
         }
-        if let Some(h) = crate::hosts::offline(ctx, Some(cfg), sp).filter(|_| s.active_lane().is_some()) {
-            (w.who, w.what, w.next_cmd, w.promise) = ("none", h, None, None);
+        let active = s.active_lane().and_then(|(_, a)| last_spawn(mine, a));
+        if let Some(h) = crate::hosts::offline(ctx, Some(cfg), active) {
+            let removed = active
+                .and_then(|e| e.str("machine"))
+                .is_some_and(|m| !crate::hosts::configured(cfg, m));
+            let (who, what) = match active.and_then(|e| e.str("agent")).filter(|_| removed) {
+                Some(a) => (
+                    "owner",
+                    format!("{h}: lane {a} is on a host no longer in [hosts]; needs you"),
+                ),
+                None => ("none", h),
+            };
+            (w.who, w.what, w.next_cmd, w.promise) = (who, what, None, None);
         }
         let stuck = ["idle without pushing", "rev idle without", "reviewer exited"]
             .iter()
