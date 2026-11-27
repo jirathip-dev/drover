@@ -13,9 +13,6 @@ use std::io::Write;
 /// A lane that shows no output this long after its spawn (or its first prompt sent again) never started.
 pub const START_SECS: u64 = 600;
 
-/// Why drive restarts a live lane the token proxy refused (401): one `self-heal` an hour per issue.
-pub const KEY_401: &str = "lane key refused";
-
 /// What drive does about a stalled lane: respawn it (`why`), or a needs-human card (code, reason).
 pub enum Act {
     Respawn(String, &'static str),
@@ -70,15 +67,6 @@ pub fn stalled(ctx: &Ctx, cfg: &Config, ev: &[Event], sessions: &Sessions, w: &W
     let role = sp.str("role")?;
     let (n, _) = crate::waiting::respawns(ev, &w.fleet, w.issue);
     let ago = |t: u64| crate::events::age(ctx.now.saturating_sub(t));
-    if let Some(x) = sessions.get(lane).filter(|x| x.key_refused()) {
-        let healed = |e: &&Event| e.is("self-heal", &w.fleet, w.issue) && e.str("why") == Some(KEY_401);
-        let Some(e) = ev.iter().rfind(healed).filter(|e| ctx.now < e.ts + 3600) else {
-            return Some(Act::Respawn(role.into(), KEY_401));
-        };
-        let note = x.note.as_deref().map(crate::lanes::mask).unwrap_or_default();
-        let why = format!("lane {lane}'s key refused again {} after its heal: {note}", ago(e.ts));
-        return Some(Act::Escalate("LANE_KEY_REFUSED", why));
-    }
     match crate::lanes::health(ctx, cfg, ev, sessions, &s) {
         Health::NeverStarted { since } => Some(if n == 0 {
             Act::Respawn(role.into(), "failed start")

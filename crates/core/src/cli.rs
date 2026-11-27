@@ -381,11 +381,6 @@ enum Cmd {
         cmd: Option<HostsCmd>,
     },
     #[command(
-        about = "Owner only: the token proxy remote ACP lanes' model calls go through, on `[proxy] port` (#637, docs/hosts.md)"
-    )]
-    #[command(hide = true)]
-    Proxy,
-    #[command(
         about = "Phone page (PWA): queue, lanes, host, events; buttons for queue order, pause/resume, role model/effort"
     )]
     Serve {
@@ -567,14 +562,6 @@ enum Cmd {
         #[arg(long, help = "Remove without asking")]
         apply: bool,
     },
-    #[command(
-        about = "#537: the `[ci_runners]` VMs and their GitHub runners (an orchestrator's `runners` group, its brief names the verbs); each verb logged `runners-*`"
-    )]
-    #[command(hide = true)]
-    Runners {
-        #[command(subcommand)]
-        cmd: RunnersCmd,
-    },
     #[command(about = "Send Esc to an agent's pane (it pauses); logs `stop`")]
     Stop { agent: String },
     #[command(
@@ -698,7 +685,7 @@ enum ThreadCmd {
         orchestrator: Option<String>,
     },
     #[command(
-        about = "An orchestrator hands off to thread <to> at once, or to a repo (or `all`): the owner taps one of its threads or a new one; linked both ways, <text> wakes its orchestrator as from <from>"
+        about = "An orchestrator hands off to thread <to>, or to a repo's (or `all`'s) desk thread, at once with no tap; linked both ways, <text> wakes its orchestrator as from <from>"
     )]
     Handoff {
         from: String,
@@ -981,67 +968,6 @@ enum HostsCmd {
         about = "Empty a root (default the host's first): new lanes skip it, its lanes are saved and restarted on the next root"
     )]
     Eject { name: String, root: Option<String> },
-    #[command(
-        about = "Owner only: a cloud host's lanes' work to `wip/` first, then its recipe's `destroy`; logs `cloud-stop`"
-    )]
-    #[command(hide = true)]
-    Destroy { name: String },
-    #[command(
-        hide = true,
-        about = "Owner only: install shed, drover, git, gh, the lane providers there over SSH, open its logins, clone its fleets"
-    )]
-    Bootstrap { name: String },
-    #[command(about = "Owner only: a healthy cloud host saved as its recipe's snapshot; logs `cloud-snapshot`")]
-    #[command(hide = true)]
-    Snapshot { name: String },
-    #[command(
-        about = "The token proxy's per-lane keys (#637): id, state, lane, host; `revoke <id>` (owner only) ends one at once"
-    )]
-    Keys {
-        #[command(subcommand)]
-        cmd: Option<KeysCmd>,
-    },
-}
-
-#[derive(Subcommand)]
-enum KeysCmd {
-    #[command(about = "Owner only: this key stops signing at once; logs `proxy-key-revoked`")]
-    Revoke { id: String },
-}
-
-#[derive(Subcommand)]
-enum RunnersCmd {
-    #[command(about = "The GitHub runners, each VM's state and a health line (`9/9 online`)")]
-    Status,
-    #[command(about = "A fresh registration token and a runner-service restart on that VM")]
-    Revive { vm: String },
-    #[command(
-        about = "Create N VMs to the spec, within `max_vms` and the $/day cap (past it: RUNNERS_CAP, an owner ask)"
-    )]
-    Add {
-        #[arg(default_value_t = 1)]
-        n: u64,
-        #[arg(help = "The owner ask that approved going past the cap")]
-        #[arg(long, value_name = "ID")]
-        approved: Option<String>,
-    },
-    #[command(about = "Drain (no job running), deregister, then delete a VM; or deregister one idle runner by name")]
-    Remove {
-        target: String,
-        #[arg(help = "The owner ask that approved removing the last online VM (RUNNERS_LAST)")]
-        #[arg(long, value_name = "ID")]
-        approved: Option<String>,
-    },
-    #[command(
-        about = "Push a fresh registration token to every VM now (`check` repeats it every 30 min) and report the refresher"
-    )]
-    Tokens,
-    #[command(about = "Stop and deregister this host's self-hosted runners (`local_label`, `local_stop`)")]
-    RetireLocal {
-        #[arg(help = "The owner ask that approved it while VM runners are below expected (RUNNERS_LOW)")]
-        #[arg(long, value_name = "ID")]
-        approved: Option<String>,
-    },
 }
 
 #[derive(Subcommand)]
@@ -1851,18 +1777,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     Some(HostsCmd::Eject { name, root }) => {
                         return crate::roots::eject(ctx, &cfg, r, out, &name, root.as_deref());
                     }
-                    Some(HostsCmd::Destroy { name }) => {
-                        let wip = crate::cloud::stop(ctx, &cfg, r, &name, "destroy", "owner")?;
-                        writeln!(out, "{name}: destroyed; wip {}", wip.join(" "))?;
-                    }
-                    Some(HostsCmd::Bootstrap { name }) => crate::cloud::bootstrap(ctx, &cfg, r, &name, out)?,
-                    Some(HostsCmd::Snapshot { name }) => crate::cloud::snapshot(ctx, &cfg, r, &name)?,
-                    Some(HostsCmd::Keys { cmd: None }) => crate::proxy::list(ctx, out)?,
-                    Some(HostsCmd::Keys {
-                        cmd: Some(KeysCmd::Revoke { id }),
-                    }) => crate::proxy::revoke(ctx, &cfg, &id, out)?,
                 },
-                Cmd::Proxy => crate::proxy::serve(ctx, &cfg, r)?,
                 Cmd::SelfUpdate { dry_run, pause, resume } => {
                     return crate::update::self_update(ctx, &cfg, r, out, (dry_run, pause, resume));
                 }
@@ -2011,18 +1926,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             }
                         }
                     }
-                }
-                Cmd::Runners { cmd } => {
-                    use crate::runners::Verb;
-                    let (verb, id) = match cmd {
-                        RunnersCmd::Status => (Verb::Status, None),
-                        RunnersCmd::Revive { vm } => (Verb::Revive(vm), None),
-                        RunnersCmd::Add { n, approved } => (Verb::Add(n), approved),
-                        RunnersCmd::Remove { target, approved } => (Verb::Remove(target), approved),
-                        RunnersCmd::Tokens => (Verb::Tokens, None),
-                        RunnersCmd::RetireLocal { approved } => (Verb::RetireLocal, approved),
-                    };
-                    crate::runners::run(ctx, &cfg, r, out, verb, id.as_deref())?;
                 }
                 Cmd::Reclaim { apply } => check::reclaim(ctx, &cfg, r, out, stdin, apply)?,
                 Cmd::Stop { agent } => check::stop(ctx, &cfg, r, out, &agent)?,
@@ -2448,8 +2351,8 @@ fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
 }
 
 fn places(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> queue::Places {
-    let st = crate::events::fold(events);
-    let ls = crate::snapshot::lanes(ctx, cfg, (events, &st), &crate::link::sessions(ctx, cfg, r));
+    let sessions = crate::link::sessions(ctx, cfg, r);
+    let ls = crate::events::with_states(events, |st| crate::snapshot::lanes(ctx, cfg, (events, st), &sessions));
     let at = ls.into_iter().map(|l| (l.name, l.place)).collect();
     (at, crate::starts::held_now(ctx, cfg, r))
 }

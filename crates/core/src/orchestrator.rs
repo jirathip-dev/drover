@@ -96,7 +96,7 @@ pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
     let t = hold(ctx, cfg, fleet, id, json!({}))?;
     let p = role.profile_or("orchestrator");
     let acp = providers::get(&role.harness).acp().unwrap_or(&role.harness);
-    let why = crate::spawn::unguarded(ctx, (&p, "orchestrator", &role.harness), acp, false);
+    let why = crate::spawn::unguarded(ctx, (&p, "orchestrator", &role.harness), acp);
     let port = crate::spawn::lane_port(range, &format!("{fleet}/orchestrator-{id}"), &[]);
     let settings = providers::profiles_root(ctx).join(&p).join("settings.json");
     let env = json!({"DROVER_LANE": format!("{fleet}:-:orchestrator"), "DROVER_THREAD": id,
@@ -365,154 +365,97 @@ pub fn upload(ctx: &Ctx, cfg: &Config, id: &str, files: &[(String, Vec<u8>)]) ->
     Ok(out)
 }
 
-/// `thread handoff`: to thread `to` at once, linked; wakes its conductor as `from`. to a repo (or `all`), a choice card in `from` (an owner ask with `handoff`): the repo's threads or a new one; `pick` delivers on the tap.
+/// `thread handoff`: to thread `to`, or to repo `to`'s (or `all`'s) desk thread, at once, linked; wakes its orchestrator as `from`.
 pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]: [&str; 4]) -> Result<String> {
     text_ok(text)?;
     let events = working(&ctx.state)?;
-    let t = find(&events, from)?;
+    find(&events, from)?;
+    let fwd = forwards(&events, from);
+    let to = if is_id(to) {
+        role(cfg, &find(&events, to)?.fleet)?;
+        to.to_string()
+    } else {
+        role(cfg, to)?;
+        title_ok(title)?;
+        desk(ctx, cfg, &events, to)?
+    };
     if to == from {
         return refused("BAD_VALUE", "a thread hands off to another thread");
     }
-    let fwd = forwards(&events, from);
-    if is_id(to) {
-        role(cfg, &find(&events, to)?.fleet)?;
-        return send(ctx, cfg, r, (from, to, to), (title, text), (fwd, None));
-    }
-    role(cfg, to)?;
-    title_ok(title)?;
-    let open = |e: &&Event| e.kind == "thread-new" && e.fleet == to;
-    let mut rows: Vec<(u64, &str)> = (events.iter().filter(open))
-        .filter_map(|e| e.str("thread"))
-        .filter(|id| *id != from && !archived(&events, id))
-        .map(|id| (of(&events, id).map(|e| e.ts).max().unwrap_or(0), id))
-        .collect();
-    rows.sort_by_key(|r| std::cmp::Reverse(r.0));
-    let row = |(ts, id): &(u64, &str)| {
-        let last = items(&events, id).pop().unwrap_or_default();
-        let last = last
-            .at("text")
-            .as_str()
-            .or(last.at("question").as_str())
-            .unwrap_or_default();
-        let topic: String = last
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .chars()
-            .take(60)
-            .collect();
-        let age = events::age(ctx.now.saturating_sub(*ts));
-        let topic = if topic.is_empty() {
-            String::new()
-        } else {
-            format!(" — {topic}")
-        };
-        format!("{} · {id}{topic} ({age} ago)", self::title(&events, id))
-    };
-    let mut opts: Vec<String> = rows.iter().map(row).collect();
-    let mut targets: Vec<&str> = rows.iter().map(|r| r.1).collect();
-    opts.insert(opts.len().min(4), format!("new thread: {title}"));
-    targets.insert(targets.len().min(4), "new");
-    let question = format!("Hand off \"{title}\" to which {to} thread? Nothing is delivered until you tap one.");
-    let d = json!({"question": question, "options": opts, "recommend": null, "kind": "owner", "thread": from,
-        "handoff": {"repo": to, "title": title, "text": text, "targets": targets}, "forwards": fwd});
-    let ev = Event::new(ctx.now, &t.fleet, None, "needs-decision", d);
-    let ev = events::ask(&ctx.state, cfg, vec![ev], None)?.pop();
-    let q = ev.as_ref().and_then(|e| e.str("id")).unwrap_or_default();
-    Ok(format!(
-        "{q}: the owner picks the thread; nothing is delivered until then"
-    ))
+    send(ctx, cfg, r, (from, &to), (title, text), (fwd, None))
 }
 
-/// The owner's tap on a handoff card (`choice`: an option number or its text, or a thread id): delivered there (`new`: a new thread in the card's repo); the target, and whether this tap delivered it. once per card: a tap waits for one in flight and gets the delivered one's target; after a failed delivery it retries that one.
-pub fn land(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, choice: &str) -> Result<(String, bool)> {
-    let (h, from) = (&ask.val("handoff"), ask.str("thread").unwrap_or_default());
-    let id = ask.str("id").unwrap_or_default();
-    let dir = dir(ctx, cfg, from);
-    std::fs::create_dir_all(&dir)?;
-    let lock = std::fs::File::create(dir.join(format!(".handoff-{id}.lock")))?;
-    lock.lock()?;
-    let events = working(&ctx.state)?;
-    let mine = |e: &&Event| e.kind == "thread-handoff" && e.str("thread") == Some(from) && e.str("ask") == Some(id);
-    let failed = |e: &Event| {
-        events
-            .iter()
-            .any(|f| f.kind == "ask-failed" && f.str("id") == Some(id) && f.seq > e.seq)
-    };
-    let (to, sent) = match events.iter().rfind(mine) {
-        Some(e) if !failed(e) => return Ok((e.str("to").unwrap_or_default().into(), false)),
-        Some(e) => {
-            let to = e.str("to").unwrap_or_default();
-            let msg = |m: &&Event| m.kind == "thread-msg" && m.seq > e.seq && m.str("from") == Some(from);
-            let text = (of(&events, to).find(msg))
-                .and_then(|m| m.str("text"))
-                .unwrap_or_default();
-            let line = format!("[{to}] {from}: {text}");
-            (
-                to.to_string(),
-                deliver(ctx, cfg, r, find(&events, to)?, &line).map(|_| to.into()),
-            )
-        }
-        None => {
-            let opts = ask.val("options").as_array().cloned().unwrap_or_default();
-            let n = choice
-                .parse::<usize>()
-                .ok()
-                .or_else(|| opts.iter().position(|o| o == choice).map(|i| i + 1));
-            let to = match n.and_then(|n| h["targets"].get(n.checked_sub(1)?)?.as_str()) {
-                Some(to) => to,
-                None if is_id(choice) && choice != from => find(&events, choice).map(|_| choice)?,
-                None => return refused("BAD_VALUE", "tap a row, or name a thread id"),
-            };
-            let s = |k: &str| h[k].as_str().unwrap_or_default();
-            let send = || {
-                send(
-                    ctx,
-                    cfg,
-                    r,
-                    (from, to, s("repo")),
-                    (s("title"), s("text")),
-                    (None, Some(id)),
-                )
-            };
-            (to.to_string(), role(cfg, s("repo")).and_then(|_| send()))
-        }
-    };
-    if let Err(e) = &sent {
-        let d = json!({"id": id, "ask_seq": ask.seq, "to": to, "reason": format!("{e:#}")});
-        emit(&ctx.state, cfg, Event::new(ctx.now, &ask.fleet, None, "ask-failed", d))?;
-        let text = format!("✗ {id} not delivered to {to}: {e:#}");
-        log(ctx, cfg, find(&events, from)?, "system", (&text, &[]))?;
+fn desk(ctx: &Ctx, cfg: &Config, events: &[Event], repo: &str) -> Result<String> {
+    if let Some(d) = crate::thread::Registry::read(events).desk(repo) {
+        return Ok(d.into());
     }
-    sent.map(|to| (to, true))
+    let id = new(ctx, cfg, repo, "Desk", (None, None))?;
+    let d = json!({"thread": id, "profile": repo, "desk": true});
+    emit(&ctx.state, cfg, Event::new(ctx.now, repo, None, "thread-facts", d))?;
+    Ok(id)
+}
+
+/// The handoff that moved handoff `seq` on, if one did.
+pub fn moved(events: &[Event], seq: u64) -> Option<&Event> {
+    events
+        .iter()
+        .find(|e| e.kind == "thread-handoff" && e.val("moves").as_u64() == Some(seq))
+}
+
+/// [move] on handoff `seq`: delivered again to thread `to` from its sender; its first copy is marked forwarded and that thread's orchestrator told to drop it.
+pub fn move_handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, seq: u64, to: &str) -> Result<String> {
+    let events = working(&ctx.state)?;
+    let Some(h) = events.iter().find(|e| e.seq == seq && e.kind == "thread-handoff") else {
+        return refused("NO_SUCH_HANDOFF", format!("no handoff {seq}"));
+    };
+    let s = |k: &str| h.str(k).unwrap_or_default();
+    if let Some(m) = moved(&events, seq) {
+        let at = m.str("to").unwrap_or_default();
+        if at == to {
+            return Ok(at.into());
+        }
+        return refused(
+            "BAD_VALUE",
+            format!("handoff {seq} moved to {at} already; move that one"),
+        );
+    }
+    if to == s("to") || to == s("from") {
+        return refused(
+            "BAD_VALUE",
+            format!("handoff {seq} is from {} and in {}", s("from"), s("to")),
+        );
+    }
+    role(cfg, &find(&events, to)?.fleet)?;
+    let first = |m: &&Event| m.kind == "thread-msg" && m.seq > seq && m.str("from") == h.str("from");
+    let copy = of(&events, s("to")).find(first).map(|m| m.seq);
+    let sent = send(ctx, cfg, r, (s("from"), to), (s("title"), s("text")), (copy, Some(seq)))?;
+    let line = format!("handoff \"{}\" moved to {to}: don't act on it here", s("title"));
+    crate::thread::route::tell(ctx, cfg, r, s("to"), &line);
+    Ok(sent)
 }
 
 fn send(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
-    (from, to, repo): (&str, &str, &str),
+    (from, to): (&str, &str),
     (title, text): (&str, &str),
-    (fwd, ask): (Option<u64>, Option<&str>),
+    (fwd, moves): (Option<u64>, Option<u64>),
 ) -> Result<String> {
-    let to = if to == "new" {
-        new(ctx, cfg, repo, title, (None, None))?
-    } else {
-        to.into()
-    };
-    let target = format!("{} · {to}", self::title(&working(&ctx.state)?, &to));
+    let events = working(&ctx.state)?;
+    let target = format!("{} · {to}", self::title(&events, to));
     let d = json!({"thread": from, "from": from, "to": to, "title": title, "text": text, "target": target,
-        "forwards": fwd, "ask": ask});
-    let t = find(&working(&ctx.state)?, from)?.fleet.clone();
+        "forwards": fwd, "moves": moves});
+    let t = find(&events, from)?.fleet.clone();
     emit(&ctx.state, cfg, Event::new(ctx.now, &t, None, "thread-handoff", d))?;
     say(
         ctx,
         cfg,
         r,
-        (&to, &format!("handoff to {target}: {text}"), &[]),
+        (to, &format!("handoff to {target}: {text}"), &[]),
         (from, false),
     )?;
-    Ok(to)
+    Ok(to.into())
 }
 
 fn forwards(events: &[Event], from: &str) -> Option<u64> {
@@ -1064,13 +1007,18 @@ fn start(
         mcp_file: dir.join(".mcp.lane.json"),
         title: crate::spawn::lane_title(&head, t.str("title").unwrap_or_default()),
         head,
-        lane_key: None,
         sandbox: None,
+        account: Some(cfg.account(fleet, "orchestrator")),
     };
     p.env.insert("DROVER_THREAD".into(), id.into());
     p.env.insert("DROVER_ORCHESTRATOR".into(), id_of(t).into());
     let shed = cfg.shed_for(fleet).context(crate::config::NO_RUNTIME)?;
     let wire = r.shed().map_or(shed.wire.clone(), |w| w.wire);
+    let all = crate::shed::accounts(r, &wire).ok();
+    let hold = (p.account.as_ref()).and_then(|a| crate::accounts::of(all.as_deref()?, &p.harness, a));
+    if let Some(h) = hold {
+        return on_hold(ctx, cfg, r, t, events, &h);
+    }
     let aid = shed.acp.clone().context(crate::config::NO_RUNTIME)?;
     let acp = match crate::spawn::acp_cmd(ctx, r, &p, &aid, None) {
         Ok(cmd) => cmd,
@@ -1109,7 +1057,7 @@ fn start(
     let kicked = b.kick_acp(r, &agent, &format!("{}\n\n{kick}\n\n{line}", text.trim_end()))?;
     let mut d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed-acp", "harness": p.harness,
         "model": p.model, "effort": p.effort, "resumed": false,
-        "confirmed": kicked});
+        "confirmed": kicked, "account": p.account.as_ref().map(crate::config::Account::word)});
     if let Some(was) = replaced {
         d.put("replaced", json!(was));
     }
@@ -1313,6 +1261,7 @@ pub fn ls(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: Option<&str>, as_
 
 /// `check`: each awake conductor whose thread has been quiet `IDLE` and that is not working is closed (`conductor-sleep`); the next message resumes it.
 pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], agents: &[Session]) -> Result<()> {
+    let all = std::cell::OnceCell::new();
     for t in events.iter().filter(|e| e.kind == "thread-new") {
         let id = t.str("thread").unwrap_or_default();
         let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
@@ -1327,8 +1276,12 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
             continue;
         };
         let a = a.as_ref();
-        if a.is_some_and(Session::signed_out) {
-            signed_out(ctx, cfg, r, t, s)?;
+        let out = account(s).filter(|_| a.is_some()).and_then(|(h, acct)| {
+            let all = all.get_or_init(|| crate::accounts::ls(cfg, r));
+            crate::accounts::of(all.as_deref()?, &h, &acct).filter(|h| h.why == crate::accounts::Why::SignedOut)
+        });
+        if let Some(h) = out {
+            signed_out(ctx, cfg, r, t, s, &h)?;
             continue;
         }
         if a.is_some() && pending(events, id).is_some() {
@@ -1351,11 +1304,33 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
     Ok(())
 }
 
-fn signed_out(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Result<()> {
-    let (id, hn) = (
-        t.str("thread").unwrap_or_default(),
-        s.str("harness").unwrap_or_default(),
-    );
+/// Shed moved thread `id`'s orchestrator to account `now` (`why` `limit` or `owner`): one row, `<was> hit its limit; now on <now>` or `switched to <now>`; none at its `start`.
+pub fn account_moved(
+    ctx: &Ctx,
+    cfg: &Config,
+    (fleet, id): (&str, &str),
+    (now, was): (&str, Option<&str>),
+    why: &str,
+) -> Result<()> {
+    let text = match (why, was) {
+        ("limit", Some(was)) => format!("{was} hit its limit; now on {now}"),
+        ("limit" | "owner", _) => format!("switched to {now}"),
+        _ => return Ok(()),
+    };
+    let d = json!({"thread": id, "from": "system", "text": text, "account": now});
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "thread-msg", d))
+}
+
+fn account(s: &Event) -> Option<(String, crate::config::Account)> {
+    let a = match s.str("account")? {
+        "auto" => crate::config::Account::Auto,
+        n => crate::config::Account::Named(n.into()),
+    };
+    Some((s.str("harness")?.into(), a))
+}
+
+fn signed_out(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event, h: &crate::accounts::Hold) -> Result<()> {
+    let id = t.str("thread").unwrap_or_default();
     close(ctx, r, s)?;
     let d = json!({"thread": id, "agent": s.str("agent"), "why": "signed out"});
     emit(
@@ -1363,7 +1338,7 @@ fn signed_out(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> 
         cfg,
         Event::new(ctx.now, &t.fleet, None, "orchestrator-sleep", d),
     )?;
-    let d = json!({"thread": id, "from": "system", "text": format!("{hn} is signed out: sign in"), "signin": hn});
+    let d = json!({"thread": id, "from": "system", "text": h.line(r), "signin": h.signin()});
     emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))
 }
 
@@ -1386,21 +1361,59 @@ fn pending<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
 }
 
 fn held(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], a: Option<&Session>) -> Result<()> {
-    let id = t.str("thread").unwrap_or_default();
     let Some(a) = a.filter(|a| a.status() == Some(crate::session::Status::Limited)) else {
         return Ok(());
     };
+    let at = crate::limit::reset_at(r, a.note.as_deref().unwrap_or_default(), ctx.now);
+    let until = at.map_or("its reset".into(), |at| crate::usage::date(r, at, "+%a %H:%M"));
+    let text = format!("orchestrator out of usage until {until}; your message is kept");
+    hold_row(ctx, cfg, t, events, (&text, at))
+}
+
+fn hold_row(ctx: &Ctx, cfg: &Config, t: &Event, events: &[Event], (text, at): (&str, Option<u64>)) -> Result<()> {
+    let id = t.str("thread").unwrap_or_default();
     let Some(m) = of(events, id)
         .rfind(|e| human(e))
         .filter(|m| !since(events, id, m.seq, "held"))
     else {
         return Ok(());
     };
-    let at = crate::limit::reset_at(r, a.note.as_deref().unwrap_or_default(), ctx.now);
-    let until = at.map_or("its reset".into(), |at| crate::usage::date(r, at, "+%a %H:%M"));
-    let text = format!("orchestrator out of usage until {until}; your message is kept");
     let d = json!({"thread": id, "from": "system", "text": text, "held": m.seq, "at": at});
     emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))
+}
+
+fn on_hold(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    t: &Event,
+    events: &[Event],
+    h: &crate::accounts::Hold,
+) -> Result<String> {
+    use crate::accounts::Why;
+    let line = h.line(r);
+    match &h.why {
+        Why::Setup(_) => {
+            let why = format!("{line}; the orchestrator does not start");
+            log(
+                ctx,
+                cfg,
+                t,
+                "system",
+                (&format!("the orchestrator does not start: ACP_UNGUARDED: {why}"), &[]),
+            )?;
+            return refused("ACP_UNGUARDED", why);
+        }
+        Why::Limited(at) => {
+            let text = format!("{line}; your message is kept. New threads will fail too until then.");
+            hold_row(ctx, cfg, t, events, (&text, *at))?;
+        }
+        Why::SignedOut | Why::Missing => {
+            let d = json!({"thread": t.str("thread"), "from": "system", "text": line, "signin": h.signin()});
+            emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))?;
+        }
+    }
+    refused("LOGIN_NEEDED", format!("{line}; the orchestrator waits"))
 }
 
 /// `check`: per thread, its rate-limited orchestrator's `out of usage` row, one `continue` at that row's reset time, and a `no reply yet` row for an owner message unanswered `orchestrator_reply_minutes`.

@@ -26,7 +26,7 @@ impl Knobs {
             max_impl: f.max_impl,
             max_rev: f.max_rev,
             serial: f.serial.clone(),
-            hosts: c.hosts.values().filter(|h| h.enabled).count().max(1) as u64,
+            hosts: u64::try_from(c.hosts.values().filter(|h| h.enabled).count().max(1)).unwrap(),
         })
     }
 
@@ -38,8 +38,11 @@ impl Knobs {
             .filter_map(|(k, v)| v.map(|v| format!("{k} = {v}\n")))
             .collect();
         let at = "integration = \"staging\"\n";
-        let mut cfg =
-            crate::scenario::config(self.spawns as u64, self.rounds.into()).replacen(at, &format!("{at}{caps}"), 1);
+        let mut cfg = crate::scenario::config(u64::try_from(self.spawns).unwrap(), self.rounds.into()).replacen(
+            at,
+            &format!("{at}{caps}"),
+            1,
+        );
         for g in &self.serial {
             cfg += &format!(
                 "\n[[fleet.{FLEET}.serial]]\nname = {:?}\npaths = {:?}\nmax = {}\n",
@@ -120,7 +123,7 @@ fn with_waits(mut m: BTreeMap<String, f64>, merges: u64) -> BTreeMap<String, f64
         .filter_map(|k| m.get(*k))
         .sum();
     m.insert("waits".into(), (waits * 100.0).round() / 100.0);
-    m.insert("merges".into(), merges as f64);
+    m.insert("merges".into(), f64::from(u32::try_from(merges).unwrap()));
     m
 }
 
@@ -163,7 +166,7 @@ pub fn side(src: &Source, k: &Knobs, real_hosts: u64) -> Side {
             place(&mut m, &ws, k.hosts);
             let (o, run) = replay::run_in(s, m, &cfg);
             Side {
-                metrics: with_waits(run.metrics, run.merged.len() as u64),
+                metrics: with_waits(run.metrics, u64::try_from(run.merged.len()).unwrap()),
                 failures: o.violations.into_iter().chain(o.failure).collect(),
             }
         }

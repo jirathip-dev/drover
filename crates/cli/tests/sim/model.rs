@@ -310,6 +310,7 @@ fn shed(w: &mut World, a: &[&str]) -> Out {
     let name = p["name"].as_str().unwrap_or_default().to_string();
     let gone = || err(1, "NO_SUCH_TERMINAL");
     match *m {
+        "account.ls" => ok(json!([{"provider": "claude", "name": "work", "state": "ready"}]).to_string()),
         "ls" => ok(Value::from(
             w.model
                 .panes
@@ -462,7 +463,10 @@ fn gh(w: &mut World, a: &[&str]) -> Out {
             let pin = a.windows(2).find(|x| x[0] == "--match-head-commit").map(|x| x[1]);
             if m.sabotage == Some(crate::invariants::Sabotage::HeadSha) {
                 let (b, old) = (b.clone(), p.head.clone());
-                let moved = format!("{:040x}", 0x0bad_u64 * 1_000_003 + m.merges.len() as u64);
+                let moved = format!(
+                    "{:040x}",
+                    0x0bad_u64 * 1_000_003 + u64::try_from(m.merges.len()).unwrap()
+                );
                 m.ci.insert(moved.clone(), Some(true));
                 crate::gates::moved(w, &b, &old);
                 let m = &mut w.model;
@@ -597,7 +601,7 @@ fn git(w: &mut World, a: &[&str]) -> Out {
         ["merge-tree", ..] => ok(format!("{:040x}\n", 7)),
         ["show", _] => err(128, "fatal: path does not exist"),
         ["worktree", "add", .., path, rev] => {
-            let _ = std::fs::create_dir_all(std::path::Path::new(path).join(".git"));
+            std::fs::create_dir_all(std::path::Path::new(path).join(".git")).ok();
             let head = m.origin.get(rev.trim_start_matches("origin/")).cloned();
             m.heads.insert((*path).into(), head.unwrap_or_else(|| (*rev).into()));
             ok("")
@@ -605,7 +609,7 @@ fn git(w: &mut World, a: &[&str]) -> Out {
         ["worktree", "remove", "--force", path]
         | ["worktree", "remove", "--force", "--force", path]
         | ["worktree", "remove", path] => {
-            let _ = std::fs::remove_dir_all(path);
+            std::fs::remove_dir_all(path).ok();
             m.heads.remove(*path);
             ok("")
         }

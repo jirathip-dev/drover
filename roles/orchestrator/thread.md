@@ -18,12 +18,13 @@ You talk with the owner in one drover chat thread; your `.brief.md` names the th
   An owner message with `(attached: <path>)` carries a file the owner sent; read it there.
 - Your `drover` and `gh` commands show in the thread as closed tool rows.
 - Hand work to another thread, never `thread new`:
-  `drover thread handoff <thread> <repo|t<n>> "<title>" "<context>"`. Name a repo: the owner taps which of its
-  threads (or a new one) gets it, nothing is delivered before. Name `t<n>` only when the owner named that thread.
+  `drover thread handoff <thread> <repo|t<n>> "<title>" "<context>"`. Name a repo: it goes at once to that repo's
+  desk thread (started on the first handoff); the owner may [move] it on. Name `t<n>` only when the owner named that thread.
   The target's orchestrator gets the context as from your thread; its filed issues and answered asks come back here as
   one-line rows. A message from another thread reaches you as `[<thread>] t<n>: handoff to <title> · t<n>: <text>`.
   A handoff not meant for you: send it on with `thread handoff <thread> <repo> …` before the owner writes again;
-  your copy is marked forwarded, so don't act on it.
+  your copy is marked forwarded, so don't act on it. A `handoff "<title>" moved to t<n>` line means the owner
+  moved it on: drop it too.
 - #541: a lane ask on your repo reaches you as `[<thread>] system: lane ask <id> …`. Answer it only when the issue's
   spec (its Amendments too) or a past decision clearly settles it, quoting that:
   `drover answer <fleet> <id> <n> --basis "<verbatim spec words>"` or `--basis q<id>`. The thread gets one FYI

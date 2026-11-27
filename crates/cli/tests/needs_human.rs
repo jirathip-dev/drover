@@ -21,7 +21,7 @@ fn fixture(name: &str, last: &str) -> drover::Ctx {
     );
     for (i, sha) in ["2", "3", "4"].iter().enumerate() {
         ev(
-            20 + i as u64,
+            20 + u64::try_from(i).unwrap(),
             "verdict",
             json!({"verdict": "FAIL", "sha": sha.repeat(40)}),
         );

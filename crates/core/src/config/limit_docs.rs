@@ -96,10 +96,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "form-only FAILs per issue that don't count as a review round",
     ),
     (
-        "overflow_after_minutes",
-        "every local host refused this long lets placement start a stopped cloud host",
-    ),
-    (
         "import_max_age_hours",
         "a remote host's asks older than this are never imported",
     ),
@@ -110,6 +106,14 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "max_parallel_spawns",
         "concurrent detached spawn kicks on the main host (0: in the pass)",
+    ),
+    (
+        "max_in_flight_total",
+        "PRs in flight across every fleet before a first start is refused `IN_FLIGHT_CAP` (0: off)",
+    ),
+    (
+        "fleet_priority",
+        "fleets in the order a freed `max_in_flight_total` slot goes to, oldest queue entry first; unlisted fleets after",
     ),
     (
         "start_max",
@@ -201,10 +205,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "the pause between a new database's WAL switch retries",
     ),
     (
-        "cloud_idle_stop_minutes",
-        "a cloud host's `idle_stop_minutes` when it sets none",
-    ),
-    (
         "notify_secs",
         "a notifier command or web push send is killed after this long",
     ),
@@ -215,11 +215,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "shed_read_millis",
         "how long drive's intake waits for shed's state changes",
-    ),
-    ("proxy_connect_secs", "the token proxy's liveness connect timeout"),
-    (
-        "proxy_retry_secs",
-        "a proxy lane's sign-out holds its host only if no call gets through the token proxy this long after it",
     ),
     (
         "service_call_secs",
@@ -269,10 +264,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "orchestrator_change_minutes",
         "an orchestrator's answer may not change one this long after it",
-    ),
-    (
-        "token_refresh_minutes",
-        "`check` pushes a fresh runner registration token to every VM this often",
     ),
     (
         "ask_waiting_minutes",

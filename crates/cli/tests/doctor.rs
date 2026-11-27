@@ -422,7 +422,7 @@ fn retired_account_keys_warn_until_they_are_dropped() {
         "profile = \"fleet-impl\"\naccount = \"main\"\n",
     ) + "\n[accounts]\nmain = \"TOKEN_MAIN\"\naccounts_env = \"/x/tokens.env\"\n";
     std::fs::write(&c.config, &old).unwrap();
-    let warn = "! config — [accounts] is removed (#923): lanes run on the host's own CLI login; delete [accounts], fleet.demo.role.impl.account";
+    let warn = "! config — [accounts] is removed (#1576): accounts are shed's, a role or fleet names one with `account`; delete [accounts]";
 
     let r = good();
     let (code, out) = run(&c, &r, &["doctor"]);
@@ -494,7 +494,7 @@ fn spawns_row_dedupes_stale_names() {
     names.extend(std::iter::repeat_n("spawn-demo-1.pending".to_string(), 299));
     for (i, f) in names.iter().enumerate() {
         let ev = drover::events::Event::new(
-            c.now - 600 + i as u64,
+            c.now - 600 + u64::try_from(i).unwrap(),
             "demo",
             Some(1),
             "stale-marker",

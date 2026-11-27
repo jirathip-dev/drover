@@ -90,7 +90,14 @@ fn with_one_fleets_pass_hung_the_others_last_pass_advances_each_fast_step() {
             let now = at(&c, c.now + k * 30);
             let (code, out) = run_only(&now, &r, &["drive"]);
             assert_eq!(code, 0, "{out}");
-            assert_eq!((started("sendmeter"), started("slowfleet")), (i + 1, 0), "{out}");
+            assert_eq!((started("sendmeter"), started("slowfleet")), (1, 0), "{out}");
+            if i > 0 {
+                assert_eq!(
+                    drover::drive::last_pass(&now, "sendmeter"),
+                    Some(now.now),
+                    "quiet: no process, its last pass now"
+                );
+            }
             let (code, out) = run_only(&now, &r, &["drive", "sendmeter"]);
             assert_eq!(code, 0, "{out}");
             assert_eq!(drover::drive::last_pass(&now, "sendmeter"), Some(now.now), "{out}");

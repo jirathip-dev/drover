@@ -17,9 +17,10 @@ hour. Its rules come from the binary and the loaded fleet.toml only, never from 
 The same hook runs on Claude `PostToolUse` (Bash) and `Stop`: a
 `git push` that went through, or a finished turn, runs `drover kick <fleet> <issue> --why push|stop`.
 So do `drover ask`, `verdict` and `answer`, and the board's answer, override, extend, park and queue
-moves. A kick returns at once: a detached `kick --now` (output in `<state>/kick.log`) drives that issue's
-due steps alone under the drive lock, logs `kick`, and coalesces kicks within 10 s (or while the lock is
-busy) into one follow-up. A lane on another host kicks the main host. The tick and fast timers stay the
+moves. A kick returns at once: it joins its fleet's kick queue, and only a fleet with no kick running starts
+one `kick --now` (output in `<state>/kick.log`; #1749: at most one per fleet). That process drives each queued
+issue's due steps alone, logs `kick` for each, then waits 10 s for more before it ends: a kick in that time, or one
+whose issue is busy, joins its run. A pass's own spawn and job kicks still run one process each. A lane on another host kicks the main host. The tick and fast timers stay the
 safety net for CI, outside merges and stalls.
 
 ### Denied commands (#216)
@@ -43,8 +44,7 @@ sheet shows the active list. Each refusal is logged `hook-denied` (`rule` = the 
 
 Per host (#256): spawn exports `DROVER_HOST=<[hosts] name>`, and the hook applies that host's rules on top:
 `[hosts.<n>] deny_commands` replaces the fleet's list, `deny_commands_add` extends it, and `allow_commands` drops
-entries. A cloud host (`cloud = …`) defaults to allowing `docker`, `docker compose` and `supabase start` (a disposable
-machine; `allow_commands = []` keeps the ban); a Mac keeps the ban. A remote lane's hook rules (deny, branches,
+entries. A remote lane's hook rules (deny, branches,
 heavy slots) are resolved on the main host at spawn and written to its `DROVER_RULES` file (#592); the remote host's
 own fleet.toml is never read. A config change reaches a live lane only when it respawns; `drover board` and
 `drover waiting` show `rules stale` until then.
@@ -78,10 +78,9 @@ pattern overlaps that list, naming both. `drover clean` runs `runners forget --d
 removes; a failure is printed and kept in the `clean` event's `forget`, and the clean goes on. `drover top` marks a
 `runners run` process `[remote <tag>]`.
 
-Gate checks (#1747): a fleet with `[fleet.<n>.remote.cargo]` sends its gate checks the same way. A lane's
-`just check…` joins the `cargo` kind; `turn done` runs each done check of a lane on the main host under
-`drover heavy cargo --remote <tag>`, but the gatekeeper check: it reads git and a build machine's tree has no `.git` (#1803), so it runs in the
-lane's worktree; `drover hold` sends its command to the fleet whose repo is the job's (`GITHUB_REPOSITORY`)
+Gate checks (#1747): a fleet with `[fleet.<n>.remote.cargo]` sends its gate checks the same way. `turn done` runs
+each done check that is a plain `cargo` step under `drover heavy cargo --remote <tag>`; `just check…` and the
+gatekeeper check read git and a build machine's tree has no `.git` (#1803, #1827), so they run in the lane's worktree; `drover hold` sends its command to the fleet whose repo is the job's (`GITHUB_REPOSITORY`)
 and holds no slot. Each falls back here as above, printing the `runners:` line. The never-routed list still applies;
 a fleet whose gate builds platform-only code (Metal, `xcodebuild`) lists its gate command in `remote_deny`.
 
@@ -95,7 +94,8 @@ samples admission every `[limits] hold_sample_secs` (default 10). Past the wait 
 `drover top` (#910; `--json` for the same data) shows what each live lane is really doing: every process under its
 worktree as a tree with its CPU %, run time and heavy kind, and `waiting for heavy slot <kind> <age>` for each of its
 commands in line; the header gives the host's CPU idle against `min_cpu_idle`, heavy slots used of `heavy_max` and
-the respawns the last drive pass held back (`RESPAWN_PACED`). When CPU idle stays under `min_cpu_idle` for
+the respawns the last drive pass held back (`RESPAWN_PACED`), then drover's own share of the busy CPU (#1749: its
+processes' CPU % summed against every process's). When CPU idle stays under `min_cpu_idle` for
 `[limits] overload_minutes` (default 10) in the host history, `drover check` alerts `host-overloaded` once, naming
 the 5 busiest processes and their lanes; once idle is back over the floor, the next overload alerts again.
 

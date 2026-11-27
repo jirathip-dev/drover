@@ -64,36 +64,69 @@ fn a_kick_runs_only_its_issue() {
 }
 
 #[test]
-fn three_kicks_coalesce_into_one_run_and_one_follow_up() {
+fn a_kick_while_its_issue_is_busy_joins_the_runs_queue_and_is_driven_once_free() {
     let (c, sh) = fan("kick-debounce");
     lease_as(&c, "kick-sendmeter-2.lock", 4242, c.now, 300);
     let r = fake(2);
     kick(&c, &r, "2");
-    kick(&c, &r, "2");
-    assert!(kicks(&c).is_empty() && started(&sh).is_empty());
-    assert!(lease_on(&c, "kick-sendmeter-2.again").is_some());
-    let r = fake(0);
-    kick(&c, &r, "2");
-    assert_eq!(kicks(&c).len(), 2);
-    assert_eq!(r.count("sleep 10"), 2);
-    assert_eq!(started(&sh), ["sendmeter-impl-2"], "the follow-up finds it started");
-    assert!(lease_on(&c, "kick-sendmeter-2.again").is_none() && lease_on(&c, "kick-sendmeter-2.lock").is_none());
+    assert_eq!(kicks(&c).len(), 1, "driven once the lock's holder is gone");
+    assert_eq!(r.count("sleep 10"), 3, "two busy retries, then the 10 s wait");
+    assert_eq!(started(&sh), ["sendmeter-impl-2"]);
+    assert!(lease_on(&c, "kick-sendmeter-2.queued").is_none() && lease_on(&c, "kick-sendmeter-2.lock").is_none());
+    assert!(
+        lease_on(&c, "kicks-sendmeter.lock").is_none(),
+        "the runner lets its lease go"
+    );
 }
 
 #[test]
-fn five_webhook_kicks_while_one_runs_start_no_process_and_give_one_follow_up() {
+fn five_webhook_kicks_while_a_runner_drains_start_no_process_and_queue_one() {
     let (c, sh) = fan("kick-1588");
-    lease_as(&c, "kick-sendmeter-2.lock", 4242, c.now, 300);
+    lease_as(&c, "kicks-sendmeter.lock", 4242, c.now, 300);
     let r = fake(5);
     for _ in 0..5 {
         assert_eq!(drover::drive::kick(&c, &r, "sendmeter", 2, "webhook"), None);
     }
-    assert_eq!(r.count("nohup"), 0, "{:?}", r.calls.borrow());
-    assert!(lease_on(&c, "kick-sendmeter-2.again").is_some());
+    assert_eq!(r.count("sh -c nohup"), 0, "{:?}", r.calls.borrow());
+    assert!(lease_on(&c, "kick-sendmeter-2.queued").is_some());
     let r = fake(0);
     kick(&c, &r, "2");
-    assert_eq!(kicks(&c).len(), 2, "the running kick's pass and one follow-up");
+    assert_eq!(kicks(&c).len(), 1, "five kicks, one queue entry, one pass");
     assert_eq!(started(&sh), ["sendmeter-impl-2"]);
+}
+
+fn starter() -> Fake {
+    fake(0).reply("sh -c nohup", "4243\n").reply("kill -0 4243", "")
+}
+
+#[test]
+fn ten_kicks_for_ten_issues_of_one_fleet_start_one_process_that_drives_all_ten() {
+    let c = ctx(&tmpdir("kick-ten"), CONFIG);
+    let sh = FakeShed::attached(&c);
+    let r = starter();
+    for n in 1..=10 {
+        drover::drive::kick(&c, &r, "sendmeter", n, "push");
+    }
+    assert_eq!(r.count("sh -c nohup"), 1, "{:?}", r.calls.borrow());
+    assert_eq!(lease_on(&c, "kicks-sendmeter.lock").map(|l| l.pid), Some(4243));
+    kick(&c, &fake(0), "1");
+    let mut driven: Vec<u64> = kicks(&c).iter().filter_map(|e| e.issue).collect();
+    driven.sort_unstable();
+    assert_eq!(driven, (1..=10).collect::<Vec<_>>());
+    assert!(lease_on(&c, "kicks-sendmeter.lock").is_none());
+    drop(sh);
+}
+
+#[test]
+fn kicks_for_two_fleets_start_at_most_two_processes() {
+    let other = "\n[fleet.other]\nrepo = \"jirathip-dev/other\"\nlocal = \"/tmp/does-not-matter/other\"\nintegration = \"staging\"\n";
+    let c = ctx(&tmpdir("kick-two"), &format!("{CONFIG}{other}"));
+    let r = starter();
+    for n in 1..=10 {
+        drover::drive::kick(&c, &r, if n % 2 == 0 { "sendmeter" } else { "other" }, n, "push");
+    }
+    let per = |f: &str| r.count(&format!("sh -c nohup '/opt/drover/bin/drover' kick {f} "));
+    assert_eq!((per("sendmeter"), per("other")), (1, 1), "{:?}", r.calls.borrow());
 }
 
 #[test]
@@ -144,7 +177,7 @@ fn the_hook_kicks_its_lanes_issue_and_is_inert_outside_lanes() {
         let argv = ["drover", "hook", "--role", "impl"].map(String::from).to_vec();
         let mut out = vec![];
         assert_eq!(drover::main_with(argv, &c, r, &mut out, &mut stop.as_bytes()), 0);
-        assert_eq!(out, [] as [u8; 0]);
+        assert_eq!(out, <[u8; 0]>::default());
     };
     std::env::remove_var("DROVER_OUTBOX");
     std::env::remove_var("DROVER_LANE");

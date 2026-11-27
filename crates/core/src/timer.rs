@@ -27,7 +27,6 @@ pub const TICK_STEPS: [(&str, &[&str]); 8] = [
             "idle_reap_minutes",
             "done_close_minutes",
             "idle_merged_minutes",
-            "token_refresh_minutes",
         ],
     ),
     ("drive", &[]),

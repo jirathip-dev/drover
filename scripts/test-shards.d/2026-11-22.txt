@@ -20,7 +20,6 @@
 3 board_fresh
 2 board_style
 4 board_tui
-3 boat
 2 brief_golden
 2 chat_index
 2 chat_pick
@@ -32,7 +31,6 @@
 3 ci_stuck
 2 ci_templates
 1 clone_heal
-3 cloud
 4 commit_status
 1 compact
 4 compaction
@@ -161,7 +159,6 @@
 1 readme
 3 reap
 3 reclaim
-2 remote_acp
 2 remote_exists
 1 remote_rules
 2 remote_sheet
@@ -178,7 +175,6 @@
 1 round_images
 3 run_card
 3 runner_limits
-3 runners
 3 runtime_breaker
 3 sbin_path
 3 scene_device

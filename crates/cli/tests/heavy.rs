@@ -168,7 +168,7 @@ fn extra_commands_wait_first_come_first_served_and_all_finish() {
         "{l}"
     );
     assert_eq!(l.matches("end ").count(), 4);
-    assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0]);
+    assert_eq!(tickets(&d), <[drover::heavy::Ticket; 0]>::default());
 }
 
 #[test]
@@ -259,7 +259,7 @@ fn hold_runs_its_command_and_returns_its_exit_code() {
     assert_eq!(hold(&d, "1", &["true"]).status().unwrap().code(), Some(0));
     let seven = hold(&d, "1", &["sh", "-c", "exit 7"]).status().unwrap();
     assert_eq!(seven.code(), Some(7));
-    assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0]);
+    assert_eq!(tickets(&d), <[drover::heavy::Ticket; 0]>::default());
 }
 
 #[test]
@@ -281,7 +281,7 @@ fn hold_on_a_host_over_its_admission_limits_gives_up_with_75_and_the_reason() {
     let d = host_with("min_cpu_idle = 101.0\nmin_free_gb = 0.0\nmin_free_mem_gb = 0.0\n", "");
     let why = refused(&d);
     assert!(why.contains("HOST_BUSY") && why.contains("cpu idle"), "{why}");
-    assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0]);
+    assert_eq!(tickets(&d), <[drover::heavy::Ticket; 0]>::default());
 }
 
 #[test]
@@ -400,7 +400,7 @@ fn the_remote_code_passes_through_without_a_local_run() {
             .unwrap();
         assert_eq!(st.code(), Some(code));
         assert_eq!(log(&d), "", "never run here");
-        assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0], "no slot held");
+        assert_eq!(tickets(&d), <[drover::heavy::Ticket; 0]>::default(), "no slot held");
         let args = std::fs::read_to_string(d.join("runners.log")).unwrap();
         let want = format!("run --tag linux --dir {top} --wait 5 --setup make deps --env CARGO_BUILD_JOBS --out target/shots -- bash -c sh test.sh a\n");
         assert_eq!(args, want);
@@ -495,7 +495,7 @@ fn a_routed_fleets_hold_runs_on_the_build_machine_and_holds_no_slot() {
         let st = routed_hold(&d, &path, &["sh", "test.sh", "h"]).status().unwrap();
         assert_eq!(st.code(), Some(code));
         assert_eq!(log(&d), "", "never run here");
-        assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0], "no slot held");
+        assert_eq!(tickets(&d), <[drover::heavy::Ticket; 0]>::default(), "no slot held");
         let here = d.canonicalize().unwrap();
         let args = std::fs::read_to_string(d.join("runners.log")).unwrap();
         assert_eq!(
@@ -555,27 +555,6 @@ fn a_hold_never_routes_a_never_routed_command_or_an_unrouted_fleets() {
 }
 
 #[test]
-fn a_routed_fleets_gate_checks_go_to_the_build_machine_under_the_cargo_kind() {
-    let d = gated();
-    Command::new("git")
-        .args(["init", "-q"])
-        .current_dir(&d)
-        .status()
-        .unwrap();
-    let w = wrapped(&d, "just check");
-    assert!(
-        w.contains("'heavy' 'cargo'") && w.contains("'--remote' 'linux'") && w.ends_with("'--' 'just check'"),
-        "{w}"
-    );
-    let d = lane("");
-    assert_eq!(
-        hook(&d, "just check"),
-        "",
-        "an unrouted fleet's gate check is unchanged"
-    );
-}
-
-#[test]
 fn a_gatekeeper_check_never_goes_to_a_build_machine() {
     let d = gated();
     let gate = "./.gatekeeper/run check --gate core/fmt";
@@ -593,6 +572,24 @@ fn a_gatekeeper_check_never_goes_to_a_build_machine() {
         .unwrap();
     assert_eq!(st.code(), Some(6), "it ran here");
     assert!(!d.join("runners.log").exists(), "never sent to runners run");
+}
+
+#[test]
+fn a_just_check_never_goes_to_a_build_machine() {
+    let d = gated();
+    assert_eq!(hook(&d, "just check"), "", "the hook leaves it on the lane's host");
+    let path = fake_runners(&d, Some(0));
+    let just = d.join("bin/just");
+    std::fs::write(&just, "#!/bin/sh\npwd -P > just.log\nexit 6\n").unwrap();
+    Command::new("chmod").args(["755"]).arg(&just).status().unwrap();
+    let st = routed_hold(&d, &path, &["just", "check"]).status().unwrap();
+    assert_eq!(st.code(), Some(6), "it ran here");
+    assert!(!d.join("runners.log").exists(), "never sent to runners run");
+    let here = d.canonicalize().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(d.join("just.log")).unwrap().trim(),
+        here.to_str().unwrap()
+    );
 }
 
 fn cargo_routed() -> (PathBuf, String, String) {

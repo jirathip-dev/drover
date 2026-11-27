@@ -25,7 +25,6 @@ pub(super) mod pages;
 pub(super) use lanes::said;
 use lanes::{lanes_screen, scene_screen};
 
-const MANIFEST: &str = include_str!("../../../cooee-plugin.toml");
 pub(super) type Res = (&'static str, &'static str, Vec<u8>);
 type Q = BTreeMap<String, String>;
 
@@ -66,17 +65,11 @@ pub(super) fn line(status: &'static str, l: &str) -> Res {
     out(status, &Value::Object(fields([("line", l.into())])))
 }
 
-/// Whether `cooee-plugin.toml`'s `[permissions]` lists `action`.
-pub fn permitted(action: &str) -> bool {
-    let m: toml::Value = toml::from_str(MANIFEST).unwrap_or(toml::Value::Integer(0));
-    let list = m.get("permissions").and_then(|p| p.get("actions")?.as_array().cloned());
-    list.unwrap_or_default().iter().any(|a| a.as_str() == Some(action))
-}
+pub use crate::manifest::permitted;
 
-/// `cooee-plugin.toml`'s `[[places]]` as JSON: the tabs, menu rows and cards the phone page draws.
+/// The manifest's places as JSON: the tabs, menu rows and cards the phone page draws.
 pub fn places() -> Value {
-    let m: toml::Value = toml::from_str(MANIFEST).unwrap_or(toml::Value::Integer(0));
-    serde_json::to_value(m.get("places")).unwrap_or_default()
+    serde_json::to_value(crate::manifest::manifest("").screens).unwrap_or_default()
 }
 
 /// The standalone page's places: the manifest's, then the Threads tab and the Hosts row (never the plugin's).
@@ -951,8 +944,8 @@ fn stats(ctx: &Ctx, ev: &[Event], states: &crate::events::States, only: Option<&
     let fleets = Config::kept(ctx).into_iter().flat_map(|c| c.fleet);
     let flights = fleets
         .filter(|f| only.is_none_or(|o| o == f.0))
-        .filter_map(|(f, fc)| crate::queue::flight(ctx, states, &fc, &f))
-        .map(|(v, cap)| (v.len(), cap))
+        .filter_map(|(f, fc)| crate::queue::flight(ctx, ev, states, &fc, &f))
+        .map(|(v, s, cap)| (v.len() + s.len(), cap))
         .reduce(|a, b| (a.0 + b.0, a.1 + b.1));
     items.extend(flights.map(|(v, cap)| tile("in flight", format!("{v}/{cap}"))));
     k::Stat::new().id("stats").items(items).block()
@@ -1518,7 +1511,6 @@ impl Server<'_> {
             ),
             "/screens/ask" => ask_sheet(ctx, q)?,
             "/screens/hosts" => return self.hosts_sheet(ctx),
-            "/screens/proxy-token" => return Self::proxy_how(ctx),
             p if p == "/screens/threads" || p.starts_with("/screens/threads/") => {
                 return self.threads_screen(ctx, &p[16..], q.get("before"), paired)
             }

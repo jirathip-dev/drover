@@ -33,12 +33,9 @@ fn acp_setup(name: &str, b: &FakeShed) -> drover::Ctx {
             "profile = \"fleet-rev\"\n",
             "profile = \"fleet-rev\"\nmodel = \"sonnet\"\n",
         )
-        .replace(
-            "harness  =  \"claude\"    # toggled in tests",
-            "harness = \"claude\"\naccount = \"C\"",
-        );
+        .replace("harness  =  \"claude\"    # toggled in tests", "harness = \"claude\"");
     let text = format!(
-        "{text}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        "{text}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n",
         b.sock.display()
     );
     let mut c = ctx(&tmpdir(name), &text);
@@ -117,7 +114,7 @@ fn a_orchestrator_choice_in_config_writes_its_table_after_a_backup_and_the_next_
         "{res}"
     );
     let want = format!(
-        "{orig}\n[fleet.sendmeter.role.orchestrator]\naccount = \"C\"\nharness = \"claude\"\nmodel = \"sonnet\"\nprofile = \"lane-orchestrator\"\n"
+        "{orig}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"sonnet\"\nprofile = \"lane-orchestrator\"\n"
     );
     assert_eq!(
         std::fs::read_to_string(&c.config).unwrap(),

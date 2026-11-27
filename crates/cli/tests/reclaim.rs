@@ -131,8 +131,8 @@ struct Held(std::process::Child);
 
 impl Drop for Held {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        self.0.kill().ok();
+        self.0.wait().ok();
     }
 }
 

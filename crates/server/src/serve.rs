@@ -411,7 +411,7 @@ pub struct Server<'a> {
     timing: Mutex<slo::Timing>,
     phone: Mutex<slo::Timing>,
     rss: std::sync::atomic::AtomicU64,
-    hosts_read: Mutex<(usize, Option<Vec<String>>)>,
+    hosts_read: Mutex<usize>,
     streams: Mutex<BTreeMap<String, usize>>,
     hub: hub::Hub,
     tails: tails::Tails,
@@ -2543,9 +2543,6 @@ impl<'a> Server<'a> {
             }
             let lanes = crate::hosts::lanes_on(cfg, events, &name);
             let (mut t, mut words) = crate::hosts::shown(on, &s, lanes.len(), now);
-            let cloud = crate::cloud::card(ctx, cfg, events, (&name, lanes.len()));
-            let title = cloud.as_ref().map(|c| c[0].clone()).filter(|w| !w.is_empty());
-            (t, words) = title.map_or((t, words), |w| ("m", w));
             let held = t == "g" && host::admit(&gate, lim).is_err();
             if t == "g" {
                 (t, words) = match host::admit(&gate, lim) {
@@ -2673,7 +2670,6 @@ impl<'a> Server<'a> {
                     at.into_iter().collect(),
                 ));
             }
-            rows.extend(cloud.map(|c| plain("cloud", &c[1], None, c[2].clone(), vec![])));
             let ls = if lanes.is_empty() {
                 "none".into()
             } else {

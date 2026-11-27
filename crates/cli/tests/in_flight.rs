@@ -195,3 +195,79 @@ fn a_held_issue_with_an_open_pr_counts_and_force_overrides_the_refusal_logged() 
         (Some("IN_FLIGHT_CAP"), Some("owner"))
     );
 }
+
+fn open_pr(c: &drover::Ctx, n: u64) {
+    let cache = c.state.with_file_name("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    let pr = json!({"ts": c.now, "pr": {"number": 20 + n, "state": "OPEN"}});
+    std::fs::write(cache.join(format!("pr-sendmeter-{n}.json")), pr.to_string()).unwrap();
+}
+
+fn held_on_its_blocker(name: &str) -> drover::Ctx {
+    let c = setup(name, "max_in_flight = 1", &["1", "2"]);
+    building(&c, 1..=1);
+    let block = ["queue", "sendmeter", "block", "--on", "2", "1"];
+    assert_eq!(run(&c, &fake(NONE), &block).0, 0);
+    c
+}
+
+fn status(c: &drover::Ctx) -> String {
+    run(c, &fake(NONE), &["status", "sendmeter"]).1
+}
+
+#[test]
+fn an_issue_held_on_its_blocker_with_no_pr_holds_no_slot_so_the_blocker_starts() {
+    let c = held_on_its_blocker("inflight-held");
+    assert_eq!(state_of(&c, 1), "impl");
+    let s = status(&c);
+    assert!(s.contains("sendmeter: in flight 0/1"), "{s}");
+    let (_, out) = run(&c, &fake(NONE), &["spawn", "sendmeter", "2", "impl"]);
+    assert!(!out.contains("IN_FLIGHT_CAP"), "{out}");
+    assert_eq!(state_of(&c, 2), "impl", "{out}");
+}
+
+#[test]
+fn an_issue_held_on_its_blocker_with_an_open_pr_still_holds_its_slot() {
+    let c = held_on_its_blocker("inflight-held-pr");
+    open_pr(&c, 1);
+    let s = status(&c);
+    assert!(s.contains("sendmeter: in flight 1/1"), "{s}");
+    let (code, out) = run(&c, &fake(NONE), &["spawn", "sendmeter", "2", "impl"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        out.contains("REFUSED IN_FLIGHT_CAP: 1/1 PRs in flight in sendmeter (#1)"),
+        "{out}"
+    );
+    assert_eq!(state_of(&c, 2), "queued");
+}
+
+fn starting(c: &drover::Ctx, n: u64, age: u64) {
+    let at = c.now - age;
+    let e = json!({"ts": at, "fleet": "sendmeter", "issue": n, "type": "spawn", "role": "impl"});
+    let key = format!("spawn-sendmeter-{n}.pending");
+    drover::db::take(&c.state, &key, at, 3600, &e.to_string(), &|_| true).unwrap();
+}
+
+#[test]
+fn a_pending_start_counts_in_status_and_refusal_alike_until_it_is_older_than_its_window() {
+    let c = setup("inflight-start", "max_in_flight = 2", &["2"]);
+    building(&c, 3..=3);
+    starting(&c, 1, 10);
+    let s = status(&c);
+    assert!(s.contains("sendmeter: in flight 2/2"), "{s}");
+    let (code, out) = run(&c, &fake(NONE), &["spawn", "sendmeter", "2", "impl"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        out.contains("REFUSED IN_FLIGHT_CAP: 2/2 PRs in flight in sendmeter (#3, 1 starting)"),
+        "{out}"
+    );
+
+    let c = setup("inflight-old-start", "max_in_flight = 2", &["2"]);
+    building(&c, 3..=3);
+    starting(&c, 1, 301);
+    let s = status(&c);
+    assert!(s.contains("sendmeter: in flight 1/2"), "{s}");
+    let (_, out) = run(&c, &fake(NONE), &["spawn", "sendmeter", "2", "impl"]);
+    assert!(!out.contains("IN_FLIGHT_CAP"), "{out}");
+    assert_eq!(state_of(&c, 2), "impl", "{out}");
+}
