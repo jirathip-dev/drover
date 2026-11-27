@@ -40,7 +40,7 @@ fn write(p: &Path, text: &str, mode: u32) {
 }
 
 fn setup(name: &str, harness: &str) -> (drover::Ctx, PathBuf) {
-    let d = tmpdir(name);
+    let d = tmpdir(name.get(..8).unwrap_or(name));
     let c = ctx(&d, &config(&d, harness));
     std::fs::create_dir_all(d.join("local")).unwrap();
     std::fs::create_dir_all(&c.worktrees).unwrap();

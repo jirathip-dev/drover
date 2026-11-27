@@ -231,14 +231,7 @@ fn a_service_that_answers_a_wake_but_runs_no_pass_never_leaves_a_fleets_last_pas
 fn deaf(c: &drover::Ctx) -> FakeShed {
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     let sh = FakeShed::attached(c);
-    let deaf = std::os::unix::net::UnixListener::bind(drover::service::sock(c)).unwrap();
-    std::thread::spawn(move || {
-        for s in deaf.incoming().flatten() {
-            let mut line = String::new();
-            std::io::BufRead::read_line(&mut std::io::BufReader::new(&s), &mut line).ok();
-            std::io::Write::write_all(&mut &s, b"{\"pid\": 1}\n").ok();
-        }
-    });
+    fake_service(c, 1);
     sh
 }
 

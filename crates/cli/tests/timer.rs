@@ -715,7 +715,7 @@ fn install_loads_the_service_in_place_of_the_fast_job() {
 
 #[test]
 fn doctor_shows_the_service_missing_then_running() {
-    let c = ctx(&tmpdir("timer-service-doctor"), CONFIG);
+    let c = ctx(&tmpdir("svc-doc"), CONFIG);
     let _sh = FakeShed::attached(&c);
     let r = host(Fake::default()).reply(LOAD, "");
     let line = |out: &str| {
