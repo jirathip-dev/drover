@@ -95,7 +95,7 @@ pub struct Sim {
 
 fn cost(prog: &str, args: &[String]) -> u64 {
     match (prog, args.first().map(String::as_str), args.get(1).map(String::as_str)) {
-        ("shed", Some("send"), Some(p)) if p.contains("\"text\":\"exec ") => 3,
+        ("shed", Some("send"), Some(_)) if args.len() == 3 => 3,
         ("gh" | "ssh", ..) => 1,
         _ => 0,
     }
@@ -343,7 +343,7 @@ impl Sim {
                 match next {
                     Some(t) if t <= until => {
                         let dt = t.saturating_sub(w.now);
-                        let idle = w.model.live().filter(|p| p.status != "working").count() as u64;
+                        let idle = u64::try_from(w.model.live().filter(|p| p.status != "working").count()).unwrap();
                         w.model.idle += idle * dt;
                         w.now = w.now.max(t);
                         crate::scenario::due(self, &mut w);
@@ -352,7 +352,7 @@ impl Sim {
                     _ => break,
                 }
             }
-            let pick = ready[usize::try_from(w.rng.below(ready.len() as u64)).unwrap()];
+            let pick = ready[usize::try_from(w.rng.below(u64::try_from(ready.len()).unwrap())).unwrap()];
             w.turn = Some(pick);
             w.step += 1;
             drop(w);
@@ -371,7 +371,7 @@ impl Sim {
         self.cv.notify_all();
         let hs: Vec<_> = std::mem::take(&mut *self.threads.lock().unwrap());
         for h in hs {
-            let _ = h.join();
+            h.join().ok();
         }
     }
 }
@@ -460,8 +460,8 @@ impl Runner for SimRunner {
         let wire = drover::shed::Wire::Connect;
         Some(drover::shed::Shed {
             wire,
-            acp: None,
-            policy: "ask".into(),
+            acp: Some("claude-acp".into()),
+            policy: "allow".into(),
         })
     }
     fn sleep(&self, secs: u64) {

@@ -1,0 +1,5 @@
+about = "every core timing is a [limits] key: no hard-coded Duration in crates/core/src (#844)"
+fix = "make the Duration a [limits] key in config.rs"
+budget_secs = 10
+paths = ["crates/core/src/**", "scripts/timing-check.sh"]
+run = "scripts/timing-check.sh"

@@ -20,5 +20,5 @@ fn a_read_that_blocks_times_out_within_the_limit() {
     let again = drover::runner::read_file(&fifo).unwrap_err();
     assert_eq!(again.kind(), std::io::ErrorKind::TimedOut);
     assert!(t.elapsed() < Duration::from_millis(200), "{:?}", t.elapsed());
-    let _ = std::fs::OpenOptions::new().write(true).open(&fifo);
+    std::fs::OpenOptions::new().write(true).open(&fifo).ok();
 }

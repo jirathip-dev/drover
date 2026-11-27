@@ -22,7 +22,7 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str, now: u64) 
 fn fixture(name: &str) -> (drover::Ctx, OnShed) {
     let c = ctx(&tmpdir(name), &two());
     let spawn = |fleet: &str, issue: u64, ts: u64, role: &str, agent: &str| {
-        let d = json!({"role": role, "agent": agent, "harness": if role == "rev" { "hermes" } else { "claude" }});
+        let d = json!({"role": role, "agent": agent, "harness": if role == "rev" { "codex" } else { "claude" }});
         append(&c.state, &Event::new(ts, fleet, Some(issue), "spawn", d)).unwrap();
     };
     spawn("sendmeter", 12, 900_100, "impl", "sendmeter-impl-12");
@@ -499,7 +499,7 @@ fn pairing_codes_devices_and_prompt_events() {
         res.starts_with("HTTP/1.1 303 ") && res.contains("device%20removed"),
         "{res}"
     );
-    assert_eq!(drover::devices::load(&c), [] as [drover::devices::Device; 0]);
+    assert_eq!(drover::devices::load(&c), <[drover::devices::Device; 0]>::default());
     assert!(send(&cookie, "again").starts_with("HTTP/1.1 401 "));
 }
 

@@ -55,7 +55,7 @@ impl Runner for Wedged {
 fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     let d = tmpdir(name);
     let cfg = CONFIG.replace(
-        "harness  =  \"hermes\"    # toggled in tests",
+        "harness  =  \"claude\"    # toggled in tests",
         "harness = \"claude\"\naccounts = [\"A\"]",
     ) + &format!(
         "\n[fleet.sendmeter.env]\nAPI_KEY = \"secret:API_KEY\"\n\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\n\n[accounts.usage]\nA = \"{}\"\n",

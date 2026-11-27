@@ -1,0 +1,10 @@
+about = "the board's esbuild bundle builds (#1147: local/gen and core/arch hold the committed web/dist to it)"
+fix = "fix the build error esbuild names in web/src"
+budget_secs = 120
+setup = ["node"]
+paths = ["web/**"]
+run = '''
+set -eu
+npm --prefix web ci --no-audit --no-fund
+npm --prefix web run build
+'''

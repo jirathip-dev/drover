@@ -1,22 +1,19 @@
 use crate::runner::Runner;
 use crate::spawn::Plan;
-use crate::term;
 use crate::Ctx;
 use anyhow::Result;
 use serde_json::Value;
 use std::io::Write;
 use std::ops::Deref;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 pub use claude::{remove_tmp, root as profiles_root, LOCAL_DIR, LOCAL_FILES};
-pub use dsh::{install_pre_push, DSH_TUI_VERSION};
-pub use hermes::set_mcp;
 
 macro_rules! registry { ($($(#[$m:meta])* $n:ident),* $(,)?) => {
     $($(#[$m])* mod $n;)*
     static ALL: &[Entry] = &[$($(#[$m])* Entry { name: stringify!($n), provider: &$n::PROVIDER }),*];
 } }
-registry! { claude, hermes, dsh, codex, gemini, #[cfg(test)] fake }
+registry! { claude, #[cfg(test)] fake }
 
 /// A registry entry: its name (the registry's ident) and the provider it derefs to.
 #[derive(Clone, Copy)]
@@ -32,31 +29,14 @@ impl Deref for Entry {
     }
 }
 
-/// How a provider is reached.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Surface {
-    Terminal,
-    Acp,
-    Listed,
-}
-
 /// Every provider, in registry order.
 pub fn all() -> impl Iterator<Item = Entry> {
     ALL.iter().copied()
 }
 
-fn on(s: Surface) -> impl Iterator<Item = Entry> {
-    all().filter(move |p| p.surface() == s)
-}
-
 /// The lane providers a role's `harness` may name.
 pub fn lanes() -> impl Iterator<Item = Entry> {
-    on(Surface::Terminal)
-}
-
-/// Providers a role reaches only through its ACP `agent` (no terminal lane, not offered as a `harness`).
-pub fn acp_only() -> impl Iterator<Item = Entry> {
-    on(Surface::Acp)
+    all()
 }
 
 /// The names a role's `harness` may take.
@@ -64,19 +44,14 @@ pub fn lane_names() -> Vec<&'static str> {
     lanes().map(|p| p.name).collect()
 }
 
-/// Every provider name `get` knows, the lanes then the ACP-only ones.
-pub fn known() -> impl Iterator<Item = &'static str> {
-    lanes().chain(acp_only()).map(|p| p.name)
-}
-
-/// ACP agent `id`'s model vendor, if known; a fleet's `rev` runs on another vendor than its `impl`.
-pub fn vendor_of_agent(id: &str) -> Option<&'static str> {
-    all().find(|p| p.acp() == Some(id)).and_then(|p| p.vendor())
-}
-
 /// The provider whose adapter ACP agent `id` is (the one that guards it).
 pub fn of_agent(id: &str) -> Option<&'static str> {
-    known().find(|h| get(h).acp() == Some(id))
+    lanes().find(|h| h.acp() == Some(id)).map(|h| h.name)
+}
+
+/// The module ACP agent `id` has, else the empty default.
+pub fn of(id: &str) -> &'static dyn Provider {
+    of_agent(id).map_or(&Generic, get)
 }
 
 /// The names an AI co-author trailer carries.
@@ -84,40 +59,8 @@ pub fn brands() -> impl Iterator<Item = &'static str> {
     all().flat_map(|p| p.brands().iter().copied())
 }
 
-/// The token proxy's provider: the first that has one.
-pub fn proxied() -> Option<&'static Proxy> {
-    all().find_map(|p| p.proxy())
-}
-
 /// Effort levels a role may set (`effort = "…"`).
 pub const EFFORTS: &[&str] = &["none", "low", "medium", "high", "xhigh"];
-
-/// What the token proxy needs from the provider it fronts.
-pub struct Proxy {
-    pub upstream: &'static str,
-    pub base_url_env: &'static str,
-    pub auth_token_env: &'static str,
-    pub setup: &'static str,
-    pub headers: fn(&[Header]) -> Vec<Header>,
-}
-
-/// A forwarded HTTP header: its lowercase name and its value.
-pub type Header = (String, String);
-
-/// A provider's own folder under `~`, its env var overriding it.
-pub struct Home {
-    pub env: &'static str,
-    pub default: &'static str,
-}
-
-impl Home {
-    /// The folder: its env var when set and not empty, else the default under `home`.
-    pub fn resolve(&self, home: &Path) -> PathBuf {
-        crate::config::env_os(self.env)
-            .filter(|v| !v.is_empty())
-            .map_or_else(|| home.join(self.default), PathBuf::from)
-    }
-}
 
 /// What a harness needs in a lane sandbox: folders it reads, folders it writes, hosts it reaches.
 pub struct Needs {
@@ -125,9 +68,6 @@ pub struct Needs {
     pub write: Vec<PathBuf>,
     pub hosts: Vec<&'static str>,
 }
-
-/// The variable sandbox-runtime takes a sandboxed command's `TMPDIR` from.
-pub const SANDBOX_TMP_ENV: &str = "CLAUDE_CODE_TMPDIR";
 
 /// A `drover doctor` row: passed, its mark when not, its text.
 pub type Row = (bool, char, String);
@@ -154,29 +94,20 @@ pub struct Dialect {
 
 /// The hook dialects of every harness that has one, in `known` order.
 pub fn dialects() -> impl Iterator<Item = &'static Dialect> {
-    known().filter_map(|h| get(h).hook_dialect())
+    lanes().filter_map(|h| h.hook_dialect())
 }
 
 pub trait Provider: Sync {
-    fn surface(&self) -> Surface {
-        Surface::Terminal
-    }
     fn vendor(&self) -> Option<&'static str> {
         None
     }
     fn brands(&self) -> &'static [&'static str] {
         &[]
     }
-    fn proxy(&self) -> Option<&'static Proxy> {
-        None
-    }
     fn efforts(&self) -> &'static [&'static str] {
         EFFORTS
     }
-    fn model_default(&self) -> Option<&'static str> {
-        None
-    }
-    fn home(&self) -> Option<Home> {
+    fn sessions(&self) -> Option<&'static str> {
         None
     }
     fn profile_files(&self, _ctx: &Ctx, _profile: &str) -> Vec<PathBuf> {
@@ -186,11 +117,7 @@ pub trait Provider: Sync {
         let files = self.profile_files(ctx, profile).into_iter();
         Needs {
             read: files.filter_map(|f| Some(f.parent()?.to_path_buf())).collect(),
-            write: self
-                .home()
-                .map(|h| h.resolve(&crate::config::home()))
-                .into_iter()
-                .collect(),
+            write: vec![],
             hosts: vec![],
         }
     }
@@ -226,23 +153,8 @@ pub trait Provider: Sync {
     fn prepare(&self, _ctx: &Ctx, _on: &crate::hosts::On, _p: &Plan) -> Result<()> {
         Ok(())
     }
-    fn start_cmd(&self, _ctx: &Ctx, p: &Plan, pane: &str) -> Vec<String> {
-        term::run_argv(pane, &[&p.harness])
-    }
-    fn resumes(&self) -> bool {
-        false
-    }
     fn takes_model(&self) -> bool {
         false
-    }
-    fn kick_cmds(&self, p: &Plan, pane: &str) -> Vec<Vec<String>> {
-        vec![term::send_text_argv(pane, &p.kick), term::keys_argv(pane, "enter")]
-    }
-    fn kick(&self, r: &dyn Runner, p: &Plan, pane: &str) -> Result<bool> {
-        Ok(self
-            .kick_cmds(p, pane)
-            .iter()
-            .all(|c| term::exec(r, c).is_ok_and(|o| o.code == 0)))
     }
     fn env(&self) -> &'static [&'static str] {
         &[]
@@ -265,9 +177,6 @@ pub trait Provider: Sync {
     fn login(&self) -> Option<&'static str> {
         None
     }
-    fn install(&self) -> Option<&'static str> {
-        None
-    }
     fn hook_dialect(&self) -> Option<&'static Dialect> {
         None
     }
@@ -285,11 +194,9 @@ pub trait Provider: Sync {
 struct Generic;
 impl Provider for Generic {}
 
-/// The provider a role's `harness` names; an unknown or listed-only one gets the generic fallbacks.
+/// The provider a role's `harness` names; an unknown one gets the generic fallbacks.
 pub fn get(name: &str) -> &'static dyn Provider {
-    all()
-        .find(|p| p.name == name && p.surface() != Surface::Listed)
-        .map_or(&Generic, |p| p.provider)
+    all().find(|p| p.name == name).map_or(&Generic, |p| p.provider)
 }
 
 /// A `shed-acp` runtime's default adapter: the first lane provider's that runs its hooks.
@@ -297,7 +204,7 @@ pub fn default_acp() -> Option<&'static str> {
     lanes().find_map(|h| h.acp())
 }
 
-/// The drover hook's command line, as Claude settings and Hermes config/allowlist name it.
+/// The drover hook's command line, as Claude settings name it.
 pub fn hook_command(ctx: &Ctx, role: &str) -> String {
     format!("'{}' hook --role {role}", real(&ctx.exe))
 }
@@ -319,12 +226,4 @@ pub fn runs_this(ctx: &Ctx, cmd: &str) -> bool {
 /// Hook command `cmd` is this binary's hook for `role`.
 pub fn guards(ctx: &Ctx, cmd: &str, role: &str) -> bool {
     runs_this(ctx, cmd) && cmd.ends_with(&format!("' hook --role {role}"))
-}
-
-fn attempts(r: &dyn Runner, n: u32, secs: u64) -> impl Iterator<Item = u32> + '_ {
-    (0..n).inspect(move |&i| {
-        if i > 0 {
-            r.sleep(secs);
-        }
-    })
 }

@@ -22,7 +22,7 @@ fn setup(name: &str) -> Roots {
     }
     let roots = format!("roots = [\"{}\", \"{}\"]", dead.display(), good.display());
     let base = CONFIG
-        .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+        .replace("harness  =  \"claude\"", "harness = \"claude\"")
         .replace("[limits]\n", "[limits]\ndisk_trust_secs = 0\n");
     let c = ctx(&d, &format!("{base}\n[hosts.mini]\n{roots}\n"));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
@@ -51,7 +51,7 @@ fn hang(root: &Path) -> std::sync::mpsc::Sender<()> {
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     let dir = root.to_string_lossy().into_owned();
     assert!(drover::runner::hung(&dir, Duration::ZERO, move |_| {
-        let _ = rx.recv();
+        rx.recv().ok();
         None
     }));
     tx
@@ -80,7 +80,7 @@ fn a_root_whose_listing_never_returns_costs_one_probe_and_the_pass_goes_on() {
         took < drover::runner::probe_wait() + Duration::from_secs(20),
         "{took:?}"
     );
-    assert!(r.sh.called("run", "sendmeter-impl-12"), "drive still starts: {out}");
+    assert!(r.sh.has("sendmeter-impl-12"), "drive still starts: {out}");
     let events = read(&r.c.state).unwrap();
     let sp = events
         .iter()
@@ -91,6 +91,7 @@ fn a_root_whose_listing_never_returns_costs_one_probe_and_the_pass_goes_on() {
         Some(&*r.good.to_string_lossy()),
         "#12 takes the root that answers"
     );
+    assert_eq!(run(&r.c, &f, &["housekeep", "--only", "check"]).0, 0);
     let alerts = hung_alerts(&r.c);
     assert_eq!(alerts.len(), 1, "{alerts:#?}");
     assert_eq!(alerts[0].str("root"), Some(&*r.dead.to_string_lossy()));
@@ -182,8 +183,15 @@ fn a_lane_whose_reads_block_or_whose_root_was_removed_never_holds_clean_or_the_t
     let off = lane(&r.c, 14, &old);
     let (code, out) = within(&r.c, host(), &["clean", "--yes"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains(&format!("keep {}: off-root", off.display())), "{out}");
+    let old = off.parent().unwrap().parent().unwrap().display().to_string();
+    assert!(
+        out.contains(&format!("orphan root {old}: 1 worktrees off-root")),
+        "{out}"
+    );
+    assert!(out.contains("this host: 1 lanes, root-hung — not checked"), "{out}");
+    let (_, out) = within(&r.c, host(), &["clean", "--verbose"]);
     assert!(out.contains(&format!("keep {}: root-hung", hung.display())), "{out}");
+    assert!(!out.contains(&format!("keep {}", off.display())), "settled once: {out}");
     let (code, out) = within(&r.c, host(), &["tick"]);
     assert_eq!(code, 0, "{out}");
     let events = read(&r.c.state).unwrap();

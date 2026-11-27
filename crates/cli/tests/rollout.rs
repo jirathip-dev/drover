@@ -11,8 +11,8 @@ const SNIPPET: &str = "In every Swift fleet:\n```toml\n[fleet.sendmeter]\nswift 
 
 fn setup(name: &str, b: &FakeShed) -> drover::Ctx {
     let cfg = format!(
-        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
-         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n\n\
+         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n",
         b.sock.display()
     );
     let mut c = ctx(&tmpdir(name), &cfg);
@@ -183,7 +183,7 @@ fn a_config_card_naming_the_rollout_closes_it_on_apply() {
 
     let file = c.config.with_file_name("proposed.toml");
     let old = std::fs::read_to_string(&c.config).unwrap();
-    std::fs::write(&file, old.replacen("review_rounds = 3", "review_rounds = 4", 1)).unwrap();
+    std::fs::write(&file, old.replacen("stall_minutes = 30", "stall_minutes = 31", 1)).unwrap();
     let f = file.to_str().unwrap();
     let propose = |n: &str| run(&c, &Fake::default(), &["config", "propose", "t1", f, "--rollout", n]);
     let (code, out) = propose("99");

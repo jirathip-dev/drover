@@ -60,7 +60,7 @@ hook behaves like an old build.
 **Cause.** The updater installs into `~/.local/share/drover/bin`, but the lanes' hook called a separate, older copy
 in `~/.local/bin` that is not a symlink, so the update never reached it. #573 is the real fix. Since #1168 the host's
 health shows `✗ drover` with both versions when ssh's PATH runs another drover than the install root, and
-`hosts bootstrap` and the next `check` relink `~/.local/bin/drover` and a stale `/usr/local/bin/drover`.
+the next `check` relinks `~/.local/bin/drover` and a stale `/usr/local/bin/drover`.
 
 **Check.**
 
@@ -84,17 +84,10 @@ host's version and git sha.
 **Symptom.** Every tool call of a lane on a remote host is refused `REFUSED HOOK_FAILED_CLOSED: <fleet> not in
 fleet.toml`.
 
-**Cause.** A remote host's own `~/.config/drover/fleet.toml` is written once at cloud bootstrap (only when it has
-none) and never refreshed. A fleet added on the main host later is missing there, so the host's lane hook fails
+**Cause.** A remote host's own `~/.config/drover/fleet.toml` is never refreshed. A fleet added on the main host later is missing there, so the host's lane hook fails
 closed.
 
-**Workaround until #592 lands.** Copy the main host's `[fleet.*]` tables (without notifiers) into the remote file, or
-move it aside and bootstrap again so it is rewritten:
-
-```sh
-ssh <host> 'mv ~/.config/drover/fleet.toml ~/.config/drover/fleet.toml.old'
-drover hosts bootstrap <host>
-```
+**Workaround until #592 lands.** Copy the main host's `[fleet.*]` tables (without notifiers) into the remote file.
 
 **After #592.** drover keeps the remote fleet.toml in step with the main host's, so a new fleet reaches every host
 without this step.
@@ -116,7 +109,7 @@ drover hosts                       # the host: offline
 ssh <host> shed ls                 # fails
 ```
 
-**Fix.** `drover hosts bootstrap <host>` (installs shed and its job), or start shed's job there.
+**Fix.** Start shed's job there.
 
 **Confirm.** `drover hosts` shows the host reachable, and a lane placed there starts.
 

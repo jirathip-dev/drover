@@ -93,18 +93,9 @@ fn gone(
         return Ok(false);
     }
     let said = (exit.cause == Cause::Crash).then(said).flatten();
-    let refused = [&exit.note, &said]
-        .into_iter()
-        .flatten()
-        .any(|w| w.contains("ECONNREFUSED"));
-    let cause = if refused && exit.cause == Cause::Crash {
-        Cause::Refused
-    } else {
-        exit.cause
-    };
     d.put("state", json!("gone"))
         .put("code", json!(exit.code))
-        .put("cause", json!(cause.word()));
+        .put("cause", json!(exit.cause.word()));
     if let Some(n) = &exit.note {
         d.put("note", json!(n));
     }
@@ -114,7 +105,7 @@ fn gone(
     stamp(ctx, &events, (fleet, issue), agent, d)?;
     if exit.cause == Cause::Limit {
         let events = crate::events::working(&ctx.state)?;
-        if let Some(sp) = last_spawn(&events, agent) {
+        if let Some(sp) = last_spawn(&events, agent).filter(|sp| !crate::hosts::on_account(sp)) {
             let d = crate::hosts::hold_alert(&events, sp, "hit the usage limit");
             if !events
                 .iter()
@@ -128,14 +119,23 @@ fn gone(
 }
 
 /// One shed event on wire `w` into the log: its pulse, and its lane's `lane-state` stamp (an exit or kill is `gone`, with its cause and a crash's last words); whether it stamped.
-pub fn on_event(ctx: &Ctx, cfg: &Config, w: &crate::shed::Wire, e: &shed_proto::Event) -> Result<bool> {
+pub fn on_event(ctx: &Ctx, cfg: &Config, r: &dyn Runner, w: &crate::shed::Wire, e: &shed_proto::Event) -> Result<bool> {
     let Some((fleet, issue)) = whose(cfg, &e.labels) else {
         return Ok(false);
     };
-    if last_spawn(&crate::events::working(&ctx.state)?, &e.name).is_some_and(|sp| sp.str("machine").is_some()) {
+    let events = crate::events::working(&ctx.state)?;
+    let sp = last_spawn(&events, &e.name);
+    if sp.is_some_and(|sp| sp.str("machine").is_some()) {
         return Ok(false);
     }
     pulse::hear(ctx, &e.name, &e.kind, e.replay)?;
+    if let Some(sp) = sp.filter(|sp| matches!(sp.str("guard"), Some("judge" | "both")) && !e.replay) {
+        super::turn::on(ctx, cfg, r, sp, e)?;
+    }
+    if let (EventKind::Account { account, was, why }, Some(t)) = (&e.kind, e.labels.get("thread").filter(|_| !e.replay))
+    {
+        crate::orchestrator::account_moved(ctx, cfg, (&fleet, t), (account, was.as_deref()), why)?;
+    }
     let Some(issue) = issue else {
         return Ok(false);
     };
@@ -285,7 +285,7 @@ pub fn observe(ctx: &Ctx, cfg: &Config, r: &dyn Runner, sessions: &Sessions) -> 
 }
 
 /// Drive's intake of shed's events since the last pass (`shed.seq` beside the log), each through `on_event`; how many stamped. a running service follows the stream and keeps `shed.seq`.
-pub fn intake(ctx: &Ctx, cfg: &Config, w: &crate::shed::Wire) -> Result<usize> {
+pub fn intake(ctx: &Ctx, cfg: &Config, r: &dyn Runner, w: &crate::shed::Wire) -> Result<usize> {
     let got = crate::shed::events(
         w,
         crate::shed::seen(ctx),
@@ -293,7 +293,7 @@ pub fn intake(ctx: &Ctx, cfg: &Config, w: &crate::shed::Wire) -> Result<usize> {
     )?;
     let mut n = 0;
     for e in &got {
-        n += usize::from(on_event(ctx, cfg, w, e)?);
+        n += usize::from(on_event(ctx, cfg, r, w, e)?);
     }
     if let Some(last) = got.iter().map(|e| e.seq).max() {
         std::fs::write(ctx.state.with_file_name("shed.seq"), last.to_string())?;

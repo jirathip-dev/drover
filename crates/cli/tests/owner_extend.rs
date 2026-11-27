@@ -37,7 +37,7 @@ fn setup(name: &str) -> (drover::Ctx, FakeShed) {
             json!({"verdict": "FAIL", "sha": sha(p), "body": "FAIL"}),
         );
     }
-    let nh = json!({"code": "ROUND_LIMIT", "reason": "out of rounds"});
+    let nh = json!({"code": "STUCK", "reason": "out of rounds"});
     ev(&c, 14, "needs-human", nh);
     (c, sh)
 }
@@ -131,7 +131,7 @@ fn kinds(c: &drover::Ctx, kind: &str) -> usize {
 }
 
 fn started(sh: &FakeShed) -> usize {
-    sh.all("run").iter().filter(|p| p["name"] == IMPL).count()
+    sh.sent(IMPL).iter().filter(|t| t.starts_with("# Brief")).count()
 }
 
 fn state(c: &drover::Ctx) -> String {
@@ -151,7 +151,7 @@ fn an_extend_requeues_at_its_old_place_spawns_nothing_and_drive_starts_it_in_tur
     assert_eq!(cards(&c, &calm, c.now).len(), 1, "the card before the tap");
     let (code, out) = run(&c, &calm, &["extend", "sendmeter", "12"]);
     assert!(code == 0 && out.ends_with("#12: extend\n"), "{out}");
-    assert!(sh.all("run").is_empty(), "the tap spawns nothing: {out}");
+    assert_eq!(started(&sh), 0, "the tap spawns nothing: {out}");
     assert_eq!((kinds(&c, "round-extended"), kinds(&c, "spawn")), (1, 1));
     assert_eq!(order(&c), queued(&[11, 12, 13]), "back in its old place");
     assert_eq!(cards(&c, &calm, c.now), []);
@@ -171,7 +171,7 @@ fn an_extend_out_of_the_queue_goes_last() {
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "rm", "12"]).0, 0);
     let (code, out) = run(&c, &fake("1"), &["extend", "sendmeter", "12"]);
     assert_eq!(code, 0, "{out}");
-    assert!(sh.all("run").is_empty(), "{out}");
+    assert_eq!(started(&sh), 0, "{out}");
     assert_eq!(order(&c), queued(&[11, 13, 12]));
 }
 

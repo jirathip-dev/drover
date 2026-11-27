@@ -6,7 +6,7 @@ use serde_json::json;
 const H1: &str = "1111111111111111111111111111111111111111";
 const H2: &str = "2222222222222222222222222222222222222222";
 const POST: &str = "gh api -X POST repos/jirathip-dev/sendmeter/statuses/";
-const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"hermes\"\nprofile = \"fleet-verify\"\n";
+const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
 
 fn setup(name: &str, cfg: &str) -> (std::path::PathBuf, drover::Ctx) {
     let d = tmpdir(name);
@@ -47,7 +47,7 @@ fn kinds(c: &drover::Ctx, k: &str) -> usize {
     read(&c.state).unwrap().iter().filter(|e| e.kind == k).count()
 }
 
-const FAIL: &str = "FAIL\n\n- blocking [correctness] src/x.rs:3: wrong\n  Proof: spec\n  > AC1: it works\n  src/x.rs:3 breaks it\n- non-blocking: a nit\n";
+const FAIL: &str = "FAIL\n\n- blocking [ac] src/x.rs:3: wrong\n  Proof: spec\n  > AC1: it works\n  src/x.rs:3 breaks it\n- non-blocking: a nit\n";
 
 fn drive_fake(head: &str) -> Fake {
     let pr = json!({"number": 34, "state": "OPEN", "baseRefName": "staging", "headRefOid": head, "mergeable": "MERGEABLE",

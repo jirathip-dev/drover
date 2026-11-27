@@ -14,9 +14,6 @@ fn setup(name: &str, extra: &str) -> drover::Ctx {
         &d,
         &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n{extra}"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
-    std::fs::create_dir_all(&profile).unwrap();
-    std::fs::write(profile.join("settings.json"), "{}").unwrap();
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Ops"]).1,
         "t1\n"
@@ -93,7 +90,7 @@ fn groups_default_to_all_but_pause_and_set_and_name_only_known_groups() {
 fn the_orchestrator_brief_lists_the_fleets_groups() {
     let sh = FakeShed::new();
     let acp = format!(
-        "account = \"C\"\n\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        "\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n",
         sh.sock.display()
     );
     let mut c = setup(
@@ -275,7 +272,6 @@ fn a_hard_no_is_refused_at_posting() {
         "git push origin +staging",
         "git filter-repo --path secrets",
         "gh api -X DELETE repos/o/r/branches/main/protection",
-        "drover merge sendmeter 5 --owner-override",
     ] {
         let (code, out) = post(&c, cmd);
         assert_eq!(
@@ -375,7 +371,7 @@ fn last_msg(c: &drover::Ctx) -> String {
 fn a_card_sleeping_90s_with_timeout_300_runs_in_the_background_and_reports_exit_0() {
     let c = setup(
         "card-background",
-        "\n[runtime]\nkind = \"shed\"\nsocket = \"/nonexistent/shed.sock\"\n",
+        "\n[runtime]\nkind = \"shed-acp\"\nsocket = \"/nonexistent/shed.sock\"\n",
     );
     assert_eq!(card_with_timeout(&c, "sleep 90", "300"), "r1\n");
     let r = Clock(Fake::default());

@@ -266,7 +266,6 @@ mod tests {
             config: dir.join("fleet.toml"),
             state: state.clone(),
             worktrees: dir.join("w"),
-            homes: std::collections::BTreeMap::default(),
             exe: "drover".into(),
             now,
             home: dir.into(),
@@ -280,7 +279,7 @@ mod tests {
 
     fn tmp(name: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!("drover-{name}-{}", crate::runner::pid()));
-        let _ = std::fs::remove_dir_all(&d);
+        std::fs::remove_dir_all(&d).ok();
         std::fs::create_dir_all(&d).unwrap();
         d
     }

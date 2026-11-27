@@ -70,7 +70,7 @@ fn local() -> Fake {
 }
 
 fn setup(name: &str, extra: &str) -> (drover::Ctx, FakeShed) {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     let other = base
         .split("[limits]")
         .next()
@@ -105,10 +105,7 @@ fn a_kick_pays_one_connect_timeout_to_a_dead_host_with_twenty_old_lanes() {
     let r = Dead::new();
     let (code, out) = run(&c, &r, &["kick", "sendmeter", "12", "--why", "push", "--now"]);
     assert_eq!(code, 0, "{out}");
-    assert!(
-        sh.called("run", "sendmeter-impl-12"),
-        "the kick still starts #12: {out}"
-    );
+    assert!(sh.has("sendmeter-impl-12"), "the kick still starts #12: {out}");
     assert!(r.calls.get() <= 1, "{} calls to air: {out}", r.calls.get());
     assert!(r.waited() <= CONNECT, "{} s simulated", r.waited());
 }
@@ -147,7 +144,7 @@ fn a_disabled_host_with_old_lanes_gets_no_ssh_from_kick_tick_drive_waiting_or_st
 }
 
 #[test]
-fn tick_ends_a_kick_past_its_limit_logs_it_and_still_runs_every_fleet() {
+fn housekeeping_ends_a_kick_past_its_limit_logs_it_and_the_tick_still_runs_every_fleet() {
     let (c, _sh) = setup("down-kick-limit", "enabled = false\n");
     let (code, show) = run(&c, &Fake::default(), &["config", "show"]);
     assert_eq!(code, 0, "{show}");
@@ -158,6 +155,8 @@ fn tick_ends_a_kick_past_its_limit_logs_it_and_still_runs_every_fleet() {
         f: r.f.reply("kill -0 4242", "").reply("ps -o etime= -p 4242", "15:00\n"),
         ..r
     };
+    let (code, out) = run(&c, &r, &["housekeep", "--only", "check"]);
+    assert_eq!(code, 0, "{out}");
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert!(r.f.count("kill -TERM -4242") == 1, "{:#?}", r.f.calls.borrow());
@@ -179,7 +178,7 @@ fn a_second_kick_for_a_running_issue_exits_at_once_and_is_logged() {
         .reply("ps -o etime= -p 4242", "00:01\n");
     let (code, out) = run(&c, &r, &["kick", "sendmeter", "12", "--why", "push", "--now"]);
     assert_eq!(code, 0, "{out}");
-    assert!(!sh.called("run", "sendmeter-impl-12"), "the running kick does the work");
+    assert!(!sh.has("sendmeter-impl-12"), "the running kick does the work");
     let ev = read(&c.state).unwrap().to_vec();
     let busy: Vec<_> = ev.iter().filter(|e| e.kind == "kick-in-flight").collect();
     assert_eq!(busy.len(), 1, "{ev:?}");

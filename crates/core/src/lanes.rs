@@ -196,6 +196,13 @@ fn ended(events: &[Event], sessions: &Sessions, sp: &Event) -> Option<Exit> {
     }
 }
 
+/// Drover closed or killed the lane spawn `sp` started.
+pub fn closed(events: &[Event], sp: &Event) -> bool {
+    let shut = |e: &Event| e.kind == "lane-closed" && crate::events::ends(e, sp) && e.ts >= sp.ts;
+    let killed = |e: &Event| e.kind == "lane-killed" && e.str("agent") == sp.str("agent") && e.ts >= sp.ts;
+    (crate::events::of_kind(events, &["lane-closed", "lane-killed"]).into_iter()).any(|e| shut(e) || killed(e))
+}
+
 /// The issue's active lane's health: one rule set for stall, never-started, dead and closed.
 pub fn health(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &Sessions, s: &IssueState) -> Health {
     let Some((_, lane)) = s.active_lane() else {
@@ -204,28 +211,20 @@ pub fn health(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &Sessions, s:
     let Some(sp) = last_spawn(events, lane) else {
         return Health::Unknown;
     };
-    let shut = |e: &Event| e.kind == "lane-closed" && crate::events::ends(e, sp) && e.ts >= sp.ts;
-    let killed = |e: &Event| e.kind == "lane-killed" && e.str("agent") == Some(lane) && e.ts >= sp.ts;
-    if (crate::events::of_kind(events, &["lane-closed", "lane-killed"]).into_iter()).any(|e| shut(e) || killed(e)) {
+    if closed(events, sp) {
         return Health::Closed;
     }
     let live = match sessions.seen(lane, sp.str("machine")) {
         Seen::Unreachable => return Health::Unknown,
         Seen::Absent if ctx.now < sp.ts + crate::stall::START_SECS => return Health::Unknown,
         Seen::Absent => return Health::Dead(stamp::exit(events, lane)),
-        Seen::Here(x) if x.key_refused() => {
-            return Health::Stalled {
-                since: stamp::since(events, lane).unwrap_or(sp.ts).max(sp.ts),
-            }
-        }
         Seen::Here(x) if held(events, x) => return Health::Fine,
         Seen::Here(x) => match x.status() {
             Some(st) => st,
             None => return Health::Dead(ended(events, sessions, sp)),
         },
     };
-    let resent = |e: &&Event| e.kind == "start-resent" && e.str("agent") == Some(lane) && e.ts >= sp.ts;
-    let start = events.iter().rfind(resent).map_or(sp.ts, |e| e.ts);
+    let start = sp.ts;
     if live == Status::Unreported {
         let due = ctx.now >= start + crate::stall::START_SECS;
         return if due {
@@ -448,7 +447,12 @@ pub fn secret(l: &str) -> Option<&str> {
             let f = |x: usize| f64::from(u32::try_from(x).unwrap_or(u32::MAX));
             let n = f(v.chars().count());
             let bits: f64 = v.chars().map(|c| -(f(v.matches(c).count()) / n).log2() / n).sum();
-            let word = !has(v, u8::is_ascii_digit) || v.contains('_') && v == v.to_ascii_lowercase();
+            let id = v.contains(['-', '_'])
+                && v.split(['-', '_']).all(|w| {
+                    !w.is_empty()
+                        && (w.bytes().all(|b| b.is_ascii_lowercase()) || w.bytes().all(|b| b.is_ascii_digit()))
+                });
+            let word = id || !has(v, u8::is_ascii_digit) || v.contains('_') && v == v.to_ascii_lowercase();
             let code = v.contains(['(', '{', ' ']) || v.contains("::") || v.starts_with(['/', '~', '.', '$']);
             ((named(&l[..i]) || named(first) || bearer) && n >= 20.0 && bits >= 3.5 && !word && !code).then_some(v)
         })

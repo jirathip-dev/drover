@@ -1,5 +1,4 @@
-use super::{hook_command, Dialect, Header, Provider, Proxy};
-use crate::term;
+use super::{hook_command, Dialect, Provider};
 use crate::runner::Runner;
 use crate::spawn::{role_prompt, Plan};
 use crate::Ctx;
@@ -13,30 +12,9 @@ const SETTINGS: &str = include_str!("../../hooks/claude-settings.json");
 pub struct Claude;
 pub static PROVIDER: Claude = Claude;
 
-const BETA_HEADER: &str = "anthropic-beta";
-const OAUTH_BETA: &str = "oauth-2025-04-20";
 /// What `acp_profile` copies into a worktree (the lane's own files, never its work) and the folder it makes.
 pub const LOCAL_FILES: [&str; 2] = ["CLAUDE.local.md", ".claude/settings.local.json"];
 pub const LOCAL_DIR: &str = ".claude/";
-
-static PROXY: Proxy = Proxy {
-    upstream: "https://api.anthropic.com",
-    base_url_env: "ANTHROPIC_BASE_URL",
-    auth_token_env: "ANTHROPIC_AUTH_TOKEN",
-    setup: "claude setup-token",
-    headers,
-};
-
-fn headers(kept: &[Header]) -> Vec<Header> {
-    let sent = kept.iter().find(|h| h.0 == BETA_HEADER).map_or("", |h| h.1.as_str());
-    let mut beta: Vec<&str> = sent.split(',').map(str::trim).filter(|b| !b.is_empty()).collect();
-    if !beta.contains(&OAUTH_BETA) {
-        beta.push(OAUTH_BETA);
-    }
-    let head = (BETA_HEADER.to_string(), beta.join(","));
-    let rest = kept.iter().filter(|h| h.0 != BETA_HEADER).cloned();
-    std::iter::once(head).chain(rest).collect()
-}
 
 static DIALECT: Dialect = Dialect {
     sent: |v| {
@@ -62,14 +40,14 @@ pub fn root(ctx: &Ctx) -> PathBuf {
 }
 
 impl Provider for Claude {
+    fn sessions(&self) -> Option<&'static str> {
+        Some(".claude/projects")
+    }
     fn vendor(&self) -> Option<&'static str> {
         Some("anthropic")
     }
     fn brands(&self) -> &'static [&'static str] {
         &["claude", "anthropic"]
-    }
-    fn proxy(&self) -> Option<&'static Proxy> {
-        Some(&PROXY)
     }
     fn sandbox(&self, ctx: &Ctx, profile: &str) -> super::Needs {
         let h = crate::config::home();
@@ -111,50 +89,8 @@ impl Provider for Claude {
         )
     }
 
-    fn start_cmd(&self, ctx: &Ctx, p: &Plan, pane: &str) -> Vec<String> {
-        let dir = root(ctx).join(&p.profile);
-        let mut a = vec![
-            "--dangerously-skip-permissions".to_string(),
-            "--settings".into(),
-            dir.join("settings.json").to_string_lossy().into(),
-            "--append-system-prompt-file".into(),
-            dir.join("role.md").to_string_lossy().into(),
-        ];
-        if let Some(m) = &p.model {
-            a.extend(["--model".into(), m.clone()]);
-        }
-        if let Some(e) = p.effort.as_deref().filter(|e| *e != "none") {
-            a.extend(["--effort".into(), e.into()]);
-        }
-        a.extend(["--name".into(), p.title.clone()]);
-        a.extend([
-            "--mcp-config".into(),
-            p.mcp_file.to_string_lossy().into(),
-            "--strict-mcp-config".into(),
-        ]);
-        if let Some((id, resume)) = &p.session {
-            a.extend([if *resume { "--resume" } else { "--session-id" }.into(), id.clone()]);
-        }
-        a.push(p.kick.clone());
-        term::start_argv("claude", pane, &a)
-    }
-
-    fn resumes(&self) -> bool {
-        true
-    }
-
     fn takes_model(&self) -> bool {
         true
-    }
-
-    fn kick_cmds(&self, p: &Plan, _pane: &str) -> Vec<Vec<String>> {
-        vec![term::wait_working_argv(&p.agent, "20000")]
-    }
-
-    fn kick(&self, r: &dyn Runner, p: &Plan, pane: &str) -> Result<bool> {
-        self.kick_cmds(p, pane)
-            .first()
-            .map_or(Ok(false), |c| Ok(term::exec(r, c)?.code == 0))
     }
 
     fn env(&self) -> &'static [&'static str] {
@@ -181,9 +117,6 @@ impl Provider for Claude {
     }
     fn login(&self) -> Option<&'static str> {
         Some("claude /login")
-    }
-    fn install(&self) -> Option<&'static str> {
-        Some("curl -fsSL https://claude.ai/install.sh | bash")
     }
     fn hook_dialect(&self) -> Option<&'static Dialect> {
         Some(&DIALECT)

@@ -690,7 +690,7 @@ fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
         let rev = json!({"role": "rev", "agent": REV, "worktree": w, "pane": REV, "runtime": "shed"});
         ev(&c, 20, 12, "spawn", rev);
         let f = d.join("verdict.md");
-        std::fs::write(&f, "FAIL\n1. blocking a.rs:1\nProof: spec\n> AC 1\n").unwrap();
+        std::fs::write(&f, "FAIL\n1. blocking [ac] a.rs:1\nProof: spec\n> AC 1\n").unwrap();
         let r = Fake::default()
             .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", HEAD)
             .reply("gh api -X POST repos/jirathip-dev/sendmeter/statuses/", "{}")
@@ -914,4 +914,55 @@ fn clean_and_the_wip_snapshot_treat_spawns_claude_files_as_the_lanes_own() {
     let wip = saved_as(&done, "wip/impl-13-1000000-");
     let files = git(&origin, &["ls-tree", "-r", "--name-only", &wip]);
     assert_eq!(files, "notes.txt\n", "{done}");
+}
+
+#[test]
+fn clean_forgets_each_removed_worktree_on_the_build_machines_and_a_failed_forget_never_stops_it() {
+    let d = tmpdir("clean-forget");
+    let c = ctx(&d, CONFIG);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let wt = |n: &str| {
+        let p = c.worktrees.join("sendmeter").join(n);
+        std::fs::create_dir_all(&p).unwrap();
+        p.to_string_lossy().into_owned()
+    };
+    let (a, b) = (wt("issue-12"), wt("issue-14"));
+    for (issue, w) in [(12, &a), (14, &b)] {
+        let agent = format!("impl-{issue}");
+        let sp = json!({"role": "impl", "agent": agent, "worktree": w, "pane": agent, "runtime": "shed"});
+        ev(&c, 10, issue, "spawn", sp);
+        ev(
+            &c,
+            50,
+            issue,
+            "merged",
+            json!({"pr": "1", "merge_sha": "m", "into": "staging"}),
+        );
+    }
+    let r = Fake::default()
+        .reply(&format!("git -C {a} rev-list"), "0\n")
+        .reply(&format!("git -C {b} rev-list"), "0\n")
+        .reply("git -C", "")
+        .once(&format!("runners forget --dir {a}"), 3, "")
+        .reply("runners forget --dir", "");
+    let (code, out) = run(&c, &r, &["clean", "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    let calls = r.calls.borrow();
+    for w in [&a, &b] {
+        assert!(
+            calls
+                .iter()
+                .any(|l| l.ends_with(&format!("worktree remove --force {w}"))),
+            "{calls:?}"
+        );
+        assert!(calls.contains(&format!("runners forget --dir {w}")), "{calls:?}");
+    }
+    assert!(out.contains(&format!("runners forget {a} failed: exit 3")), "{out}");
+    assert!(!out.contains(&format!("runners forget {b} failed")), "{out}");
+    let all = read(&c.state).unwrap();
+    let cleaned: Vec<_> = all.iter().filter(|e| e.kind == "clean").collect();
+    assert_eq!(cleaned.len(), 2, "the failed forget does not stop the clean");
+    let logged = cleaned.iter().find(|e| e.str("worktree") == Some(a.as_str())).unwrap();
+    assert_eq!(logged.str("forget"), Some("exit 3: "));
 }

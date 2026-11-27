@@ -1,23 +1,26 @@
 # Terminal runtimes: shed (#298, #721)
 
-A lane is a coding agent running in a terminal. drover starts that terminal, types into it, reads its screen and
-closes it through one adapter, `crates/core/src/term.rs`, on **shed** (a separate project): a per-user server that
-keeps terminals alive, reads their screens and reports their state. shed is the only runtime (#721).
+A lane is a coding agent running as an ACP session in **shed** (a separate project): a per-user server that keeps
+sessions alive, reads them and reports their state. drover starts, prompts, reads and closes a lane through one
+adapter, `crates/core/src/term.rs`. shed is the only runtime (#721) and ACP its only mode (#1726).
 
 ```toml
 [runtime]
-kind = "shed"               # "shed" (a shed terminal per lane) or "shed-acp" (ACP lanes, below)
+kind = "shed-acp"           # each lane an ACP session (below); the only kind
 # socket = "~/x/shed.sock"    # default: shed's per-user socket
-# acp = "claude-acp"          # ACP mode: run this installed ACP agent instead of the harness's terminal UI
-# acp_policy = "ask"          # ACP permission requests: ask (default), allow or deny
+# acp = "claude-acp"          # the installed ACP agent lanes run (default: the role's harness's)
+# acp_policy = "allow"        # ACP permission requests: allow (default), ask or deny
 ```
 
-The kind decides where **new** lanes start. With no `[runtime]` (and no fleet or host runtime) there is none: spawn
+**Terminal lanes retired (#1726).** `kind = "shed"` (a shed terminal per lane, with the harness typed into a login
+shell) and its old name `kind = "berth"` no longer load: fleet.toml fails with a message naming `shed-acp`. Set
+`kind = "shed-acp"` there.
+
+The kind decides where **new** lanes start. With no `[runtime]` (and no fleet runtime) there is none: spawn
 and the orchestrator refuse with "no shed runtime".
 
-**Migrating from herdr (#721).** `kind = "herdr"` (in `[runtime]`, a `[fleet.<n>.runtime]` or a host's `runtime`)
-no longer loads: fleet.toml fails with a message naming `shed-acp`. Set `kind = "shed-acp"` (or `"shed"`) there, or
-`runtime = "shed-acp"` on a `[hosts.<name>]`; let live herdr lanes finish (or merge) first, since drover no longer
+**Migrating from herdr (#721).** `kind = "herdr"` (in `[runtime]` or a `[fleet.<n>.runtime]`)
+no longer loads: fleet.toml fails with a message naming `shed-acp`. Set `kind = "shed-acp"` there; let live herdr lanes finish (or merge) first, since drover no longer
 reaches them.
 
 ## How drover talks to shed
@@ -44,11 +47,9 @@ drover speaks in pane words (`term.rs`); shed answers each with JSON shapes and 
 | close a lane           | `kill`, then `rm` (so the next lane can use the name)   |
 | list lanes             | `ls`, keeping running terminals labelled `fleet`        |
 
-A shed lane's terminal is labelled `fleet`, `issue`, `role` and `harness`, kept (`keep`) across a shed server
-restart, and runs the user's login shell (`$SHELL -l`, in shed's environment). drover then types the lane's
-exports and the harness command (`exec <harness> <args>`) into that shell. So no
-token is ever in the terminal's command line, in `ps` or in shed's state file. `exec` makes the harness the
-terminal's program, so the terminal ends when the harness exits; shed then lists it `exited` with its code until
+A lane's session is labelled `fleet`, `issue`, `role` and `harness`; its adapter starts through `sh -c` with the
+lane's exports, and its secrets are sourced from a file the start removes. So no token is ever in the session's
+command line, in `ps` or in shed's state file. The session ends when the adapter exits; shed then lists it `exited` with its code until
 drover removes it, and `drover check` alerts `lane-dead` with the cause (#1053), and for a crash the exit code or
 signal (shed's 128 + N), the terminal's last three lines (the adapter's stderr) and the last ACP event (#1311).
 
@@ -60,9 +61,9 @@ In a shed terminal `$SHED` names the terminal. The lane's hook (`drover hook`, t
 then reports the turn's state with shed's `state` method:
 
 - `working` when a prompt is submitted or a tool is used (Claude Code `UserPromptSubmit`, `PreToolUse`,
-  `PostToolUse`; Hermes `pre_tool_call`, `post_tool_call`);
+  `PostToolUse`);
 - `blocked` when the harness waits on a person (Claude Code `Notification`);
-- `done` at a turn's end (Claude Code `Stop`; Hermes `on_session_end`).
+- `done` at a turn's end (Claude Code `Stop`).
 
 `drover profiles sync` adds the `UserPromptSubmit` and `Notification` hooks to the Claude profiles. A failed report
 is printed on stderr and never blocks the tool call. The kick's confirmation (`wait --until working blocked`) and the
@@ -122,7 +123,7 @@ Workflow list reads: `source=drover`, `group=<repo name>`, `item=#<issue>`, `rol
 
 **The guard.** The adapter after `--` is the installed agent's command (`shed agents --json`), run by `sh` after the
 lane's exports (`DROVER_LANE`, `DROVER_PORT`, the fleet's `env`; #923: the adapter signs in with the host's own
-login and gets no token, and a lane on another host signs in through the main host's token proxy). It
+login and gets no token). It
 sets the role's model as `ANTHROPIC_MODEL`, copies the lane's synced profile (`~/.config/drover/claude/<profile>`)
 into the worktree as `.claude/settings.local.json` and `CLAUDE.local.md`, and unsets `$SHED`. The claude-acp adapter
 runs Claude Code with its user, project and local settings, so the profile's `settings.json` applies:
@@ -141,32 +142,16 @@ ACP event history (prompts, tool calls with their status, replies), not a screen
 **Fail closed (#508).** A lane that drover's hook would not guard does not start: spawn, and its dry run, refuse
 `ACP_UNGUARDED` before anything is made. That happens when the harness and adapter pair is not one known to run the
 hook (today only `claude` with `claude-acp`), when the profile's `settings.json` has no drover `PreToolUse` hook
-(run `drover profiles sync`). #637: on another host an ACP lane runs only on a `runtime = "shed-acp"` host, where its guard is
-proven, and it signs in through the token proxy, never with a token there (docs/hosts.md). shed's
+(run `drover profiles sync`). shed's
 `--policy` has no per-command rules, so a hook-less adapter has no fallback guard. Not carried over from a pane
 yet: the role's `effort` and its `mcp` servers (the bridge's `session/new` passes none).
 
-**Agent and provider per role (#732).** A role may name its own ACP agent over the runtime's `acp`, with its `model`
-and `effort`; `harness` then follows from the agent (`claude-acp` is `claude`, `codex-acp` is `codex`):
-
-```toml
-[fleet.drover.role.rev]
-agent = "codex-acp"
-model = "gpt-5.5"
-effort = "high"
-```
-
-Each agent's provider is known (`claude-acp` anthropic, `codex-acp` openai, `gemini-acp` google). Once a fleet's
-`impl` or `rev` names an `agent`, its config refuses to load (`REVIEW_SAME_PROVIDER`) while `rev` runs on `impl`'s
-provider (a role without `agent` counts as the runtime's), unless the fleet sets `rev_same_provider = true # <why>`;
-the reason comment on that line is required. The verify role may share either. A fleet naming no `agent` loads as
-before.
-
-A codex lane signs in with the host's own Codex login (`codex login`). Its guard is the same `drover hook`, given to codex-acp in its session config (`CODEX_CONFIG`, from
-the profile's `codex-config.json`) with Codex's hook-trust review bypassed, since a lane has no one to answer it;
-Codex hooks speak Claude Code's protocol, and an `apply_patch` edit is judged on its patch text. The role prompt goes
-first in `AGENTS.override.md`, ahead of the repo's own `AGENTS.md`. `drover config apply` runs `profiles sync`
-itself, so a role it adds is guarded (and a Hermes profile's hook approved) before doctor looks.
+**Agent per role (#732, #1694).** A role may name any ACP agent shed lists over the runtime's `acp`; one with no
+drover module runs judged ([lanes/agents](lanes/agents.md)). Once a fleet's `impl` or `rev` names an `agent`, a rev
+spawn is refused `REVIEW_SAME_PROVIDER` while `rev` runs on the program `impl` runs (shed's list says which; a role
+without `agent` counts as the runtime's), unless the fleet sets `rev_same_provider = true # <why>`; the reason comment
+on that line is required. `drover config apply` runs `profiles sync` itself, so a role it adds is guarded before
+doctor looks.
 
 **Orchestrators (#608).** A thread whose fleet (for an `all` thread, the fleet whose orchestrator role it runs on) is on
 `shed-acp` starts its orchestrator the same way: `shed run --acp <acp> --policy <acp_policy> --name orchestrator-<thread>
@@ -205,7 +190,7 @@ adapter loads both the same way. The tests in `crates/cli/tests/shed.rs` cover s
    oldest shed protocol it accepts (`shed::MIN_PROTOCOL`); spawn and `doctor` refuse `SHED_VERSION` only when serve's
    protocol is under it (or newer than shed's own window still serves), naming both. A shed on PATH of another
    build than serve is shown by `doctor` as info, never refused.
-2. Set `[runtime] kind = "shed"` in fleet.toml on the main host (and on another host's fleet.toml if its lane hooks
+2. Set `[runtime] kind = "shed-acp"` in fleet.toml on the main host (and on another host's fleet.toml if its lane hooks
    should use a non-default socket; without one, the hook uses shed's default socket).
 3. Run `drover profiles sync` so the Claude profiles get the state hooks.
 
@@ -217,6 +202,5 @@ The acceptance trial is one drover lane on shed end to end (spawn, push, review,
 
 ## berth, shed's old name (#455)
 
-shed was called berth. For one release drover still accepts `kind = "berth"`: it runs shed, prints a one-line
-deprecation warning, and `drover doctor` flags it. The lane hook reads `$BERTH` when `$SHED` is unset, and drive
+shed was called berth. `kind = "berth"` no longer loads (#1726), like `kind = "shed"`. The lane hook reads `$BERTH` when `$SHED` is unset, and drive
 reads `berth.seq` once when `shed.seq` is missing.

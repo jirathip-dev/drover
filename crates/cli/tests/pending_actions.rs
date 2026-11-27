@@ -18,7 +18,7 @@ fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: Value) {
 }
 
 fn started(sh: &FakeShed) -> usize {
-    sh.all("run").iter().filter(|p| p["name"] == IMPL).count()
+    sh.sent(IMPL).iter().filter(|t| t.starts_with("# Brief")).count()
 }
 
 fn fake(level: &str) -> Fake {
@@ -107,7 +107,10 @@ fn an_answer_for_a_gone_lane_is_pending_and_two_racing_passes_start_it_once() {
     let second = Shared::<Vec<String>>::default();
     let race = || {
         std::thread::scope(|s| {
-            let b = s.spawn(|| run(&c, &calm, &["kick", "sendmeter", "12", "--now"]));
+            let b = s.spawn(|| {
+                sh.config("");
+                run(&c, &calm, &["kick", "sendmeter", "12", "--now"])
+            });
             second.borrow_mut().push(b.join().unwrap().1);
         });
     };
@@ -146,7 +149,7 @@ fn a_start_held_by_host_load_alone_never_goes_back_to_the_owner_and_starts_once_
         "agent": "sendmeter-impl-12"});
     ev(&c, 20, "needs-decision", ask);
     let load = Out {
-        stdout: "{ 40.00 3.00 2.00 }\n".into(),
+        stdout: iostat(5),
         ..Out::default()
     };
     let swapd = Out {
@@ -155,10 +158,7 @@ fn a_start_held_by_host_load_alone_never_goes_back_to_the_owner_and_starts_once_
     };
     let loaded = Fake {
         replies: [
-            vec![
-                ("sysctl -n vm.loadavg".to_string(), load),
-                ("ps -Ao".to_string(), swapd),
-            ],
+            vec![("iostat".to_string(), load), ("ps -Ao".to_string(), swapd)],
             fake("1").replies,
         ]
         .concat(),

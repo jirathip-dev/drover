@@ -1034,7 +1034,7 @@ fn issue_1238_a_respawned_review_is_one_round_and_the_sheet_shows_ci_and_each_st
     let last = find(&sheet, "v-rev");
     assert_eq!(
         (&last["badge"], &last["value"]),
-        (&json!({"text": "PASS", "tone": "ok"}), &json!("2/3"))
+        (&json!({"text": "PASS", "tone": "ok"}), &json!("2"))
     );
     assert_eq!(find(&sheet, "pr")["subtitle"], "count rounds once");
     assert_eq!(
@@ -1351,7 +1351,7 @@ fn a_hidden_card_returns_on_a_new_reason_state_or_head_sha_and_not_otherwise() {
                 );
             }
             "state" => {
-                let d = json!({"code": "ROUND_LIMIT", "reason": "out"});
+                let d = json!({"code": "STUCK", "reason": "out"});
                 append(&c.state, &Event::new(T, "sendmeter", Some(17), "needs-human", d)).unwrap();
             }
             _ => head(&c, 17, "b"),

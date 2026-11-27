@@ -9,16 +9,13 @@ use std::sync::Mutex;
 
 static ONE: Mutex<()> = Mutex::new(());
 const ADDR: &str = "127.0.0.1:7777";
-const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
+const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"claude\"\nprofile = \"fleet-design\"\n";
 const HEAD: &str = "dddddddddddddddddddddddddddddddddddddddd";
 
 fn setup(name: &str, extra: &str) -> (drover::Ctx, FakeShed) {
     let c = ctx(&tmpdir(name), &format!("{CONFIG}{DESIGN}{extra}"));
     let sh = FakeShed::new();
     sh.attach(&c);
-    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
-    std::fs::create_dir_all(&profile).unwrap();
-    std::fs::write(profile.join("settings.json"), "{}").unwrap();
     (c, sh)
 }
 
@@ -66,6 +63,10 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
         .collect()
 }
 
+fn started(sh: &FakeShed, lane: &str) -> bool {
+    !sh.sent(lane).is_empty()
+}
+
 fn spawned(c: &drover::Ctx, role: &str) -> usize {
     kinds(c, "spawn").iter().filter(|e| e.str("role") == Some(role)).count()
 }
@@ -81,8 +82,8 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "13"]).0, 0);
     let r = fake(&c, HEAD);
     drive(&c, &r);
-    assert!(sh.called("run", "sendmeter-design-12") && !sh.called("run", "sendmeter-impl-12"));
-    assert!(sh.called("run", "sendmeter-impl-13"), "unmarked: impl at once");
+    assert!(started(&sh, "sendmeter-design-12") && !started(&sh, "sendmeter-impl-12"));
+    assert!(started(&sh, "sendmeter-impl-13"), "unmarked: impl at once");
     let wt12 = format!(
         "git -C /tmp/does-not-matter/sendmeter worktree add {} issue-12",
         wt(&c, 12)
@@ -121,7 +122,7 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     assert_eq!((p.action.as_str(), p.reason.as_deref()), ("approve", Some("HOST_BUSY")));
     assert_eq!(spawned(&c, "impl"), 1, "only #13's");
     drive(&c, &r);
-    assert!(sh.called("run", "sendmeter-impl-12"));
+    assert!(started(&sh, "sendmeter-impl-12"));
     assert_eq!((state(&c, 12).as_str(), spawned(&c, "design")), ("impl", 1));
     assert_eq!(drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12), None);
 }
@@ -164,7 +165,7 @@ fn post(s: &Server, path: &str, body: &str, cookie: &str, now: u64) -> String {
 
 fn needs_and_ask(s: &Server, cookie: &str, now: u64) -> (Value, Value) {
     let needs: Value = serde_json::from_str(&api(s, ADDR, cookie, now, "needs")).unwrap();
-    let chat: Value = serde_json::from_str(&api(s, ADDR, cookie, now, "chat")).unwrap();
+    let chat: Value = chat_all(s, ADDR, cookie, now);
     let msgs: Vec<Value> = chat["threads"]
         .as_array()
         .unwrap()
@@ -436,7 +437,7 @@ fn design_off_on_a_queued_issue_lets_impl_spawn_directly() {
     );
     let r = fake(&c, HEAD);
     drive(&c, &r);
-    assert!(sh.called("run", "sendmeter-impl-12") && !sh.called("run", "sendmeter-design-12"));
+    assert!(started(&sh, "sendmeter-impl-12") && !started(&sh, "sendmeter-design-12"));
     assert_eq!(state(&c, 12), "impl");
 }
 
@@ -456,14 +457,14 @@ fn a_paused_fleet_auto_spawns_no_design_but_the_orchestrator_still_can() {
     );
     let r = fake(&c, HEAD);
     drive(&c, &r);
-    assert!(sh.all("run").is_empty(), "{:?}", sh.methods());
+    assert!(sh.all("send").is_empty(), "{:?}", sh.methods());
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "design"]);
     assert_eq!(code, 0, "{out}");
-    assert!(sh.called("run", "sendmeter-design-12"));
+    assert!(started(&sh, "sendmeter-design-12"));
     assert_eq!(state(&c, 12), "design");
 }
 
-const ARCHITECT: &str = "\n[fleet.sendmeter.role.architect]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
+const ARCHITECT: &str = "\n[fleet.sendmeter.role.architect]\nharness = \"claude\"\nprofile = \"fleet-architect\"\n";
 
 fn adr(c: &drover::Ctx, head: &str) -> Fake {
     let w = wt(c, 12);
@@ -486,7 +487,7 @@ fn design_and_architect_run_architect_then_design_then_impl_which_links_the_adr(
     let base = fake(&c, HEAD);
     let r = Both(adr(&c, HEAD), &base);
     drive(&c, &r);
-    assert!(sh.called("run", "sendmeter-architect-12") && !sh.called("run", "sendmeter-design-12"));
+    assert!(started(&sh, "sendmeter-architect-12") && !started(&sh, "sendmeter-design-12"));
     assert!(brief(&c).contains("# ROLE: ARCHITECT") && brief(&c).contains("docs/architecture/<slug>/"));
     assert_eq!(state(&c, 12), "design");
     drive(&c, &r);
@@ -509,13 +510,13 @@ fn design_and_architect_run_architect_then_design_then_impl_which_links_the_adr(
         (Some("architect"), Some("docs/architecture/meter"))
     );
     drive(&c, &r);
-    assert!(sh.called("run", "sendmeter-design-12"), "the design comes next");
+    assert!(started(&sh, "sendmeter-design-12"), "the design comes next");
     assert_eq!((state(&c, 12).as_str(), spawned(&c, "impl")), ("design", 0));
     let r = fake(&c, &"e".repeat(40));
     drive(&c, &r);
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q2", "approve"]).0, 0);
     drive(&c, &r);
-    assert!(sh.called("run", "sendmeter-impl-12"));
+    assert!(started(&sh, "sendmeter-impl-12"));
     assert_eq!(state(&c, 12), "impl");
     let b = brief(&c);
     assert!(
@@ -573,7 +574,11 @@ fn a_superseded_design_lane_over_a_pushed_design_hands_it_off_once() {
     assert_eq!(state(&c, 12), "design");
     c.now += 1000;
     let r = fake(&c, HEAD);
-    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "design", "--supersede"]);
+    let (code, out) = run(
+        &c,
+        &r,
+        &["spawn", "sendmeter", "12", "design", "--supersede", "--why", "redo"],
+    );
     assert_eq!(code, 0, "{out}");
     assert_eq!(spawned(&c, "design"), 2);
     let out = drive(&c, &r);
@@ -804,7 +809,7 @@ fn a_recipe_tool_the_main_host_lacks_ends_the_design_turn_blocked_before_it_star
     let card = &kinds(&c, "needs-human")[0];
     assert_eq!(card.str("code"), Some("LANE_BLOCKED"));
     assert!(card.str("reason").unwrap().contains("missing tool blender"));
-    assert!(!sh.called("run", "sendmeter-design-12") && spawned(&c, "design") == 0);
+    assert!(!started(&sh, "sendmeter-design-12") && spawned(&c, "design") == 0);
     assert!(!Path::new(&wt(&c, 12)).join(".brief.md").exists(), "nothing drawn");
     assert_eq!(state(&c, 12), "needs-human");
 }
@@ -813,6 +818,7 @@ fn staged(name: &str, flag: &str) -> (drover::Ctx, std::path::PathBuf, RealGit, 
     let (c, w, sh) = repo(&tmpdir(name));
     let toml = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(&c.config, format!("{toml}{ARCHITECT}")).unwrap();
+    synced(&c);
     let t = run(&c, &Fake::default(), &["thread", "new", "sendmeter", "meter"]);
     assert!(t.0 == 0 && t.1.contains("t1"), "{}", t.1);
     set_env("DROVER_THREAD", "t1");
@@ -1159,7 +1165,7 @@ fn a_stale_approve_after_a_revise_starts_no_impl_until_a_new_design_ask_is_appro
     assert_eq!(code, 0, "{out}");
     c.now += 1000;
     drive(&c, &r);
-    assert!(!sh.called("run", "sendmeter-impl-12"), "the stale approve started impl");
+    assert!(!started(&sh, "sendmeter-impl-12"), "the stale approve started impl");
     assert_eq!((state(&c, 12).as_str(), spawned(&c, "design")), ("design", 2));
     let r2 = fake(&c, &"e".repeat(40));
     drive(&c, &r2);
@@ -1168,7 +1174,7 @@ fn a_stale_approve_after_a_revise_starts_no_impl_until_a_new_design_ask_is_appro
     c.now += 1000;
     drive(&c, &r2);
     assert!(
-        sh.called("run", "sendmeter-impl-12"),
+        started(&sh, "sendmeter-impl-12"),
         "the new design's approve starts impl"
     );
 }
@@ -1191,4 +1197,76 @@ fn a_design_stage_left_with_no_lane_and_its_flag_off_shows_on_waiting() {
     let (code, w) = run(&c, &r, &["waiting", "sendmeter"]);
     assert_eq!(code, 0, "{w}");
     assert!(w.contains("#12") && w.contains("drover spawn sendmeter 12 impl"), "{w}");
+}
+
+struct Hung<'a>(&'a dyn Runner, String);
+impl Runner for Hung<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        if prog == "git" && args.contains(&self.1) {
+            let stderr = format!("{} is on a disk that is not answering", self.1);
+            return Ok(Out {
+                code: 124,
+                stdout: String::new(),
+                stderr,
+            });
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+#[test]
+fn a_pushed_round_whose_worktree_git_does_not_answer_waits_for_its_ask_instead_of_a_respawn() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    for (flag, role, what, file) in [
+        ("--design", "design", "Design", "docs/design/meter/index.html"),
+        (
+            "--architect",
+            "architect",
+            "Architecture (ADR)",
+            "docs/architecture/meter/adr.md",
+        ),
+    ] {
+        let (mut c, w, r, sh) = staged(&format!("{role}-hung-round"), flag);
+        let lane = kinds(&c, "spawn")[0].str("agent").unwrap().to_string();
+        sh.set(&lane, |t| t["reported"] = json!({"state": "working"}));
+        let head = push(&w, &[(file, "# round\n")]);
+        sh.set(&lane, |t| t["reported"] = json!({"state": "done", "note": "end_turn"}));
+        c.now += 300;
+        drive(&c, &Hung(&r, w.display().to_string()));
+        let respawned = |c: &drover::Ctx| {
+            kinds(c, "respawn").len()
+                + kinds(c, "driven")
+                    .iter()
+                    .filter(|e| e.str("step") == Some("respawn"))
+                    .count()
+        };
+        assert_eq!(
+            (respawned(&c), spawned(&c, role)),
+            (0, 1),
+            "{role}: respawned over a pushed round"
+        );
+        drive(&c, &r);
+        let asks = kinds(&c, "needs-decision");
+        let (code, flow) = run(&c, &r, &["waiting", "sendmeter", "--flow"]);
+        assert_eq!((code, asks.len()), (0, 1), "{role}: {flow}");
+        let q = asks[0].str("question").unwrap();
+        assert!(q.contains(&format!("{what} for #12 is ready ({head:.7})")), "{q}");
+        assert_eq!((respawned(&c), state(&c, 12).as_str()), (0, "design-review"), "{flow}");
+        assert!(flow.contains("owner") && !flow.contains("respawning"), "{flow}");
+        assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "make it blue"]).0, 0);
+        c.now += 1000;
+        drive(&c, &r);
+        assert_eq!(spawned(&c, role), 2, "{role}: the revise");
+        let lane = kinds(&c, "spawn").last().unwrap().str("agent").unwrap().to_string();
+        sh.set(&lane, |t| t["reported"] = json!({"state": "done", "note": "end_turn"}));
+        c.now += 300;
+        drive(&c, &r);
+        assert_eq!(
+            kinds(&c, "design-review").len(),
+            1,
+            "{role}: the reviewed head asks once"
+        );
+        assert!(respawned(&c) > 0, "{role}: nothing new over the reviewed head respawns");
+    }
 }

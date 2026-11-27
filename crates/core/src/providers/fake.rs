@@ -1,7 +1,4 @@
 use super::Provider;
-use crate::term;
-use crate::spawn::Plan;
-use crate::Ctx;
 
 pub struct Fake;
 pub static PROVIDER: Fake = Fake;
@@ -9,9 +6,6 @@ pub static PROVIDER: Fake = Fake;
 impl Provider for Fake {
     fn vendor(&self) -> Option<&'static str> {
         Some("fake")
-    }
-    fn start_cmd(&self, _ctx: &Ctx, _p: &Plan, pane: &str) -> Vec<String> {
-        term::run_argv(pane, &["fake-cli", "--go"])
     }
     fn env(&self) -> &'static [&'static str] {
         &["FAKE_QUIET=1"]
@@ -25,7 +19,6 @@ impl Provider for Fake {
 mod tests {
     use crate::config::Config;
     use crate::spawn::Plan;
-    use crate::Ctx;
     use std::path::PathBuf;
 
     const FLEET: &str = "[fleet.app]\nrepo = \"o/app\"\nlocal = \"/x/app\"\nintegration = \"staging\"\n\
@@ -58,23 +51,8 @@ mod tests {
             mcp_file: wt.join(".mcp.lane.json"),
             head: s(),
             title: s(),
-            session: None,
-            lane_key: None,
-            sandbox: None,
-        }
-    }
-
-    fn ctx() -> Ctx {
-        let d = PathBuf::from("/nowhere");
-        Ctx {
-            config: d.join("fleet.toml"),
-            state: d.join("events.jsonl"),
-            worktrees: d.join("w"),
-            homes: std::collections::BTreeMap::default(),
-            exe: "drover".into(),
-            now: 0,
-            home: d,
-            hints: vec![],
+                sandbox: None,
+            account: None,
         }
     }
 
@@ -95,9 +73,8 @@ mod tests {
     }
 
     #[test]
-    fn a_lane_launches_with_its_command_and_env() {
+    fn a_lane_launches_with_its_env() {
         let p = plan();
-        assert_eq!(p.start_cmd(&ctx(), "w1:p1"), crate::term::run_argv("w1:p1", &["fake-cli", "--go"]));
         let shell = p.lane_cmd("w1:p1").join(" ");
         assert!(shell.contains("FAKE_QUIET=1"), "{shell}");
     }

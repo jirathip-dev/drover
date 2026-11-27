@@ -1,0 +1,13 @@
+flow = "rollout"
+states = ["open"]
+reads = []
+ignores = ["lane", "host", "pr", "verdict", "ask", "turn"]
+
+[[row]]
+id = "draft"
+when = {  }
+do = "tell-orchestrator"
+then = ["tell-orchestrator", "to-owner"]
+owner = "orchestrator"
+timeout = "escalate_minutes"
+say = "the orchestrator drafts the rollout"

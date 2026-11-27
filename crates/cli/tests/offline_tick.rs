@@ -64,7 +64,7 @@ fn main_host() -> Fake {
 
 fn setup(name: &str, air_cfg: &str, limits: &str) -> (drover::Ctx, FakeShed) {
     let base = CONFIG
-        .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+        .replace("harness  =  \"claude\"", "harness = \"claude\"")
         .replace("[limits]\n", &format!("[limits]\n{limits}"));
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n{air_cfg}");
     let c = ctx(&tmpdir(name), &toml);
@@ -107,29 +107,22 @@ fn a_host_that_drops_after_its_probe_costs_one_timeout_and_drive_still_starts() 
         );
         assert!(r.2.get() <= 10, "{name}: {} s on the Air", r.2.get());
         assert!(
-            sh.called("run", "sendmeter-impl-12"),
+            sh.has("sendmeter-impl-12"),
             "{name}: drive's full pass starts #12 on the main host: {out}"
         );
     }
 }
 
 #[test]
-fn a_tick_past_its_budget_skips_the_rest_says_so_and_ends() {
+fn a_tick_past_its_budget_runs_no_housekeeping_and_still_starts_local_work() {
     let (c, sh) = setup("drop-budget", "", "slow_secs = 0\n");
     let r = Dropped::new(main_host());
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert!(r.timeouts().len() <= 1, "only the sweep tries air: {:#?}", r.timeouts());
-    assert!(
-        out.contains("tick: past its 0 s budget; skipped: clean, lesson, triage"),
-        "{out}"
-    );
-    assert!(!c.state.with_file_name("clean.at").exists(), "no clean: {out}");
+    assert!(!out.contains("removed "), "the tick cleans nothing: {out}");
     assert!(!out.contains("compact:") && !out.contains("sendmeter lesson"), "{out}");
-    assert!(
-        sh.called("run", "sendmeter-impl-12"),
-        "drive still starts local work: {out}"
-    );
+    assert!(sh.has("sendmeter-impl-12"), "drive still starts local work: {out}");
 }
 
 fn crashed_on_air(c: &drover::Ctx) -> String {
@@ -167,10 +160,7 @@ fn a_tick_past_its_budget_still_pushes_a_remote_lanes_commits_every_pass() {
             !out.contains("not sent (the tick past its budget)"),
             "pass {pass}: {out}"
         );
-        assert!(
-            out.contains("tick: past its 0 s budget; skipped: clean, lesson, triage, deps, hotspots, compact"),
-            "pass {pass}: {out}"
-        );
+        assert!(!out.contains("removed "), "pass {pass}: the tick cleans nothing: {out}");
     }
 }
 

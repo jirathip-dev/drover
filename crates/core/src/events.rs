@@ -416,14 +416,9 @@ pub struct IssueState {
     /// The latest lane's reasoning effort, as spawned.
     pub effort: Option<String>,
     pub rounds: u32,
-    /// Extra rounds the owner allowed (`round-extended`); the latest grants the round after any stage's.
-    pub extra: u32,
-    pub granted: u32,
     /// Passed `--update` rounds, apart from `rounds`; `updating` while one is open (state `fix(n)+uk`).
     pub updates: u32,
     pub updating: bool,
-    /// Update rounds the owner allowed past `update_rounds` (`round-extended` on an `UPDATE_LIMIT` card).
-    pub update_extra: u32,
     pub last_ts: u64,
     pub last_event: String,
     /// Latest agent per role (impl, rev).
@@ -437,6 +432,8 @@ pub struct IssueState {
     pub stage_rounds: BTreeMap<String, u32>,
     /// `FAIL (form-only)` verdicts that did not count toward the rounds.
     pub form: u32,
+    /// Worktrees its lanes were spawned in (an agent: a spawn naming none) and not cleaned since.
+    pub worktrees: std::collections::BTreeSet<String>,
 }
 
 /// Per-issue state, keyed by (fleet, issue).
@@ -697,7 +694,14 @@ pub fn working(path: &Path) -> Result<Arc<Log>> {
 }
 
 const WORKING: &str = concat!(
-    "archived = 0 AND seq <= ?1 AND type NOT IN ('build-cloned', 'build-reused') AND (seq > ?1 - 10000",
+    "archived = 0 AND seq <= ?1 AND type NOT IN ('build-cloned', 'build-reused')",
+    " AND (issue IS NULL OR (fleet, issue) NOT IN (SELECT fleet, issue FROM states WHERE done = 2",
+    " EXCEPT SELECT fleet, issue FROM events WHERE seq > ?1 - 10000))",
+    " AND (type NOT IN ('thread-msg', 'thread-read') OR seq IN (SELECT MAX(seq) FROM events WHERE type IN",
+    " ('thread-msg', 'thread-read') GROUP BY type, json_extract(json, '$.thread')) OR json_extract(json, '$.thread') NOT IN",
+    " (SELECT t FROM (SELECT json_extract(json, '$.thread') AS t, type, MAX(seq) FROM events",
+    " WHERE type IN ('thread-archive', 'thread-restore') GROUP BY t) WHERE type = 'thread-archive'))",
+    " AND (seq > ?1 - 10000",
     " OR (fleet, issue) IN (SELECT fleet, issue FROM states WHERE done = 0)",
     " OR seq IN (SELECT MAX(seq) FROM events WHERE seq <= ?1 AND type IN ('driven', 'kick', 'drive-pass', 'lane-state', 'conflict-predicted', 'intent', 'push-sent', 'pass-slow')",
     " GROUP BY type, fleet, issue, json_extract(json, '$.agent'), json_extract(json, '$.step'))",
@@ -706,7 +710,7 @@ const WORKING: &str = concat!(
     " OR (fleet, issue) IN (SELECT fleet, issue FROM events WHERE seq > ?1 - 10000) OR type GLOB 'ask-*' OR type IN (",
     "'needs-decision', 'decision', 'queue', 'merged', 'closed', 'closed-other', 'why', ",
     "'premerge-failed', 'landed', 'revert-opened', ",
-    "'revert-failed', 'reverted', 'land-fix', 'land-bisect', 'lesson-skipped', 'compacted', 'compact-undone'",
+    "'revert-failed', 'reverted', 'land-fix', 'land-bisect', 'job-filed', 'compacted', 'compact-undone'",
     ")))"
 );
 
@@ -765,7 +769,7 @@ fn catch_up(path: &Path, l: &mut Arc<Log>, last: u64, key: (Option<u64>, Option<
     let fresh = l.seq == 0 && l.events.is_empty();
     let (mut new, states, asks) = crate::db::since(path, l.seq, fresh, (live && fresh).then_some(WORKING))?;
     if fresh {
-        new.extend(crate::db::lanes(path)?);
+        new.extend(crate::db::lanes(path, live)?);
         new.sort_by_key(|e| e.seq);
         new.dedup_by_key(|e| e.seq);
     }
@@ -965,6 +969,12 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
             ..Default::default()
         };
         let s = m.entry((e.fleet.clone(), n)).or_insert_with(new);
+        match (e.kind.as_str(), e.str("worktree")) {
+            ("clean" | "clean-settled", Some(w)) => drop(s.worktrees.remove(w)),
+            ("spawn", w) => s.worktrees.extend(w.or(e.str("agent")).map(String::from)),
+            (k, Some(w)) if k.starts_with("spawn") => drop(s.worktrees.insert(w.into())),
+            _ => {}
+        }
         let back = matches!(e.kind.as_str(), "reverted" | "land-fix");
         if e.is_passive() || s.state == "merged" && !back || s.state == "closed" && e.kind != "spawn" {
             continue;
@@ -1055,11 +1065,6 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
             "round-extended" if s.state == "needs-human" && s.card() == "start lane" => s.state = "queued".into(),
             "round-extended" => {
                 let on = |k: &str| e.data.get(k) == Some(&Value::Bool(true));
-                if on("update") {
-                    s.update_extra += 1;
-                } else {
-                    (s.extra, s.granted) = (s.extra + 1, s.stage_rounds.values().max().unwrap_or(&0) + 1);
-                }
                 if s.state == "needs-human" && on("update") && on("spawn") {
                     s.state = "ready".into();
                 } else if s.state == "needs-human" && on("queued") {
@@ -1133,7 +1138,7 @@ pub const STATES: &[(&str, &[(&str, &str)])] = &[
         &[
             ("ready", "PASS at head"),
             ("fix(n)", "FAIL at head"),
-            ("needs-human", "ROUND_LIMIT after review_rounds"),
+            ("needs-human", "STUCK: the same blocking finding in 3 FAILs in a row"),
         ],
     ),
     (
@@ -1150,15 +1155,16 @@ pub const STATES: &[(&str, &[(&str, &str)])] = &[
         "ready",
         &[
             ("review(n)", "verify stage at head for ui_paths, a verify or repro mark"),
-            (
-                "fix(n)",
-                "update round +uN when behind or conflicting, UPDATE_LIMIT after update_rounds",
-            ),
+            ("fix(n)", "update round +uN when behind or conflicting"),
             (
                 "merged",
                 "squash-merge into one commit, with PASS at head and CI green, no STAGING_WOULD_BREAK",
             ),
             ("blocked", "merge refused, or PR closed outside drover"),
+            (
+                "needs-human",
+                "STUCK: CI red at the same check for 2 fix rounds, or still conflicting after 2 update rounds",
+            ),
         ],
     ),
     (
@@ -1219,6 +1225,11 @@ impl IssueState {
     /// Merged, or closed on GitHub: no lane, alert or queue slot any more.
     pub fn done(&self) -> bool {
         self.state == "merged" || self.state == "closed"
+    }
+
+    /// Done with every worktree cleaned: its saved row is final, its events are never read again.
+    pub fn settled(&self) -> bool {
+        self.done() && self.worktrees.is_empty()
     }
 
     /// The lane that should be working now: impl in impl/fix, rev in review; none once ready, blocked or merged.

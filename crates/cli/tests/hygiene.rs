@@ -24,6 +24,7 @@ fn hook(d: &Path, cwd: &Path, lane: &str, args: &[&str], stdin: &str) -> (i32, S
     let mut child = Command::new(env!("CARGO_BIN_EXE_drover"))
         .env_remove("DROVER_RULES")
         .env_remove("DROVER_SCRATCH_TARGET")
+        .env("HOME", d)
         .env("DROVER_LANE", lane)
         .env("FLEET_CONFIG", d.join("fleet.toml"))
         .env("FLEET_STATE", d.join("state/events.jsonl"))
@@ -98,12 +99,6 @@ fn a_private_name_is_refused_by_its_list_index_and_hosts_by_kind() {
     let out = bash(
         &d,
         "open",
-        "gh pr create --title t --body 'session 0b1c2d3e-1111-2222-3333-444455556666'",
-    );
-    assert!(out.contains("session-id"), "{out}");
-    let out = bash(
-        &d,
-        "open",
         "gh pr create --title t --body 'Acme is a placeholder, as is Globexx'",
     );
     assert!(!out.contains("PUBLIC_LEAK"), "whole names only: {out}");
@@ -133,56 +128,79 @@ fn a_host_name_is_a_leak_only_where_it_is_used_as_a_hostname() {
     }
 }
 
-fn repo(d: &Path, text: &str) -> String {
-    let wt = d.join("wt");
-    std::fs::create_dir_all(&wt).unwrap();
-    let git = |a: &[&str]| {
-        let o = Command::new("git").args(a).current_dir(&wt).output().unwrap();
-        assert!(o.status.success(), "{a:?}: {}", String::from_utf8_lossy(&o.stderr));
-        String::from_utf8(o.stdout).unwrap()
-    };
-    git(&["init", "-q"]);
-    std::fs::write(wt.join("hosts.md"), text).unwrap();
-    git(&["add", "."]);
-    git(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "docs"]);
-    git(&["rev-parse", "HEAD"]).trim().to_string()
+#[test]
+fn a_public_gatt_service_uuid_is_no_session_id() {
+    let d = dir("hygiene-gatt");
+    let out = bash(
+        &d,
+        "open",
+        "gh pr create --title t --body 'the service is 7e4e1701-1ea6-40c9-9dcc-13d34ffead57'",
+    );
+    assert!(!out.contains("PUBLIC_LEAK"), "{out}");
 }
 
-fn push(d: &Path, fleet: &str, sha: &str) -> (i32, String) {
-    let line = format!("refs/heads/issue-24 {sha} refs/heads/issue-24 {}\n", "0".repeat(40));
-    hook(
-        d,
-        &d.join("wt"),
-        &format!("{fleet}:24:impl"),
-        &["--git-pre-push"],
-        &line,
-    )
+fn session_file(d: &Path, id: &str) {
+    let dir = d.join(".claude/projects/-wt-x");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(format!("{id}.jsonl")), "{}\n").unwrap();
 }
 
 #[test]
-fn a_pushed_commit_naming_a_fleet_host_is_refused_only_in_a_public_fleet() {
-    let d = dir("hygiene-push");
-    let sha = repo(&d, "# Hosts\n\nThe lanes run on me@bazzite.\n");
-    let (code, out) = push(&d, "open", &sha);
-    assert_eq!(code, 1, "{out}");
-    assert!(
-        out.contains("PUBLIC_LEAK") && out.contains("hosts.md:3 has a host"),
-        "{out}"
+fn a_uuid_drover_or_the_provider_knows_as_a_session_is_still_refused() {
+    let d = dir("hygiene-known-session");
+    let filed = "0b1c2d3e-1111-2222-3333-444455556666";
+    session_file(&d, filed);
+    let logged = "9f8e7d6c-aaaa-bbbb-cccc-ddddeeeeffff";
+    let start = Event::new(
+        1,
+        "open",
+        None,
+        "orchestrator-start",
+        json!({"thread": "t1", "session": logged}),
     );
-    assert!(!out.contains("bazzite"), "{out}");
-    assert_eq!(push(&d, "closed", &sha).0, 0, "the fleet.toml flag: private");
-    let cache = d.join("state/cache/visibility-cached-0.json");
-    std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    let cached = json!({"ts": now, "repo": "o/cached", "public": false});
-    std::fs::write(&cache, cached.to_string()).unwrap();
-    assert_eq!(push(&d, "cached", &sha).0, 0, "the cached visibility: private");
-    let d = dir("hygiene-push-clean");
-    let clean = repo(&d, "# Hosts\n\nThe lanes run on the main host.\n");
-    assert_eq!(push(&d, "open", &clean).0, 0);
+    append(&d.join("state/events.jsonl"), &start).unwrap();
+    for id in [filed, &logged.to_uppercase()] {
+        let out = bash(&d, "open", &format!("gh pr create --title t --body 'resume {id}'"));
+        assert!(
+            out.contains("REFUSED PUBLIC_LEAK") && out.contains("--body has a session-id"),
+            "{id}: {out}"
+        );
+        assert!(!out.to_lowercase().contains(&id.to_lowercase()), "{out}");
+    }
+}
+
+#[test]
+fn a_session_id_already_on_the_integration_branch_passes() {
+    let d = tmpdir("hygiene-tree-session");
+    let (shown, kept) = (
+        "0b1c2d3e-1111-2222-3333-444455556666",
+        "1a2b3c4d-5555-6666-7777-888899990000",
+    );
+    let up = d.join("up");
+    std::fs::create_dir_all(&up).unwrap();
+    std::fs::write(up.join("ids.md"), format!("example {shown}\n")).unwrap();
+    let git = |dir: &Path, a: &[&str]| {
+        let o = Command::new("git").args(a).current_dir(dir).output().unwrap();
+        assert!(o.status.success(), "{a:?}: {}", String::from_utf8_lossy(&o.stderr));
+    };
+    git(&up, &["init", "-q", "-b", "staging"]);
+    git(&up, &["add", "."]);
+    git(
+        &up,
+        &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "ids"],
+    );
+    git(&d, &["clone", "-q", "up", "clone"]);
+    let fleet = format!(
+        "\n[fleet.open]\nrepo = \"o/open\"\nlocal = \"{}\"\nintegration = \"staging\"\npublic = true\n",
+        d.join("clone").display()
+    );
+    std::fs::write(d.join("fleet.toml"), CONFIG.to_string() + &fleet).unwrap();
+    session_file(&d, shown);
+    session_file(&d, kept);
+    let out = bash(&d, "open", &format!("gh pr create --title t --body 'see {shown}'"));
+    assert!(!out.contains("PUBLIC_LEAK"), "already public on staging: {out}");
+    let out = bash(&d, "open", &format!("gh pr create --title t --body 'see {kept}'"));
+    assert!(out.contains("session-id"), "{out}");
 }
 
 #[test]
@@ -552,4 +570,18 @@ fn push_is_the_owners_never_a_lanes_or_an_orchestrators() {
         assert!(out.contains("REFUSED OWNER_ONLY"), "{lane}: {out}");
     }
     assert!(!bash(&d, "open", "drover hygiene check --base origin/staging").contains("REFUSED"));
+}
+
+#[test]
+fn the_guard_matches_private_names_as_the_shared_set_says() {
+    let set = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/private-names");
+    let read = |f: &str| std::fs::read_to_string(set.join(f)).unwrap();
+    let check = drover::hygiene::Check {
+        private: read("names").lines().map(String::from).collect(),
+        ..Default::default()
+    };
+    let hits: Vec<String> = (read("lines.md").lines().zip(1..))
+        .filter_map(|(l, n)| Some(format!("{} at lines.md:{n}", check.find(l)?)))
+        .collect();
+    assert_eq!(hits.join("\n"), read("expect").trim());
 }

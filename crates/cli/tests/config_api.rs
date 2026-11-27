@@ -73,16 +73,16 @@ fn read_gives_every_setting_with_secrets_as_names_and_needs_a_paired_device() {
     );
     assert_eq!(
         field(&v, "fleet.sendmeter.role.impl.harness")["allowed"],
-        json!(["claude", "hermes", "dsh"])
+        json!(["claude"])
     );
     assert_eq!(
         field(&v, "fleet.sendmeter.integration")["doc"],
         json!("drover merge target; main is never a target")
     );
-    assert_eq!(field(&v, "limits.review_rounds")["kind"], json!("integer"));
+    assert_eq!(field(&v, "limits.stall_minutes")["kind"], json!("integer"));
     assert_eq!(
-        field(&v, "limits.review_rounds")["doc"],
-        json!("review rounds before an issue goes needs-human (ROUND_LIMIT)")
+        field(&v, "limits.stall_minutes")["doc"],
+        json!("a working lane with no event this long is stalled")
     );
     let token = format!("ghp_{}", "a1".repeat(18));
     std::fs::write(&c.config, text.replace("secret:STRIPE_KEY", &token)).unwrap();
@@ -180,7 +180,7 @@ fn a_fleet_is_added_removed_paused_and_resumed_with_each_logged() {
     let web = cfg.fleet("web").unwrap();
     assert_eq!((web.repo.as_str(), web.integration.as_str()), ("acme/web", "staging"));
     assert_eq!(web.role("impl").unwrap().profile.as_deref(), Some("fleet-impl"));
-    assert_eq!(web.role("rev").unwrap().harness, "hermes");
+    assert_eq!(web.role("rev").unwrap().harness, "claude");
     assert!(std::fs::read_to_string(&c.config).unwrap().starts_with(&before));
     assert_eq!(edits(&c).pop().unwrap().str("added"), Some("web"));
     let (status, v) = post("config-edit", json!({"hash": get(&s, &ck)["hash"], "remove": "web"}));

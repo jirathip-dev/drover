@@ -84,7 +84,7 @@ fn the_old_hosts_exit_events_stamp_nothing() {
         "labels": {"fleet": "sendmeter", "issue": "12", "role": "impl", "harness": "claude"},
         "event": "exited", "code": 1}));
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    drover::session::stamp::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap();
+    drover::session::stamp::intake(&c, &cfg, &drover::runner::Real, &cfg.shed().unwrap().wire).unwrap();
     assert!(states(&c).is_empty(), "{:?}", states(&c));
 }
 

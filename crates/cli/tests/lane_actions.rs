@@ -285,6 +285,61 @@ fn kill_snapshots_only_the_real_dirty_file() {
 }
 
 #[test]
+fn kill_snapshots_a_merge_of_integration_without_scanning_its_lines() {
+    let (c, wt, sh) = lane("kill-merge");
+    sh.lane(LANE, "idle", &wt);
+    let r = repo(&wt, "");
+    let g = |a: &[&str]| {
+        let o = std::process::Command::new("git").args(a).output().unwrap();
+        assert!(o.status.success(), "{a:?}: {}", String::from_utf8_lossy(&o.stderr));
+    };
+    let up = format!("{wt}-up");
+    g(&["clone", "-q", &format!("{wt}.git"), &up]);
+    let row = format!(
+        "{{\n  \"key\": \"rollout-sendmeter-12\",\n  \"note\": \"{}\"\n}}\n",
+        concat!("gh", "p_abcdefghijklmnopqrstu1234")
+    );
+    std::fs::write(format!("{up}/row.json"), row).unwrap();
+    g(&["-C", &up, "add", "-A"]);
+    g(&[
+        "-C",
+        &up,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-qm",
+        "integ",
+    ]);
+    g(&["-C", &up, "push", "-q", "origin", "HEAD:refs/heads/integ"]);
+    std::fs::remove_dir_all(&up).unwrap();
+    g(&[
+        "-C",
+        &wt,
+        "config",
+        "remote.origin.fetch",
+        "+refs/heads/lane:refs/remotes/origin/lane",
+    ]);
+    g(&["-C", &wt, "fetch", "-q", "origin", "integ"]);
+    g(&[
+        "-C",
+        &wt,
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        "Merge origin/integ into lane",
+        "FETCH_HEAD",
+    ]);
+    let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("SECRET_IN_WIP"), "{out}");
+    assert!(r.0.called(&format!("git -C {wt} push origin HEAD:refs/heads/wip/")));
+    assert!(closed(&sh), "{:?}", sh.methods());
+}
+
+#[test]
 fn kill_leaves_an_untracked_log_out_of_the_snapshot_and_in_the_worktree() {
     let (c, wt, sh) = lane("kill-log");
     sh.lane(LANE, "idle", &wt);
@@ -340,19 +395,16 @@ fn stop_sends_escape() {
 fn close_shuts_an_others_pane_and_refuses_lanes() {
     let (c, _, sh) = lane("close");
     sh.lane(LANE, "idle", "/x");
-    sh.lane("dsh-tui-test", "idle", "/tmp");
+    sh.lane("tui-test", "idle", "/tmp");
     let r = Fake::default();
-    let (code, out) = run(&c, &r, &["close", "dsh-tui-test"]);
+    let (code, out) = run(&c, &r, &["close", "tui-test"]);
     assert_eq!(
         (code, out.as_str()),
-        (0, "closed dsh-tui-test's pane; its worktree and files stay\n")
+        (0, "closed tui-test's pane; its worktree and files stay\n")
     );
-    assert!(sh.called("kill", "dsh-tui-test") && !sh.has("dsh-tui-test") && !r.called("git"));
+    assert!(sh.called("kill", "tui-test") && !sh.has("tui-test") && !r.called("git"));
     let e = read(&c.state).unwrap().to_vec().pop().unwrap();
-    assert_eq!(
-        (e.kind.as_str(), e.str("agent")),
-        ("closed-other", Some("dsh-tui-test"))
-    );
+    assert_eq!((e.kind.as_str(), e.str("agent")), ("closed-other", Some("tui-test")));
     let (code, out) = run(&c, &r, &["close", LANE]);
     assert!(code == 3 && out.starts_with("REFUSED IS_LANE"), "{out}");
     assert!(!sh.called("kill", LANE) && sh.has(LANE));
@@ -533,6 +585,7 @@ fn secret_flags_real_shapes_only() {
         "a3f9c2e1b7d4058a6e3f9c2e1b7d4058a6e3f9c2 src/x.rs",
         "    \"integrity\": \"sha512-z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpIdNs6c5H0NE8XYXysP+DGNKHfuwvY7kxvUdBeoGlODJ6+SfaPg==\",",
         "    \"apiKey\": \"config_api_key_from_env\",",
+        "\"key\": \"rollout-sendmeter-12\",",
     ] {
         assert_eq!(secret(ok), None, "{ok}");
     }
@@ -745,12 +798,12 @@ fn wip_prune_dry_run_lists_and_deletes_nothing() {
     let wip = |name: &str, file: &str| {
         git(&["-C", &l, "checkout", "-q", "--detach", "origin/staging"]);
         std::fs::create_dir_all(local.join(file).parent().unwrap()).unwrap();
-        let mut x = file.len() as u64;
+        let mut x = u64::try_from(file.len()).unwrap();
         let bytes: Vec<u8> = (0..2 << 20)
             .map(|_| {
                 (
                     x = x.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1),
-                    (x >> 56) as u8,
+                    u8::try_from(x >> 56).unwrap(),
                 )
                     .1
             })

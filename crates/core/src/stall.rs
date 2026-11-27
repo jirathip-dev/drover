@@ -13,9 +13,6 @@ use std::io::Write;
 /// A lane that shows no output this long after its spawn (or its first prompt sent again) never started.
 pub const START_SECS: u64 = 600;
 
-/// Why drive restarts a live lane the token proxy refused (401): one `self-heal` an hour per issue.
-pub const KEY_401: &str = "lane key refused";
-
 /// What drive does about a stalled lane: respawn it (`why`), or a needs-human card (code, reason).
 pub enum Act {
     Respawn(String, &'static str),
@@ -61,54 +58,27 @@ fn refusals<'a>(ev: &'a [Event], sp: &Event, role: &str) -> Vec<&'a Event> {
 }
 
 /// What to do about row `w`'s live lane that nothing else waits on, when `lanes::health` says it never started or stalled.
-pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], sessions: &Sessions, w: &Waiting) -> Option<Act> {
+pub fn stalled(ctx: &Ctx, cfg: &Config, ev: &[Event], sessions: &Sessions, w: &Waiting) -> Option<Act> {
     if w.who != "none" || w.next_cmd.is_some() {
         return None;
     }
     let s = fold(ev).remove(&(w.fleet.clone(), w.issue))?;
     let (lane, sp) = (&w.lane, last_spawn(ev, &w.lane)?);
-    let (role, on) = (sp.str("role")?, On::of(r, Some(sp)));
-    let resent = |e: &&Event| e.kind == "start-resent" && e.str("agent") == Some(lane) && e.ts >= sp.ts;
-    let resent = ev.iter().rfind(resent);
+    let role = sp.str("role")?;
     let (n, _) = crate::waiting::respawns(ev, &w.fleet, w.issue);
     let ago = |t: u64| crate::events::age(ctx.now.saturating_sub(t));
-    if let Some(x) = sessions.get(lane).filter(|x| x.key_refused()) {
-        let healed = |e: &&Event| e.is("self-heal", &w.fleet, w.issue) && e.str("why") == Some(KEY_401);
-        let Some(e) = ev.iter().rfind(healed).filter(|e| ctx.now < e.ts + 3600) else {
-            return Some(Act::Respawn(role.into(), KEY_401));
-        };
-        let note = x.note.as_deref().map(crate::lanes::mask).unwrap_or_default();
-        let why = format!("lane {lane}'s key refused again {} after its heal: {note}", ago(e.ts));
-        return Some(Act::Escalate("LANE_KEY_REFUSED", why));
-    }
     match crate::lanes::health(ctx, cfg, ev, sessions, &s) {
-        Health::NeverStarted { since } => {
-            let acp = sp.str("runtime") == Some("shed") && cfg.shed_for(&w.fleet).is_some_and(|b| b.acp.is_some());
-            let brief = sp
-                .str("worktree")
-                .and_then(|wt| on.read(&std::path::Path::new(wt).join(".brief.md")));
-            if let Some(text) = brief.filter(|_| acp && resent.is_none()) {
-                let sent = term::prompt(&on, lane, &text).is_ok();
-                let d = json!({"agent": lane, "sent": sent});
-                append(
-                    &ctx.state,
-                    &Event::new(ctx.now, &w.fleet, Some(w.issue), "start-resent", d),
-                )
-                .ok();
-                return None;
-            }
-            Some(if n == 0 {
-                Act::Respawn(role.into(), "failed start")
-            } else {
-                Act::Escalate(
-                    "START_FAILED",
-                    format!(
-                        "lane {lane} never started: no report {} after its spawn, retried once",
-                        ago(since)
-                    ),
-                )
-            })
-        }
+        Health::NeverStarted { since } => Some(if n == 0 {
+            Act::Respawn(role.into(), "failed start")
+        } else {
+            Act::Escalate(
+                "START_FAILED",
+                format!(
+                    "lane {lane} never started: no report {} after its spawn, retried once",
+                    ago(since)
+                ),
+            )
+        }),
         Health::Stalled { .. } if n == 0 => Some(Act::Respawn(role.into(), "lane stalled")),
         Health::Stalled { since } => {
             let note = sessions

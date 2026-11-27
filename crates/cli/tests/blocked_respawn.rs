@@ -42,7 +42,7 @@ fn lane(name: &str, title: &str) -> (drover::Ctx, Fake, FakeShed) {
 }
 
 fn started(sh: &FakeShed) -> bool {
-    !sh.all("run").is_empty()
+    !sh.lock().terms.is_empty()
 }
 
 fn ok(c: &drover::Ctx, r: &Fake, args: &[&str]) -> String {
@@ -115,7 +115,7 @@ fn a_blocked_issue_given_an_extra_round_is_never_respawned_and_waits_for_its_blo
     }
     let (out, steps) = drive(&at(&c, 7300), &r);
     assert_eq!(steps, ["start"], "{out}");
-    assert_eq!(sh.last("run")["name"], LANE);
+    assert!(sh.has(LANE));
 }
 
 #[test]
@@ -158,6 +158,8 @@ fn an_extra_round_for_a_lane_that_never_pushed_is_no_review_fail() {
 #[test]
 fn a_lessons_issue_done_with_no_change_and_no_pr_closes() {
     let (c, r, sh) = lane("lesson-close", "lessons: sendmeter week of 2026-11-05");
+    let filed = json!({"job": "lesson", "role": "lesson", "title": "lessons: sendmeter week of 2026-11-05"});
+    ev(&c, 9, 12, "job-filed", filed);
     ok(&c, &r, &["brief", "sendmeter", "12"]);
     let out = ok(&c, &r, &["done", "--no-change", "no repeated class", "sendmeter", "12"]);
     assert!(out.contains("closed sendmeter#12: no repeated class"), "{out}");
@@ -230,9 +232,13 @@ fn a_lane_ends_after_an_idle_trim_gets_one_respawn() {
         Some(wt.to_str().unwrap()),
         "its own worktree"
     );
-    let runs = sh.all("run");
+    let runs: Vec<_> = sh.lock().terms.values().cloned().collect();
     assert_eq!(
-        (runs.len(), runs[0]["name"].as_str(), runs[0]["cwd"].as_str()),
+        (
+            r.count("shed run --acp"),
+            runs[0]["name"].as_str(),
+            runs[0]["cwd"].as_str()
+        ),
         (1, Some(LANE), wt.to_str()),
         "its lane restarted on shed in that worktree"
     );

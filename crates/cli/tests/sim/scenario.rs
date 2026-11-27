@@ -7,13 +7,14 @@ use std::sync::Arc;
 /// 2026-11-04 22:11:25, the incident's frozen `ts`.
 pub const T0: u64 = 1_793_805_085;
 
-pub fn config(max_spawns: u64, rounds: u64) -> String {
+pub fn config(max_spawns: u64, _rounds: u64) -> String {
     format!(
         r#"[fleet.{FLEET}]
 repo = "{REPO}"
 public = false
 local = "LOCAL"
 integration = "staging"
+flow = "legacy"
 baseline = "{BASELINE}"
 
 [fleet.{FLEET}.role.impl]
@@ -25,10 +26,9 @@ harness = "claude"
 profile = "fleet-rev"
 
 [runtime]
-kind = "shed"
+kind = "shed-acp"
 
 [limits]
-review_rounds = {rounds}
 stall_minutes = 30
 max_parallel_spawns = {max_spawns}
 build_root = ""
@@ -49,7 +49,6 @@ pub fn ctx(root: &Path, now: u64) -> Ctx {
         config: root.join("config/fleet.toml"),
         state: root.join("state/events.jsonl"),
         worktrees: root.join("wt"),
-        homes: [("hermes", root.join("hermes"))].into(),
         exe: "/opt/drover/bin/drover".into(),
         now,
         home: root.join("home"),
@@ -64,12 +63,9 @@ pub fn setup(root: &Path, cfg: &str) {
     std::fs::create_dir_all(root.join("config")).unwrap();
     let cfg = cfg.replace("LOCAL", &local.display().to_string());
     std::fs::write(root.join("config/fleet.toml"), cfg).unwrap();
-    for p in ["fleet-impl", "fleet-rev", "fleet-verify"] {
-        let d = root.join("config/claude").join(p);
-        std::fs::create_dir_all(&d).unwrap();
-        std::fs::write(d.join("settings.json"), "{}").unwrap();
-        std::fs::write(d.join("role.md"), "role").unwrap();
-    }
+    let c = ctx(root, T0);
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    drover::spawn::profiles_sync(&c, &cfg, "", &mut std::io::sink()).unwrap();
 }
 
 /// The three timers launchd runs, each first at a seeded offset.
@@ -121,7 +117,7 @@ pub fn due(sim: &Arc<Sim>, w: &mut World) {
                     .filter(|&i| w.procs[i].live() && w.procs[i].started.is_some() && w.procs[i].args[0] == kind)
                     .collect();
                 if !live.is_empty() {
-                    let i = live[usize::try_from(w.rng.below(live.len() as u64)).unwrap()];
+                    let i = live[usize::try_from(w.rng.below(u64::try_from(live.len()).unwrap())).unwrap()];
                     w.procs[i].killed = true;
                     let name = w.procs[i].name.clone();
                     w.log(&format!("crash {name}"));
@@ -210,9 +206,9 @@ fn lane(sim: &Arc<Sim>, w: &mut World, id: &str, step: u8) {
             let fixed = step == 2 || proof;
             let body = match (pass, fixed) {
                 (true, _) => format!("PASS\n\nReviewed head: {head}\n\nAll criteria met.\n"),
-                (false, false) => format!("FAIL\n\nReviewed head: {head}\n\n- blocking [correctness] src/lib.rs:10: wrong\n"),
+                (false, false) => format!("FAIL\n\nReviewed head: {head}\n\n- blocking [ac] src/lib.rs:10: wrong\n"),
                 (false, true) => format!(
-                    "FAIL\n\nReviewed head: {head}\n\n- blocking [correctness] src/lib.rs:10: wrong\n  Proof: spec\n  > AC 1: it works\n  src/lib.rs:10\n"
+                    "FAIL\n\nReviewed head: {head}\n\n- blocking [ac] src/lib.rs:10: wrong\n  Proof: spec\n  > AC 1: it works\n  src/lib.rs:10\n"
                 ),
             };
             if pass || fixed {
@@ -230,10 +226,11 @@ fn write_verdict(cwd: &str, body: &str, now: u64) {
     let f = Path::new(cwd).join("verdict.md");
     std::fs::write(&f, body).unwrap();
     let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(now);
-    let _ = std::fs::File::options()
+    std::fs::File::options()
         .write(true)
         .open(&f)
-        .and_then(|f| f.set_modified(t));
+        .and_then(|f| f.set_modified(t))
+        .ok();
 }
 
 fn done(sim: &Arc<Sim>, w: &mut World, id: &str, i: usize, step: u8) {
@@ -300,7 +297,7 @@ pub fn default_script(rng: &mut Rng, role: &str) -> Script {
     }
 }
 
-/// A seed's own fleet: 2–6 issues queued over the first hour (some blocked on another for a while), lanes drawn from `default_script`, CI green or red, load spikes, crashed passes, and the owner's `drive` and `merge` by hand. `Model` and `config`'s (`max_spawns`, rounds).
+/// A seed's own fleet: 2–6 issues queued over the first hour (some blocked on another for a while), lanes drawn from `default_script`, CI green or red, load spikes, crashed passes, and the owner's `drive` and `merge` by hand. `Model` and `config`'s (`max_spawns`, retired rounds).
 pub fn random(seed: u64) -> (Model, (u64, u64)) {
     let mut rng = Rng::new(seed ^ 0x5eed);
     let mut m = Model::default();
@@ -328,7 +325,7 @@ pub fn random(seed: u64) -> (Model, (u64, u64)) {
     for _ in 0..rng.below(4) {
         let t = T0 + rng.below(6 * 3600);
         m.at(t, Ev::Run(args(&["drive"])));
-        let n = issues[usize::try_from(rng.below(issues.len() as u64)).unwrap()].to_string();
+        let n = issues[usize::try_from(rng.below(u64::try_from(issues.len()).unwrap())).unwrap()].to_string();
         m.at(T0 + 3600 + rng.below(5 * 3600), Ev::Run(args(&["merge", FLEET, &n])));
     }
     for _ in 0..rng.below(3) {

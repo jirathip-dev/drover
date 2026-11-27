@@ -1,0 +1,25 @@
+flow = "ask"
+states = ["with-owner"]
+reads = ["lane"]
+ignores = ["host", "pr", "verdict", "ask", "turn"]
+
+[[row]]
+id = "asker-gone"
+when = { lane = ["exited", "gone"] }
+do = "wait"
+then = ["expire"]
+owner = "owner"
+timeout = "ask_expire_hours"
+escalate = "owner"
+say = "the asking lane is gone"
+
+[[row]]
+id = "waiting"
+when = { lane = ["none", "running", "limited", "asleep", "done"] }
+do = "wait"
+then = ["remind"]
+owner = "owner"
+timeout = "ask_waiting_minutes"
+escalate = "owner"
+to = ["answered"]
+say = "with the owner"

@@ -8,26 +8,10 @@ use std::process::{Command, Stdio};
 
 const ADDR: &str = "127.0.0.1:7777";
 
-fn setup(name: &str) -> drover::Ctx {
-    let d = tmpdir(name);
-    let c = ctx(
-        &d,
-        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
-    );
-    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
-    std::fs::create_dir_all(&profile).unwrap();
-    std::fs::write(profile.join("settings.json"), "{}").unwrap();
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill #12"]).1,
-        "t1\n"
-    );
-    c
-}
-
 fn acp_setup(name: &str, b: &FakeShed) -> drover::Ctx {
     let cfg = format!(
-        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
-         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n\n\
+         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n",
         b.sock.display()
     );
     let mut c = ctx(&tmpdir(name), &cfg);
@@ -61,12 +45,7 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
 fn to_new(c: &drover::Ctx, r: &dyn drover::runner::Runner, repo: &str, title: &str, text: &str) -> String {
     let (code, out) = run(c, r, &["thread", "handoff", "t1", repo, title, text]);
     assert_eq!(code, 0, "{out}");
-    let card = kinds(c, "needs-decision").pop().unwrap();
-    let targets = card.val("handoff")["targets"].as_array().unwrap().clone();
-    let n = targets.iter().position(|t| t == "new").unwrap() + 1;
-    let (code, out) = run(c, r, &["answer", &card.fleet, card.str("id").unwrap(), &n.to_string()]);
-    assert_eq!(code, 0, "{out}");
-    out.trim().rsplit(' ').next().unwrap().to_string()
+    out.trim().to_string()
 }
 
 fn show(c: &drover::Ctx, id: &str) -> String {
@@ -112,7 +91,7 @@ fn ran(c: &drover::Ctx, thread: &str, cmd: &str, stdout: &str) {
 }
 
 #[test]
-fn a_handoff_to_a_repo_starts_a_linked_thread_and_wakes_its_orchestrator_with_the_text() {
+fn a_handoff_to_a_repo_starts_its_desk_thread_and_wakes_its_orchestrator_with_the_text() {
     let b = FakeShed::new();
     let c = acp_setup("handoff-new", &b);
     let r = acp();
@@ -121,7 +100,7 @@ fn a_handoff_to_a_repo_starts_a_linked_thread_and_wakes_its_orchestrator_with_th
     let new = kinds(&c, "thread-new");
     assert_eq!(
         (new.len(), new[1].str("title"), new[1].fleet.as_str()),
-        (2, Some("Rate limits"), "sendmeter")
+        (2, Some("Desk"), "sendmeter")
     );
     let h = kinds(&c, "thread-handoff");
     assert_eq!(h.len(), 1);
@@ -136,23 +115,23 @@ fn a_handoff_to_a_repo_starts_a_linked_thread_and_wakes_its_orchestrator_with_th
     );
     let sent = r.calls.borrow().join("\n");
     assert!(
-        sent.contains("\n\n[t2] t1: handoff to Rate limits · t2: 429s from #19"),
+        sent.contains("\n\n[t2] t1: handoff to Desk · t2: 429s from #19"),
         "{sent}"
     );
     let dir = c.state.with_file_name("orchestrator").join("t2");
     assert_eq!(
         std::fs::read_to_string(dir.join(".thread.md")).unwrap(),
-        "from t1: handoff to Rate limits · t2: 429s from #19\n"
+        "from t1: handoff to Desk · t2: 429s from #19\n"
     );
     let msg = kinds(&c, "thread-msg");
     assert_eq!((msg[0].str("thread"), msg[0].str("from")), (Some("t2"), Some("t1")));
     assert!(
-        show(&c, "t1").ends_with("continued in t2: Rate limits → Rate limits · t2\n"),
+        show(&c, "t1").ends_with("continued in t2: Rate limits → Desk · t2\n"),
         "{}",
         show(&c, "t1")
     );
     assert!(
-        show(&c, "t2").ends_with("from t1: handoff to Rate limits · t2: 429s from #19\n"),
+        show(&c, "t2").ends_with("from t1: handoff to Desk · t2: 429s from #19\n"),
         "{}",
         show(&c, "t2")
     );
@@ -231,179 +210,6 @@ fn a_handoff_to_an_existing_thread_appends_to_it_and_types_into_its_awake_orches
     );
 }
 
-fn threads(name: &str, b: &FakeShed) -> drover::Ctx {
-    let c = acp_setup(name, b);
-    let titles = [
-        "Main chat",
-        "Test",
-        "Search",
-        "Billing",
-        "Rate limits",
-        "Docs",
-        "Release",
-    ];
-    for (i, t) in titles.iter().enumerate() {
-        let n = i as u64 + 2;
-        let at = drover::Ctx {
-            now: c.now + n * 60,
-            ..c.clone()
-        };
-        let id = format!("t{n}");
-        assert_eq!(
-            run(&at, &Fake::default(), &["thread", "new", "sendmeter", t]).1,
-            format!("{id}\n")
-        );
-        let topic = if n == 5 {
-            "invoices double-charge on retry when the card issuer times out mid-capture".to_string()
-        } else {
-            format!("topic {n}")
-        };
-        assert_eq!(run(&at, &Fake::default(), &["thread", "reply", &id, &topic]).0, 0);
-    }
-    assert_eq!(run(&c, &Fake::default(), &["thread", "archive", "t8"]).0, 0);
-    c
-}
-
-#[test]
-fn a_handoff_to_a_repo_posts_a_choice_card_of_its_threads_and_delivers_nothing_before_the_tap() {
-    let b = FakeShed::new();
-    let c = threads("handoff-card", &b);
-    let at = drover::Ctx {
-        now: c.now + 1000,
-        ..c.clone()
-    };
-    let msgs = kinds(&c, "thread-msg").len();
-    let r = Fake::default();
-    let (code, out) = run(
-        &at,
-        &r,
-        &["thread", "handoff", "t1", "sendmeter", "Rate limits", "429s from #19"],
-    );
-    assert_eq!(
-        (code, out.as_str()),
-        (0, "q1: the owner picks the thread; nothing is delivered until then\n")
-    );
-    let card = kinds(&c, "needs-decision").pop().unwrap();
-    assert_eq!((card.str("thread"), card.str("kind")), (Some("t1"), Some("owner")));
-    assert!(
-        card.str("question")
-            .unwrap()
-            .contains("Nothing is delivered until you tap"),
-        "{card:?}"
-    );
-    assert_eq!(
-        *card.val("options"),
-        json!([
-            "Docs · t7 — topic 7 (9m ago)",
-            "Rate limits · t6 — topic 6 (10m ago)",
-            "Billing · t5 — invoices double-charge on retry when the card issuer times o (11m ago)",
-            "Search · t4 — topic 4 (12m ago)",
-            "new thread: Rate limits",
-            "Test · t3 — topic 3 (13m ago)",
-            "Main chat · t2 — topic 2 (14m ago)"
-        ])
-    );
-    assert_eq!(
-        card.val("handoff")["targets"],
-        json!(["t7", "t6", "t5", "t4", "new", "t3", "t2"])
-    );
-    assert_eq!(
-        (
-            kinds(&c, "thread-handoff").len(),
-            kinds(&c, "thread-msg").len(),
-            kinds(&c, "thread-new").len()
-        ),
-        (0, msgs, 8)
-    );
-    assert!(r.calls.borrow().is_empty(), "{:?}", r.calls.borrow());
-    assert!(b.methods().is_empty(), "{:?}", b.methods());
-
-    let f = Fake::default();
-    let r = b.on(&f);
-    let s = Server::new(&at, &r, Some(ADDR.into()));
-    let cookie = pair(&s, &at, "Mozilla/5.0 (iPhone)", at.now);
-    let chat: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, at.now, "chat")).unwrap();
-    let t1 = chat["threads"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|t| t["id"] == "t1")
-        .unwrap();
-    let h = t1["page"]["msgs"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find_map(|m| m["handoff"].as_object())
-        .expect("a handoff card");
-    let choices = h["choices"].as_array().unwrap();
-    let picks: Vec<(&str, &str)> = choices
-        .iter()
-        .map(|c| (c["text"].as_str().unwrap(), c["thread"].as_str().unwrap()))
-        .collect();
-    assert_eq!(picks.len(), 7, "{picks:?}");
-    assert_eq!(picks[4], ("new thread: Rate limits", "new"), "{picks:?}");
-    assert_eq!(picks[6].1, "t2", "{picks:?}");
-    assert!(picks[6].0.starts_with("Main chat · t2"), "{picks:?}");
-}
-
-#[test]
-fn a_tap_on_a_thread_delivers_there_and_a_tap_on_new_starts_a_thread() {
-    let b = FakeShed::new();
-    let c = threads("handoff-pick", &b);
-    let f = acp();
-    let r = b.cli(&f);
-    let hand = |title: &str, text: &str| run(&c, &r, &["thread", "handoff", "t1", "sendmeter", title, text]).0;
-    assert_eq!(hand("Rate limits", "429s from #19"), 0);
-    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "3"]);
-    assert!(
-        code == 0 && out.starts_with("sendmeter q1: Billing · t5 — invoices") && out.ends_with(" -> t5\n"),
-        "{out}"
-    );
-    assert_eq!(kinds(&c, "thread-new").len(), 8, "an existing thread, no new one");
-    assert!(
-        f.called("shed run --acp claude-acp --policy allow --name orchestrator-t5"),
-        "{:?}",
-        f.calls.borrow()
-    );
-    assert!(
-        show(&c, "t5").ends_with("from t1: handoff to Billing · t5: 429s from #19\n"),
-        "{}",
-        show(&c, "t5")
-    );
-    assert!(
-        show(&c, "t1").ends_with("continued in t5: Rate limits → Billing · t5\n"),
-        "{}",
-        show(&c, "t1")
-    );
-    let (code, again) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
-    assert_eq!((code, again), (0, out));
-    assert_eq!(kinds(&c, "thread-handoff").len(), 1);
-
-    assert_eq!(hand("Webhooks", "retry storms"), 0);
-    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q2", "5"]);
-    assert_eq!((code, out.as_str()), (0, "sendmeter q2: new thread: Webhooks -> t9\n"));
-    let new = kinds(&c, "thread-new").pop().unwrap();
-    assert_eq!((new.str("thread"), new.str("title")), (Some("t9"), Some("Webhooks")));
-    assert!(
-        show(&c, "t9").ends_with("from t1: handoff to Webhooks · t9: retry storms\n"),
-        "{}",
-        show(&c, "t9")
-    );
-
-    assert_eq!(hand("Search", "facets"), 0);
-    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q3", "nowhere"]);
-    assert!(code == 3 && out.contains("REFUSED BAD_VALUE"), "{out}");
-    assert_eq!(
-        run(&c, &r, &["answer", "sendmeter", "q3", "t4"]).1,
-        "sendmeter q3: t4 -> t4\n"
-    );
-    assert!(
-        show(&c, "t4").ends_with("from t1: handoff to Search · t4: facets\n"),
-        "{}",
-        show(&c, "t4")
-    );
-}
-
 #[test]
 fn a_forward_marks_the_received_row_and_a_handoff_after_the_owner_wrote_does_not() {
     let b = FakeShed::new();
@@ -452,7 +258,7 @@ fn a_forward_marks_the_received_row_and_a_handoff_after_the_owner_wrote_does_not
     let r = b.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
-    let chat = api(&s, ADDR, &cookie, c.now, "chat");
+    let chat = chat_all(&s, ADDR, &cookie, c.now).to_string();
     assert_eq!(
         chat.matches("\"text\":\"handoff to Test · t2: add facets (forwarded)\"")
             .count(),
@@ -502,17 +308,17 @@ fn an_issue_filed_and_an_ask_answered_in_the_target_each_add_one_row_to_the_sour
         "--thread",
         "t2",
     ];
-    assert_eq!(run(&c, &Fake::default(), &ask).1, "q2\n");
+    assert_eq!(run(&c, &Fake::default(), &ask).1, "q1\n");
     let r = acp();
-    assert_eq!(run(&c, &b.cli(&r), &["answer", "sendmeter", "q2", "1"]).0, 0);
+    assert_eq!(run(&c, &b.cli(&r), &["answer", "sendmeter", "q1", "1"]).0, 0);
     assert!(
-        r.called("shed send orchestrator-t2 DECISION q2: small") && !r.called("shed run"),
+        r.called("shed send orchestrator-t2 DECISION q1: small") && !r.called("shed run"),
         "{:?}",
         r.calls.borrow()
     );
     let t1 = show(&c, "t1");
     assert_eq!(t1.lines().count(), rows + 1, "{t1}");
-    assert!(t1.ends_with("from t2: answered q2: Which scope? → small\n"), "{t1}");
+    assert!(t1.ends_with("from t2: answered q1: Which scope? → small\n"), "{t1}");
 }
 
 #[test]
@@ -560,7 +366,7 @@ fn the_chat_api_links_each_linked_row_and_thread_row() {
     let r = b.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
-    let chat: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, c.now, "chat")).unwrap();
+    let chat: serde_json::Value = chat_all(&s, ADDR, &cookie, c.now);
     let thread = |t: &str| {
         chat["threads"]
             .as_array()
@@ -575,7 +381,7 @@ fn the_chat_api_links_each_linked_row_and_thread_row() {
     let msgs = t1.as_array().unwrap();
     assert!(
         msgs.iter()
-            .any(|m| m["link"] == link("t2", "continued in") && m["text"] == "Rate limits → Rate limits · t2"),
+            .any(|m| m["link"] == link("t2", "continued in") && m["text"] == "Rate limits → Desk · t2"),
         "{t1}"
     );
     assert!(
@@ -598,11 +404,6 @@ fn the_chat_api_links_each_linked_row_and_thread_row() {
     assert_eq!(links("t2"), json!([link("t1", "from")]));
 }
 
-fn starts(b: &FakeShed) -> Vec<String> {
-    let sent = b.sent("orchestrator-t2").into_iter();
-    sent.filter(|l| l.starts_with("exec ")).collect()
-}
-
 fn long_text() -> String {
     let text: String = (0..300).map(|i| format!("line {i:03}. ")).collect();
     text[..2400].to_string()
@@ -620,7 +421,7 @@ fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one() {
         .into_iter()
         .find(|e| e.str("thread") == Some("t2"))
         .unwrap();
-    let line = format!("handoff to Big plan · t2: {text}");
+    let line = format!("handoff to Desk · t2: {text}");
     assert_eq!(
         (first.str("from"), first.str("text")),
         (Some("t1"), Some(line.as_str()))
@@ -652,123 +453,6 @@ fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one() {
     }
 }
 
-#[test]
-fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_the_shells_line_limit() {
-    let c = setup("handoff-long");
-    let b = FakeShed::attached(&c);
-    let r = Fake::default();
-    let text = long_text();
-    assert_eq!(text.len(), 2400);
-    assert_eq!(to_new(&c, &r, "sendmeter", "Big plan", &text), "t2");
-    let first = kinds(&c, "thread-msg")
-        .into_iter()
-        .find(|e| e.str("thread") == Some("t2"))
-        .unwrap();
-    let line = format!("handoff to Big plan · t2: {text}");
-    assert_eq!(
-        (first.str("from"), first.str("text")),
-        (Some("t1"), Some(line.as_str()))
-    );
-    let md = c.state.with_file_name("orchestrator").join("t2/.thread.md");
-    assert_eq!(std::fs::read_to_string(&md).unwrap(), format!("from t1: {line}\n"));
-
-    b.remove("orchestrator-t2");
-    let (code, out) = run(&c, &r, &["thread", "handoff", "t1", "t2", "More", &text]);
-    assert_eq!((code, out.as_str()), (0, "t2\n"));
-    assert!(
-        std::fs::read_to_string(&md)
-            .unwrap()
-            .ends_with(&format!("from t1: {line}\n")),
-        "{}",
-        std::fs::read_to_string(&md).unwrap()
-    );
-    let s = starts(&b);
-    assert_eq!(s.len(), 2, "{s:?}");
-    assert!(s[1].contains("--resume"), "{}", s[1]);
-    for l in &s {
-        assert!(l.len() <= 1024, "a {}-byte start line: {l}", l.len());
-    }
-}
-
-fn card(name: &str, text: &str, b: &FakeShed) -> drover::Ctx {
-    let c = acp_setup(name, b);
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Search"]).1,
-        "t2\n"
-    );
-    let hand = ["thread", "handoff", "t1", "sendmeter", "Facets", text];
-    assert_eq!(run(&c, &Fake::default(), &hand).0, 0);
-    let card = kinds(&c, "needs-decision").pop().unwrap();
-    assert_eq!(card.val("handoff")["targets"], json!(["t2", "new"]));
-    c
-}
-
-fn copies(c: &drover::Ctx, id: &str, text: &str) -> (usize, usize) {
-    let msgs = kinds(c, "thread-msg");
-    let into = msgs
-        .iter()
-        .filter(|e| e.str("thread") == Some(id) && e.str("text").is_some_and(|t| t.ends_with(text)));
-    (
-        into.count(),
-        show(c, "t1").matches(&format!("continued in {id}: ")).count(),
-    )
-}
-
-#[test]
-fn three_taps_on_one_handoff_deliver_it_once_and_each_gets_the_first_result() {
-    let b = FakeShed::new();
-    let c = card("handoff-thrice", "add facets", &b);
-    let f = acp();
-    let r = b.cli(&f);
-    for _ in 0..3 {
-        let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
-        assert_eq!((code, out.as_str()), (0, "sendmeter q1: Search · t2 (0s ago) -> t2\n"));
-    }
-    assert_eq!(copies(&c, "t2", "add facets"), (1, 1));
-    assert_eq!(kinds(&c, "thread-handoff").len(), 1);
-    assert_eq!(kinds(&c, "decision").len(), 1);
-    assert_eq!(f.count("shed run"), 1, "{:?}", f.calls.borrow());
-}
-
-#[test]
-fn a_failed_first_try_of_a_handoff_tap_is_retried_and_delivered_once() {
-    let b = FakeShed::new();
-    let c = card("handoff-retry-once", "add facets", &b);
-    let f = acp().once_err("shed run", 1, "timed out waiting for agent startup");
-    let (code, out) = run(&c, &b.cli(&f), &["answer", "sendmeter", "q1", "1"]);
-    assert_eq!((code, out.as_str()), (0, "sendmeter q1: Search · t2 (0s ago) -> t2\n"));
-    assert_eq!(copies(&c, "t2", "add facets"), (1, 1));
-    assert_eq!(f.count("shed run"), 2, "{:?}", f.calls.borrow());
-    assert!(!show(&c, "t1").contains("not delivered"), "{}", show(&c, "t1"));
-}
-
-#[test]
-fn a_failed_handoff_tap_shows_its_error_and_its_retry_is_the_one_delivery() {
-    let b = FakeShed::new();
-    let c = card("handoff-retry", "add facets", &b);
-    let why = "input contains a 1486-byte line but the terminal is in canonical mode with a 1024-byte limit; wait for the shell prompt and retry";
-    let f = acp().once_err("shed run", 1, why).once_err("shed run", 1, why);
-    let r = b.cli(&f);
-    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
-    assert_ne!(code, 0, "{out}");
-    assert!(show(&c, "t1").contains(why), "{}", show(&c, "t1"));
-    assert!(
-        kinds(&c, "orchestrator-start").is_empty(),
-        "{:?}",
-        kinds(&c, "orchestrator-start")
-    );
-    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
-    assert_eq!((code, out.as_str()), (0, "sendmeter q1: Search · t2 (0s ago) -> t2\n"));
-    assert_eq!(copies(&c, "t2", "add facets"), (1, 1));
-    assert_eq!(f.count("shed run"), 3, "{:?}", f.calls.borrow());
-    let md = c.state.with_file_name("orchestrator").join("t2/.thread.md");
-    assert_eq!(
-        std::fs::read_to_string(md).unwrap(),
-        "from t1: handoff to Search · t2: add facets\n"
-    );
-    assert!(show(&c, "t1").contains(why), "{}", show(&c, "t1"));
-}
-
 fn v1_post(s: &Server, cookie: &str, now: u64, op: &str, body: &serde_json::Value) -> serde_json::Value {
     let body = body.to_string();
     let req = format!(
@@ -788,71 +472,127 @@ fn items(s: &Server, cookie: &str, now: u64, t: &str) -> Vec<serde_json::Value> 
 }
 
 #[test]
-fn a_pending_repo_handoff_is_one_item_with_choices_and_its_pick_delivers_it_in_both_threads() {
+fn a_handoff_to_a_repo_goes_at_once_to_its_desk_thread_and_files_no_ask() {
     let b = FakeShed::new();
-    let c = card("handoff-v1", "add facets\nthen reindex", &b);
+    let c = acp_setup("handoff-desk", &b);
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Search"]).1,
+        "t2\n"
+    );
+    let r = acp();
+    let cli = b.cli(&r);
+    assert_eq!(to_new(&c, &cli, "sendmeter", "Facets", "add facets"), "t3");
+    assert_eq!(to_new(&c, &cli, "sendmeter", "Docs", "doc it"), "t3");
+    assert!(kinds(&c, "needs-decision").is_empty());
+    let facts = kinds(&c, "thread-facts");
+    assert_eq!(facts.len(), 1, "{facts:?}");
+    assert_eq!(
+        (facts[0].str("thread"), facts[0].str("profile"), facts[0].val("desk")),
+        (Some("t3"), Some("sendmeter"), &json!(true))
+    );
+    let h = kinds(&c, "thread-handoff");
+    assert_eq!(
+        h.iter().map(|e| (e.str("from"), e.str("to"))).collect::<Vec<_>>(),
+        [(Some("t1"), Some("t3")), (Some("t1"), Some("t3"))]
+    );
+    assert_eq!(h[0].str("target"), Some("Desk · t3"));
+    assert!(
+        show(&c, "t3").ends_with("from t1: handoff to Desk · t3: doc it\n"),
+        "{}",
+        show(&c, "t3")
+    );
+    assert!(!show(&c, "t2").contains("handoff"), "{}", show(&c, "t2"));
+}
+
+#[test]
+fn a_move_redelivers_a_desk_handoff_marks_the_first_copy_forwarded_and_flows_back_to_the_sender() {
+    let b = FakeShed::new();
+    let c = acp_setup("handoff-move", &b);
     let f = acp();
     let cli = b.cli(&f);
+    assert_eq!(to_new(&c, &cli, "sendmeter", "Facets", "add facets"), "t2");
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Search"]).1,
+        "t3\n"
+    );
+    let first = kinds(&c, "thread-handoff").pop().unwrap();
     let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
-    let sent = items(&s, &ck, c.now, "t1");
-    assert_eq!(sent.len(), 1, "{sent:?}");
-    let h = &sent[0];
-    let card = kinds(&c, "needs-decision").pop().unwrap();
+    let body = json!({"id": first.seq.to_string(), "to": "t3"});
+    let got = v1_post(&s, "", c.now, "handoff-move", &body);
+    assert_eq!(got["code"], json!("UNPAIRED"), "{got}");
+    let got = v1_post(&s, &ck, c.now, "handoff-move", &body);
     assert_eq!(
-        (&h["kind"], &h["id"], &h["state"], &h["folded"]),
-        (&json!("handoff"), &json!(card.seq), &json!("pending"), &json!(true))
+        (&got["ok"], &got["message"]),
+        (&json!(true), &json!("moved to t3")),
+        "{got}"
     );
+    let again = v1_post(&s, &ck, c.now, "handoff-move", &body);
+    assert_eq!(again["ok"], json!(true), "{again}");
+    let other = v1_post(
+        &s,
+        &ck,
+        c.now,
+        "handoff-move",
+        &json!({"id": first.seq.to_string(), "to": "t1"}),
+    );
+    assert_eq!(other["code"], json!("BAD_VALUE"), "{other}");
+
+    let h = kinds(&c, "thread-handoff");
+    assert_eq!(h.len(), 2, "{h:?}");
     assert_eq!(
-        h["from"],
-        json!({"agent": "conductor", "thread": "t1", "repo": "sendmeter"})
+        (h[1].str("from"), h[1].str("to"), h[1].val("moves")),
+        (Some("t1"), Some("t3"), &json!(first.seq))
     );
-    assert_eq!(h["to"], json!({"repo": "sendmeter", "pending": true}));
-    assert_eq!(
-        (&h["title"], &h["summary"], &h["text"]),
-        (
-            &json!("Facets"),
-            &json!("add facets"),
-            &json!("add facets\nthen reindex")
-        )
+    assert!(
+        show(&c, "t2").contains("handoff to Desk · t2: add facets (forwarded)\n"),
+        "{}",
+        show(&c, "t2")
     );
-    let rows: Vec<_> = h["choices"]
+    assert!(
+        show(&c, "t3").contains("from t1: handoff to Search · t3: add facets\n"),
+        "{}",
+        show(&c, "t3")
+    );
+    assert!(
+        f.calls
+            .borrow()
+            .iter()
+            .any(|l| l.starts_with("shed send orchestrator-t2 ") && l.contains("moved to t3: don't act on it here")),
+        "{:?}",
+        f.calls.borrow()
+    );
+    let desk = items(&s, &ck, c.now, "t2");
+    assert_eq!(desk[0]["state"], json!("forwarded"), "{desk:?}");
+    let rows: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &ck, c.now, "rows")).unwrap();
+    let states: Vec<_> = rows["rows"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|c| (c["n"].clone(), c["thread"].clone()))
+        .filter(|r| r["kind"] == "handoff")
+        .map(|r| (r["to"]["id"].clone(), r["handoff"]["state"].clone()))
         .collect();
-    assert_eq!(rows, [(json!(1), json!("t2")), (json!(2), json!("new"))]);
-    assert_eq!(h["choices"][1]["text"], "new thread: Facets");
-    assert!(
-        items(&s, &ck, c.now, "t2").is_empty(),
-        "nothing delivered before the pick"
+    assert_eq!(
+        states,
+        [(json!("t2"), json!("forwarded")), (json!("t3"), json!("delivered"))]
     );
 
-    let pick = &h["choices"][0];
-    let mtime =
-        serde_json::from_str::<serde_json::Value>(&api(&s, ADDR, &ck, c.now, "state")).unwrap()["mtime"].clone();
-    let body = json!({"fleet": pick["fleet"], "id": pick["id"], "choice": pick["n"], "mtime": mtime});
-    let got = v1_post(&s, &ck, c.now, pick["op"].as_str().unwrap(), &body);
-    assert_eq!(got["ok"], json!(true), "{got}");
-    for (t, folded) in [("t1", true), ("t2", false)] {
-        let got = items(&s, &ck, c.now, t);
-        assert_eq!(got.len(), 1, "{t}: {got:?}");
-        let h = &got[0];
-        assert_eq!(
-            (&h["id"], &h["state"], &h["to"], &h["folded"], &h["choices"]),
-            (
-                &json!(card.seq),
-                &json!("delivered"),
-                &json!("t2"),
-                &json!(folded),
-                &json!([])
-            ),
-            "{t}"
-        );
-        assert_eq!(h["text"], "add facets\nthen reindex", "{t}");
-    }
+    let before = show(&c, "t1");
+    ran(
+        &c,
+        "t2",
+        "gh issue create -t \"Desk one\"",
+        "https://github.com/acme/x/issues/51\n",
+    );
+    assert_eq!(show(&c, "t1"), before, "the first copy's thread no longer flows back");
+    ran(
+        &c,
+        "t3",
+        "gh issue create -t \"Facets\"",
+        "https://github.com/acme/x/issues/52\n",
+    );
+    assert_eq!(show(&c, "t1"), format!("{before}from t3: filed #52: Facets\n"));
 }
 
 #[test]

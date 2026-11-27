@@ -3,7 +3,7 @@ use common::*;
 use drover::events::{append, fold, read, Event};
 use serde_json::json;
 
-const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
+const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"claude\"\nprofile = \"fleet-design\"\n";
 const HEAD: &str = "5bf04afe07dae022b35684353f2040f9a37d33a6";
 
 fn sctx(name: &str, cfg: &str) -> (drover::Ctx, FakeShed) {
@@ -116,7 +116,7 @@ fn a_finished_design_lane_is_adopted_once_and_never_hides_the_fix_round() {
 fn a_respawn_is_named_after_the_build_lane() {
     let (c, _sh) = sctx("design-respawn", CONFIG);
     failed(&c, 12);
-    ev(&c, 12, 500, "needs-human", json!({"code": "ROUND_LIMIT"}));
+    ev(&c, 12, 500, "needs-human", json!({"code": "STUCK"}));
     ev(&c, 12, 600, "round-extended", json!({"by": "owner", "spawn": false}));
     let r = fake("4\n");
     let w = waiting(&c, &r, 12);
@@ -191,7 +191,7 @@ fn the_install_repair_unparks_a_lane_ends_a_design_adoption_caused() {
     assert_eq!((state(&c, 12), state(&c, 13)), ("fix(1)".into(), "needs-human".into()));
     assert_eq!(
         waiting(&c, &r, 12)["what"],
-        "review FAIL, waiting for drive (next pass ≤ 5 min) to start fix round · held: HOST_BUSY memory pressure critical"
+        "review FAIL, waiting for drive (next pass ≤ 5 min) to start fix round · held: HOST_BUSY memory pressure critical · line 1 on every host"
     );
     run(&c, &r, &["drive"]);
     assert_eq!(kinds(&c, "repaired").len(), 1);

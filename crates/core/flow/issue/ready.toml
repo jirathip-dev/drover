@@ -1,0 +1,114 @@
+flow = "issue"
+states = ["ready"]
+reads = ["pr", "verdict", "ask"]
+ignores = ["lane", "host", "turn"]
+in_flight = true
+
+[[row]]
+id = "merged-outside"
+when = { pr = ["merged"], verdict = "*", ask = "*" }
+do = "record-merge"
+owner = "drive"
+timeout = "act_minutes"
+to = ["merged"]
+say = "merged outside drover: record it"
+
+[[row]]
+id = "pr-closed"
+when = { pr = ["closed"], verdict = "*", ask = "*" }
+do = "raise-card"
+owner = "drive"
+timeout = "act_minutes"
+escalate = "orchestrator"
+to = ["needs-human"]
+say = "PR closed outside drover: a card"
+
+[[row]]
+id = "ask-open"
+when = { pr = "*", verdict = "*", ask = ["open"] }
+do = "wait"
+then = ["remind"]
+owner = "owner"
+timeout = "ask_waiting_minutes"
+escalate = "owner"
+say = "waiting on the owner's answer"
+
+[[row]]
+id = "decided"
+when = { pr = "*", verdict = "*", ask = ["answered"] }
+do = "apply-decision"
+owner = "drive"
+timeout = "act_minutes"
+say = "apply the answer"
+
+[[row]]
+id = "next-check"
+when = { pr = ["none", "open", "pending", "red", "green", "conflicting"], verdict = ["none"], ask = ["none"] }
+do = "spawn-check"
+owner = "drive"
+timeout = "act_minutes"
+to = ["review"]
+say = "start the next check"
+
+[[row]]
+id = "stray-verdict"
+when = { pr = "*", verdict = ["written", "FAIL", "refused"], ask = ["none"] }
+do = "reconcile"
+owner = "drive"
+timeout = "act_minutes"
+escalate = "orchestrator"
+say = "a stray verdict at ready: reconcile"
+
+[[row]]
+id = "merge"
+when = { pr = ["green"], verdict = ["PASS"], ask = ["none"] }
+do = "merge"
+owner = "drive"
+timeout = "gate_check_minutes"
+to = ["merged", "fix"]
+say = "PASS and CI green: merge"
+
+[[row]]
+id = "ci-running"
+when = { pr = ["pending"], verdict = ["PASS"], ask = ["none"] }
+do = "wait"
+then = ["unstick-ci"]
+owner = "drive"
+timeout = "ci_stuck_minutes"
+say = "CI is running"
+
+[[row]]
+id = "ci-not-started"
+when = { pr = ["open"], verdict = ["PASS"], ask = ["none"] }
+do = "wait"
+then = ["unstick-ci", "ci-fail"]
+owner = "drive"
+timeout = "ci_start_minutes"
+say = "CI has not started"
+
+[[row]]
+id = "ci-red"
+when = { pr = ["red"], verdict = ["PASS"], ask = ["none"] }
+do = "ci-fail"
+owner = "drive"
+timeout = "act_minutes"
+to = ["fix", "needs-human"]
+say = "CI is red: a fix round"
+
+[[row]]
+id = "conflict"
+when = { pr = ["conflicting"], verdict = ["PASS"], ask = ["none"] }
+do = "update"
+owner = "drive"
+timeout = "act_minutes"
+to = ["fix", "needs-human"]
+say = "the PR conflicts: update it"
+
+[[row]]
+id = "no-pr"
+when = { pr = ["none"], verdict = ["PASS"], ask = ["none"] }
+do = "reconcile"
+owner = "drive"
+timeout = "act_minutes"
+escalate = "orchestrator"
+say = "PASS with no PR: reconcile"

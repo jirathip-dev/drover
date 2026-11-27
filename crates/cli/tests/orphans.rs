@@ -68,12 +68,9 @@ fn review(c: &drover::Ctx, verdict: &str) -> PathBuf {
 #[test]
 fn spawn_logs_spawn_started_before_the_harness_starts() {
     let sh = FakeShed::new();
-    let cfg = CONFIG.replace(
-        "harness  =  \"hermes\"    # toggled in tests",
-        "harness = \"claude\"\naccount = \"C\"",
-    );
+    let cfg = CONFIG.replace("harness  =  \"claude\"    # toggled in tests", "harness = \"claude\"");
     let cfg = format!(
-        "{cfg}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        "{cfg}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n",
         sh.sock.display()
     );
     let mut c = ctx(&tmpdir("orphan-started"), &cfg);

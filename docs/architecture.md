@@ -16,7 +16,7 @@ import or a device change is all or nothing) and **leases** (a lock can no longe
 | Table | What |
 |---|---|
 | `events` | the log: `seq`, `ts`, `fleet`, `issue`, `type`, the event's JSON, `archived`; indexed by (fleet, issue) and type |
-| `leases` | every lock and marker: `drive-<fleet>.lock`, `admit-<host>.lock`, `drive-<fleet>-<n>.lock`, `kick-<fleet>-<n>.lock` and `.again`, `spawn-<fleet>-<n>.pending`, `job-<fleet>-<i>.lock` (a job slot), `merge-<fleet>.lock` |
+| `leases` | every lock and marker: `drive-<fleet>.lock`, `admit-<host>.lock`, `drive-<fleet>-<n>.lock`, `kick-<fleet>-<n>.lock` and `.queued` (a kick waiting for its fleet's runner), `kicks-<fleet>.lock` (#1749: the fleet's one kick runner), `spawn-<fleet>-<n>.pending`, `job-<fleet>-<i>.lock` (a job slot), `merge-<fleet>.lock` |
 | `devices`, `push` | paired phones and web push subscriptions (were `serve/devices.json`, `webpush/subs.json`) |
 | `snapshot` | `board`: #337's reads; `archived`: the last compaction's stamp |
 | `processed` | #509: the trigger ids (`kick --id`: a verdict's sha, a decision) already driven, each driven once |
@@ -79,8 +79,6 @@ writer died mid-line has a torn tail; its import skips it. A merged issue stays 
 | `~/.local/state/drover/cache/` | cached issue specs and PR/CI reads |
 | `~/.local/share/drover/work/` (`FLEET_WORKTREES`; a host's `root`/`roots`, #630) | lane worktrees, `<repo>/issue-<n>`; builds under `.build/` |
 | `~/.config/drover/claude/<profile>/` | `settings.json` (PreToolUse hook), `role.md`, `fleet.md` |
-| `~/.hermes/profiles/<profile>/config.yaml` (`FLEET_HERMES_PROFILES`) | sync rewrites its `hooks:` key and drops `agent.reasoning_effort` (fleet.toml `effort` owns it) |
-| `~/.config/drover/dsh/<profile>.patch.yml` | DSH patch layer for `harness = "dsh"` lanes ([dsh.md](dsh.md)) |
 | `roles/`, `hooks/` | role prompts, the tail of `help --agent` (`usage/`, one file a section and one a refusal code, joined at build time) and hook settings, compiled into the binary |
 
 A path variable that is set but empty counts as unset.
@@ -131,7 +129,7 @@ lane terminal call, on shed) and `gh` (cached GitHub reads).
 | `host`, `hosts` | host-load admission and live agents; multi-host placement ([hosts.md](hosts.md)) |
 | `access`, `usage` | a lane's MCP servers; the DeepSeek balance and the lanes' status line |
 | `hook` | the lanes' pre-tool hook |
-| `overlap` | conflict preview between open branches, `cap-check` |
+| `overlap` | conflict preview between open branches |
 | `serve`, `lanes`, `devices`, `webpush` | the phone page, its Lanes tab, paired devices, web push |
 | `doctor`, `protection` | read-only host and branch-protection checks |
 | `status` | the commit statuses drover posts on PR heads: `drover/review`, `drover/verify`, `drover/override` |
@@ -146,7 +144,7 @@ board shows (`Event` for events and asks, `IssueState`, `Waiting`, `HostSeen`, `
 `just types` writes it (`cargo test -p drover-server --features ts export_bindings`). The types follow serde's JSON:
 u64 is `number`, `Option<T>` is `field?: T | null`, `rename` and `flatten` as serde does them. CI regenerates the file
 and fails on any diff, then `serde_json_fits_the_types` type-checks the demo export's real payloads and each type's
-default with `tsc --noEmit --strict`, and `just types-lint` fails a hand-written copy of a generated type in the board's
+default with `tsc --noEmit --strict`, and local/ts-types (`.gatekeeper/gates/ts-types.toml`) fails a hand-written copy of a generated type in the board's
 TS: it imports them from `assets/types/api.d.ts`.
 
 ## Code rules
@@ -171,17 +169,14 @@ TS: it imports them from `assets/types/api.d.ts`.
   `#[must_use]` value and an `#[allow]` without a `reason`; `unsafe_code` is forbidden in every crate but
   `crates/sys` (`drover-sys`), which holds each OS call std has no safe form for, and the event log's shared
   append buffer, behind safe fns (`// SAFETY:` on each block, `unsafe_op_in_unsafe_fn` denied). Tests may unwrap, index and
-  print (`clippy.toml`; CI's second clippy pass allows them in test targets). `.drover/arch.toml` keeps processes in
-  `runner.rs`, the environment in `config.rs` and the clock and sleeps in `clock.rs`. Each ban has a fixture CI must
-  see fail: `scripts/lint-fixtures.sh rust|ts` (`ci/lint-fixtures/rust/`, `web/lint-fixtures/`).
-- **Size cap:** at most `line_cap` (in `ci/cap.toml`) formatted lines of non-test Rust under `src/` and `crates/*/src/` (tests
-  live in `crates/cli/tests/`), counted after `cargo fmt`. CI runs `drover cap-check --config ci/cap.toml`; a fleet can set its own
-  `line_cap` under `[fleet.<name>]`. Raising the cap needs the owner's OK in the cap issue (its q-number). The
-  commit that edits `ci/cap.toml` (or adds a `ci/cap.d/*.toml` raise; the highest `line_cap` wins) carries
-  `Cap: <old> → <new> (#issue, q<N>)`; on a PR, `cap-check --base` refuses a cap commit without it. `drover cap log`
-  prints the history from git.
+  print (gatekeeper's rust/clippy, with its pack's `clippy.toml`, allows them in test targets). `.drover/arch.toml` keeps
+  processes in `runner.rs`, the environment in `config.rs` and the clock and sleeps in `clock.rs`. gatekeeper's rust/bans
+  and ts/oxlint hold each ban's fixture (#1587).
+- **Size (#1812):** no repo-wide line cap: `.drover/arch.toml`'s per-file `[[size]]` rules and the weekly hotspots
+  issue watch size; each PR body states its `src/ net`. An old `cap_script`, `line_cap` or cap-script `premerge`
+  entry still loads, and drover never reads it.
 - **Rules file and PR body (#1484):** `drover lesson-check` fails a `.drover/rules.md` line that names no enforcer
-  and a file over 30 lines (`cap-check` no longer takes `rules`). `drover pr-body --file <body> --head <sha> [--base staging]`
+  and a file over 30 lines. `drover pr-body --file <body> --head <sha> [--base staging]`
   applies `turn done`'s `PR_BODY` rule to a file and exits 1 with the reason; neither needs a fleet config.
 - **Drive over time (#856):** a fix for a bug that shows only as drive runs pass after pass (a stuck tick, a lane
   never replaced, a hold that never lifts) adds its scenario to `crates/cli/tests/drive_sim.rs`: a fake clock,

@@ -61,7 +61,6 @@ fn the_door_builds_what_http_serves_with_no_socket_and_prunes_what_the_terminal_
         "/screens/scene",
         "/screens/threads",
         "/screens/threads/t1",
-        "/screens/proxy-token",
     ] {
         assert_eq!(door.screen(T, gone), None, "{gone}");
     }

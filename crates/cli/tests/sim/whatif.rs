@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 /// The fleet.toml knobs a what-if carries into the sim's fleet, read (never written) from one config.
 #[derive(Debug, Clone)]
 pub struct Knobs {
-    pub rounds: u32,
     pub spawns: usize,
     pub max_impl: Option<usize>,
     pub max_rev: Option<usize>,
@@ -21,12 +20,11 @@ impl Knobs {
         let c = Config::parse(text)?;
         let f = c.fleet(fleet)?;
         Ok(Knobs {
-            rounds: c.limits.review_rounds,
             spawns: c.limits.max_parallel_spawns,
             max_impl: f.max_impl,
             max_rev: f.max_rev,
             serial: f.serial.clone(),
-            hosts: c.hosts.values().filter(|h| h.enabled).count().max(1) as u64,
+            hosts: u64::try_from(c.hosts.values().filter(|h| h.enabled).count().max(1)).unwrap(),
         })
     }
 
@@ -39,7 +37,7 @@ impl Knobs {
             .collect();
         let at = "integration = \"staging\"\n";
         let mut cfg =
-            crate::scenario::config(self.spawns as u64, self.rounds.into()).replacen(at, &format!("{at}{caps}"), 1);
+            crate::scenario::config(u64::try_from(self.spawns).unwrap(), 0).replacen(at, &format!("{at}{caps}"), 1);
         for g in &self.serial {
             cfg += &format!(
                 "\n[[fleet.{FLEET}.serial]]\nname = {:?}\npaths = {:?}\nmax = {}\n",
@@ -52,7 +50,6 @@ impl Knobs {
     fn rows(&self) -> Vec<(String, String)> {
         let opt = |v: Option<usize>| v.map_or("-".into(), |v| v.to_string());
         let mut rows = vec![
-            ("review_rounds".into(), self.rounds.to_string()),
             ("max_parallel_spawns".into(), self.spawns.to_string()),
             ("max_impl".into(), opt(self.max_impl)),
             ("max_rev".into(), opt(self.max_rev)),
@@ -120,7 +117,7 @@ fn with_waits(mut m: BTreeMap<String, f64>, merges: u64) -> BTreeMap<String, f64
         .filter_map(|k| m.get(*k))
         .sum();
     m.insert("waits".into(), (waits * 100.0).round() / 100.0);
-    m.insert("merges".into(), merges as f64);
+    m.insert("merges".into(), f64::from(u32::try_from(merges).unwrap()));
     m
 }
 
@@ -163,7 +160,7 @@ pub fn side(src: &Source, k: &Knobs, real_hosts: u64) -> Side {
             place(&mut m, &ws, k.hosts);
             let (o, run) = replay::run_in(s, m, &cfg);
             Side {
-                metrics: with_waits(run.metrics, run.merged.len() as u64),
+                metrics: with_waits(run.metrics, u64::try_from(run.merged.len()).unwrap()),
                 failures: o.violations.into_iter().chain(o.failure).collect(),
             }
         }

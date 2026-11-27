@@ -5,6 +5,10 @@ use serde_json::json;
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
 
+fn started(sh: &FakeShed, lane: &str) -> bool {
+    !sh.sent(lane).is_empty()
+}
+
 fn config(extra: &str) -> String {
     CONFIG
         .replace(
@@ -13,7 +17,7 @@ fn config(extra: &str) -> String {
         )
         .replace(
             "[limits]",
-            "[fleet.sendmeter.role.design]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n\n[limits]",
+            "[fleet.sendmeter.role.design]\nharness = \"claude\"\nprofile = \"fleet-design\"\n\n[limits]",
         )
 }
 
@@ -246,19 +250,6 @@ fn unmarked_pr_touching_serial_path_is_refused() {
 }
 
 #[test]
-fn owner_override_still_refuses_an_unmarked_serial_pr() {
-    let c = ctx(&tmpdir("serial-override"), &config(SERIAL));
-    let sh = FakeShed::new();
-    sh.attach(&c);
-    spawned(&c, 12, "impl");
-    log(&c, 12, "verdict", json!({"verdict": "PASS", "sha": HEAD}));
-    let r = merge_fake("supabase/migrations/x.sql\n");
-    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12", "--owner-override"]);
-    assert!(exit == 3 && out.contains("REFUSED SERIAL_UNMARKED"), "{out}");
-    assert!(!r.called("gh pr merge"));
-}
-
-#[test]
 fn marked_pr_touching_serial_path_merges() {
     let (exit, out, r) = merge(true, "supabase/migrations/x.sql\n");
     assert_eq!(exit, 0, "{out}");
@@ -333,11 +324,11 @@ fn design_lane_spawns_but_never_moves_the_issue() {
     let r = happy().once("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", 1, "");
     let (exit, out) = run(&c, &r, &["spawn", "sendmeter", "12", "design"]);
     assert_eq!(exit, 0, "{out}");
-    assert!(sh.called("run", "sendmeter-design-12"), "{:?}", sh.methods());
+    assert!(started(&sh, "sendmeter-design-12"), "{:?}", sh.methods());
     let wt = c.worktrees.join("sendmeter/design-12");
     assert!(
         r.called(&format!(
-            "git -C /tmp/does-not-matter/sendmeter worktree add -b design-12 {} origin/staging",
+            "git -C /tmp/does-not-matter/sendmeter worktree add -b design-12 --no-track {} origin/staging",
             wt.display()
         )),
         "{:?}",

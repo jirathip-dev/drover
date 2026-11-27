@@ -39,15 +39,12 @@ fn every_ssh_drover_starts_is_bounded_by_a_deadline() {
             }
         }
     }
-    let probe =
-        "core/src/hosts/probe.rs: let ssh = |a: Vec<String>| self.r.run_for(\"ssh\", &a, \"\", Duration::from_secs(secs));";
+    let probe = "core/src/hosts/probe.rs: r.run_for(\"ssh\", &argv(a), \"\", Duration::from_secs(secs))";
     let config = "core/src/hosts.rs: let g = ok(self.r, \"ssh\", &[\"-G\", CM[1], m]).unwrap_or_default();";
-    let tunnel =
-        "core/src/proxy.rs: let n = r.detach(\"ssh\", &a, &ctx.state.with_file_name(format!(\"tunnel-{name}.log\")))?;";
     assert_eq!(
         seen,
-        [probe, config, tunnel],
-        "an ssh is started only by the host probe (its deadline), `ssh -G` (no connection) and the detached proxy tunnel; every other one goes through hosts::On::wrap, whose ssh runs by run_for"
+        [probe, config],
+        "an ssh is started only by the host probe (its deadline) and `ssh -G` (no connection); every other one goes through hosts::On::wrap, whose ssh runs by run_for"
     );
     let hosts = std::fs::read_to_string(root.join("core/src/hosts.rs")).unwrap();
     let routed = "        if let Some(m) = self.machine {\n            return self.remote(m, (p, a), ";

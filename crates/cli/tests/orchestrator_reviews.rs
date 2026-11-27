@@ -34,7 +34,7 @@ fn at(c: &drover::Ctx, now: u64) -> drover::Ctx {
 
 fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     let other = "[fleet.other]\nrepo = \"jirathip-dev/other\"\nlocal = \"/tmp/does-not-matter/other\"\n\
-                 integration = \"staging\"\n\n[fleet.other.role.impl]\nharness = \"hermes\"\n\n\
+                 integration = \"staging\"\n\n[fleet.other.role.impl]\nharness = \"claude\"\n\n\
                  [fleet.other.role.orchestrator]\nharness = \"claude\"\n";
     let conf = format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n\n{other}");
     let c = ctx(&tmpdir(name), &conf);
@@ -79,7 +79,7 @@ fn design_ask(c: &drover::Ctx, ts: u64) {
 }
 
 fn needs_human(c: &drover::Ctx, ts: u64) {
-    let d = json!({"code": "ROUND_LIMIT", "reason": "review rounds exceed 3"});
+    let d = json!({"code": "STUCK", "reason": "review rounds exceed 3"});
     log(c, ts, "sendmeter", Some(36), "needs-human", d);
 }
 
@@ -107,7 +107,7 @@ fn changeable(c: &drover::Ctx, now: u64) -> bool {
     let c = at(c, now);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", now);
-    let chat: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, now, "chat")).unwrap();
+    let chat: serde_json::Value = chat_all(&s, ADDR, &cookie, now);
     let threads = chat["threads"].as_array().unwrap().iter();
     let mut msgs = threads.flat_map(|t| t["page"]["msgs"].as_array().unwrap().clone());
     msgs.any(|m| m["kind"] == "note" && m["ask"]["id"] == "q1" && m["open"] == true)

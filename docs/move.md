@@ -25,7 +25,7 @@ Copy the secret files with their mode (`scp -p` or `rsync -a`), never through ch
 
 ## Regenerate, don't copy
 
-- `~/.config/drover/claude/` (the per-role Claude profiles) and the Hermes profiles' hooks:
+- `~/.config/drover/claude/` (the per-role Claude profiles):
   `drover profiles sync`.
 - `gh auth login`, shed (and its job), and each fleet's `local` checkout (`git clone https://github.com/<repo>.git <local>`).
 - Then `drover setup` ([setup.md](setup.md#4-watchdog)): the tick and serve jobs, `tailscale serve`
@@ -34,7 +34,7 @@ Copy the secret files with their mode (`scp -p` or `rsync -a`), never through ch
 ## Don't copy
 
 - Worktrees (each workspace root): their branches are on GitHub; new lanes make fresh ones.
-- Lock files, `check.at` / `drive.at` and `tick.log`: the new host writes its own.
+- Lock files, `check.at` / `drive-fast.at` and `tick.log`: the new host writes its own.
 
 ## New hostname
 

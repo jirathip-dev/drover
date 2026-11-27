@@ -722,3 +722,41 @@ fn a_promise_missed_after_the_disk_recovers_names_the_current_hold_not_disk_low_
     assert!(why.contains("SERIAL_BUSY") && why.contains("#983"), "{why:?} {ev:?}");
     assert!(!why.contains("DISK_LOW") && !why.contains("disk nearly full"), "{why}");
 }
+
+#[test]
+fn waiting_flow_prints_each_issues_state_condition_and_row_under_its_line() {
+    let (c, r) = fixture("waiting-flow");
+    let (code, out) = run(&c, &r, &["waiting", "sendmeter", "--flow"]);
+    assert_eq!(code, 0, "{out}");
+    let flow = |n: u64| {
+        let at = out
+            .find(&format!("sendmeter #{n} "))
+            .unwrap_or_else(|| panic!("#{n}: {out}"));
+        let line = out[at..].lines().nth(1).unwrap_or_default().to_string();
+        assert!(line.starts_with("  flow: "), "#{n}: {out}");
+        line
+    };
+    let l = flow(42);
+    assert!(l.contains("  flow: fix · lane gone · "), "{l}");
+    assert!(
+        l.contains(" · pr pending · verdict none · ask none · turn done · issue/build/pushed ("),
+        "{l}"
+    );
+    assert!(l.contains("PR 100 at 605297c"), "{l}");
+    let l = flow(1);
+    assert!(
+        l.contains("  flow: impl · ")
+            && l.contains(" · pr none · verdict none · ask open · turn none · issue/build/ask-open ("),
+        "{l}"
+    );
+    assert!(l.contains("ask q3 open") && l.contains("no PR;"), "{l}");
+    let l = flow(4);
+    assert!(l.contains("  flow: ready · lane none · host up · pr green · verdict PASS · ask none · turn none · issue/ready/merge ("), "{l}");
+    let l = flow(6);
+    assert!(
+        l.contains(" · verdict written · ") && l.contains("issue/review/record ("),
+        "{l}"
+    );
+    let (_, plain) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert!(!plain.contains("flow: "), "{plain}");
+}

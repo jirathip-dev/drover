@@ -1,0 +1,14 @@
+flow = "pass"
+states = ["due"]
+reads = []
+ignores = ["lane", "host", "pr", "verdict", "ask", "turn"]
+
+[[row]]
+id = "late"
+when = {  }
+do = "wait"
+then = ["raise-card"]
+owner = "drive"
+timeout = "act_minutes"
+escalate = "owner"
+say = "work is due and no pass finished"

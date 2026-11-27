@@ -144,7 +144,7 @@ fn no_ask_id_is_counted_from_the_log_in_core() {
 }
 
 const ADDR: &str = "127.0.0.1:7777";
-const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
+const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"claude\"\nprofile = \"fleet-design\"\n";
 const HEAD: &str = "dddddddddddddddddddddddddddddddddddddddd";
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
@@ -169,10 +169,11 @@ impl Runner for Meet {
             let mut n = self.met.lock().unwrap();
             *n += 1;
             self.cv.notify_all();
-            let _ = self
-                .cv
-                .wait_timeout_while(n, Duration::from_secs(5), |n| *n < 2)
-                .unwrap();
+            drop(
+                self.cv
+                    .wait_timeout_while(n, Duration::from_secs(5), |n| *n < 2)
+                    .unwrap(),
+            );
         }
         self.fake.run(prog, args)
     }

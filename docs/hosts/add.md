@@ -19,8 +19,7 @@
    - drover itself. The lane's tool-guard hook calls `drover hook`, and the Claude profile lives under that host's
      own home: each spawn there syncs its lane's profile (`profiles sync --profile <p> --role <r>`, #592).
 
-   drover never copies credentials to another host: a lane on another host runs on that host's own Claude login
-   (a `shed-acp` host's, through the main host's token proxy).
+   drover never copies credentials to another host: a lane on another host runs on that host's own Claude login.
 3. Add the host to fleet.toml:
 
 ```toml
@@ -33,8 +32,3 @@ tags = ["gpu"]          # hand tags, added to the detected ones
 root = "~/lanes"        # workspace root on that host (default ~/.local/share/drover/work)
 enabled = true          # false: no new lanes go there (see below)
 ```
-
-#1616: every `drover drive` keeps the main host's shed machines in step with `[hosts]`: each enabled host with a
-`machine` shed does not list (`shed machine ls --json`) is added as `shed machine add <machine> <machine>`. drover
-never removes a machine from shed, for a host turned off or dropped from `[hosts]` either. `doctor` shows one
-`✗ shed machine <machine>` row per missing one, with that command as the fix.

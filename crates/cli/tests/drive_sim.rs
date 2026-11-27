@@ -218,7 +218,7 @@ struct Sim {
 
 impl Sim {
     fn new(name: &str, extra: &str) -> Sim {
-        let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+        let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
         let c = ctx(&tmpdir(name), &format!("{base}{extra}"));
         std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
         assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
@@ -291,7 +291,11 @@ impl Sim {
     }
 
     fn started(&self) {
-        let (runs, seen) = (self.sh.all("run"), self.born.borrow().len());
+        let sends = self.sh.all("send").into_iter();
+        let runs: Vec<_> = sends
+            .filter(|p| p["text"].as_str().is_some_and(|t| t.starts_with("# Brief")))
+            .collect();
+        let seen = self.born.borrow().len();
         for p in runs.iter().skip(seen) {
             let n = p["name"].as_str().unwrap().to_string();
             self.born.borrow_mut().push((n.clone(), self.w.now()));
@@ -308,7 +312,7 @@ impl Sim {
             let running = self.w.procs.borrow().contains_key(&TICK_PID);
             if (self.w.now() - T0).is_multiple_of(300) && !running {
                 if let Some(h) = self.tick.take() {
-                    let _ = h.join();
+                    h.join().ok();
                 }
                 self.start(&["tick"], TICK_PID);
             }
@@ -372,6 +376,8 @@ fn worktrees_sharing_files_count_once_and_hold_no_spawn() {
     std::fs::write(a.join("target.bin"), vec![7u8; 1 << 20]).unwrap();
     std::fs::hard_link(a.join("target.bin"), b.join("target.bin")).unwrap();
     assert_eq!(run(&s.c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
+    let (code, o) = run(&s.at(), &*s.w, &["housekeep", "--only", "budget"]);
+    assert_eq!(code, 0, "{o}");
     s.minutes(10, |_| {});
     let du = std::fs::read_to_string(s.c.state.with_file_name("worktrees.du")).unwrap();
     let total: u64 = du.split_whitespace().next().unwrap().parse().unwrap();

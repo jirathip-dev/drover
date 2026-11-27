@@ -59,17 +59,18 @@ struct Proc(std::process::Child, std::path::PathBuf);
 
 impl Drop for Proc {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        self.0.kill().ok();
+        self.0.wait().ok();
         for _ in 0..10 {
             let passes = drover::db::leases(&self.1, "drive-").into_iter();
             for l in passes.filter(|l| !l.key.trim_end_matches(".lock").ends_with(|c: char| c.is_ascii_digit())) {
                 if l.pid == 0 || l.pid == std::process::id() {
                     continue;
                 }
-                let _ = std::process::Command::new("kill")
+                std::process::Command::new("kill")
                     .args(["-9", &l.pid.to_string()])
-                    .status();
+                    .status()
+                    .ok();
                 drover::db::release(&self.1, &l.key, Some(&l));
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -87,7 +88,6 @@ fn service(c: &drover::Ctx, bin: &std::path::Path, api: &str) -> (Proc, u64) {
         .env("FLEET_CONFIG", &c.config)
         .env("FLEET_STATE", &c.state)
         .env("FLEET_WORKTREES", &c.worktrees)
-        .env("FLEET_HERMES_PROFILES", &c.homes["hermes"])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
@@ -121,6 +121,8 @@ fn a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes() {
     );
     let mut c = ctx(&d, &cfg);
     c.now = drover::now();
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
+    synced(&c);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "1"]).0, 0);
     let (bin, log) = (d.join("bin"), d.join("gh.log"));
     std::fs::create_dir_all(&bin).unwrap();
@@ -132,8 +134,11 @@ fn a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes() {
                 log.display()
             ),
         ),
-        ("hermes", "exit 0".into()),
-        ("shed", "exit 0".into()),
+        ("claude", "exit 0".into()),
+        (
+            "shed",
+            "case \"$*\" in 'help run') echo '--meta <JSON>';; 'agents --json') echo '[{\"id\": \"claude-acp\", \"cmd\": [\"claude-acp\"]}]';; esac".into(),
+        ),
     ];
     for (name, body) in tools {
         let p = bin.join(name);

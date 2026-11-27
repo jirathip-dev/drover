@@ -24,20 +24,19 @@ fn shed_fake() -> Fake {
     Fake::default().reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-fn requests(p: &Value) -> Vec<(String, Value)> {
+fn start(p: &Value) -> Vec<String> {
     let cmds = p["commands"].as_array().unwrap();
-    let shed = cmds.iter().filter(|c| c[0] == "shed" && c[2].is_string());
-    shed.map(|c| {
-        let params = serde_json::from_str(c[2].as_str().unwrap()).unwrap_or_default();
-        (c[1].as_str().unwrap().to_string(), params)
-    })
-    .collect()
+    let run = cmds
+        .iter()
+        .find(|c| c[0] == "shed" && c[1] == "run")
+        .expect("no shed run");
+    let words = run.as_array().unwrap().iter();
+    words.map(|w| w.as_str().unwrap().to_string()).collect()
 }
 
-fn typed(p: &Value, head: &str) -> String {
-    let sends = requests(p).into_iter().filter(|r| r.0 == "send");
-    let texts = sends.map(|r| r.1["text"].as_str().unwrap().trim_end_matches('\r').to_string());
-    texts.into_iter().find(|t| t.starts_with(head)).unwrap()
+fn line(p: &Value) -> String {
+    let s = start(p);
+    s[s.iter().position(|w| w == "--").unwrap() + 3].clone()
 }
 
 fn export(p: &Value) -> Vec<String> {
@@ -48,86 +47,71 @@ fn low() -> Vec<String> {
     drover::spawn::BACKGROUND.split_whitespace().map(String::from).collect()
 }
 
-fn raw_export(p: &Value) -> Vec<String> {
-    typed(p, "export ").split_whitespace().map(String::from).collect()
+fn claude(model: &[&str]) -> Vec<String> {
+    let env = ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1"];
+    [&env[..], model].concat().into_iter().map(String::from).collect()
 }
 
-fn launch(p: &Value) -> Vec<String> {
-    let (mut out, mut w, mut quoted, mut any) = (vec![], String::new(), false, false);
-    for ch in typed(p, "exec ").chars() {
-        match ch {
-            '\'' => (quoted, any) = (!quoted, true),
-            c if c.is_whitespace() && !quoted => {
-                if any {
-                    out.push(std::mem::take(&mut w));
-                }
-                any = false;
-            }
-            c => (w, any) = (w + &c.to_string(), true),
-        }
-    }
-    out.extend(any.then_some(w));
-    out.into_iter().filter(|w| !w.contains("/.build/")).collect()
+fn exports(p: &Value) -> String {
+    line(p).split(" && mkdir ").next().unwrap().to_string()
+}
+
+fn raw_export(p: &Value) -> Vec<String> {
+    exports(p).split_whitespace().map(String::from).collect()
 }
 
 #[test]
 fn claude_role_dry_run_uses_synced_profile() {
     let d = tmpdir("spawn-claude");
-    let c = ctx(&d, &CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\""));
+    let c = ctx(&d, &CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\""));
     let sh = on_shed(&c);
     let r = shed_fake();
     let p = plan(&c, &r, "impl");
-    let run = &requests(&p)[0];
-    assert_eq!(run.0, "run");
+    let s = start(&p);
     assert_eq!(
-        (&run.1["name"], &run.1["labels"]["harness"]),
-        (&json!("sendmeter-impl-12"), &json!("claude"))
+        s[..9],
+        [
+            "shed",
+            "run",
+            "--acp",
+            "claude-acp",
+            "--policy",
+            "allow",
+            "--name",
+            "sendmeter-impl-12",
+            "--cwd"
+        ]
     );
+    assert!(s.windows(2).any(|w| w == ["--label", "harness=claude"]), "{s:?}");
     assert_eq!(
         export(&p),
         [
-            "export",
-            "DROVER_LANE='sendmeter:12:impl'",
-            &port12(),
-            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
-            "DISABLE_AUTOUPDATER=1",
-            "&&",
-            "unset",
-            "CLAUDE_CODE_OAUTH_TOKEN",
+            vec!["export".to_string(), "DROVER_LANE='sendmeter:12:impl'".into(), port12()],
+            claude(&["ANTHROPIC_MODEL='opus'"]),
+            low()
         ]
-        .map(String::from)
-        .into_iter()
-        .chain(low())
-        .collect::<Vec<_>>()
+        .concat()
     );
-    let start = launch(&p);
     let prof = c.config.parent().unwrap().join("claude/fleet-impl");
     let (settings, role) = (prof.join("settings.json"), prof.join("role.md"));
-    let expect = [
-        "exec",
-        "claude",
-        "--dangerously-skip-permissions",
-        "--settings",
-        settings.to_str().unwrap(),
-        "--append-system-prompt-file",
-        role.to_str().unwrap(),
-        "--model",
-        "opus",
-    ];
-    assert_eq!(&start[..expect.len()], &expect);
-    let kick = start.last().unwrap();
-    assert!(
-        kick.starts_with("Read ") && kick.ends_with("issue-12/.brief.md and execute it fully."),
-        "{kick}"
+    let profile = format!(
+        " && mkdir -p .claude && cp '{}' .claude/settings.local.json && cp '{}' CLAUDE.local.md && unset SHED BERTH && ",
+        settings.display(),
+        role.display()
     );
+    assert!(line(&p).contains(&profile), "{}", line(&p));
+    assert_eq!(s.last().unwrap(), "claude-acp", "{s:?}");
     assert_eq!(p["branch"], "issue-12");
     assert_eq!(p["base"], "origin/staging");
-    let wait = requests(&p).pop().unwrap();
     assert_eq!(
-        (wait.0.as_str(), &wait.1["name"], &wait.1["until"]),
-        ("wait", &json!("sendmeter-impl-12"), &json!(["working", "blocked"]))
+        p["commands"].as_array().unwrap().last().unwrap(),
+        &json!(["shed", "send", "sendmeter-impl-12", "<the brief>"])
     );
-    assert_eq!(*r.calls.borrow(), ["which shed"], "dry-run calls nothing");
+    assert_eq!(
+        *r.calls.borrow(),
+        ["which shed", "shed agents --json", "shed help run"],
+        "a dry run only reads"
+    );
     assert!(sh.methods().is_empty(), "dry-run calls nothing");
     assert!(read(&c.state).unwrap().is_empty(), "dry-run logs nothing");
 }
@@ -196,21 +180,22 @@ fn rev_role_flags_new_commit_trailers_only() {
 }
 
 #[test]
-fn cap_asks_only_when_your_own_pr_crosses() {
+fn briefs_ask_for_src_net_and_name_no_line_cap() {
     let d = tmpdir("help-429");
+    let (code, out) = run(&ctx(&d, CONFIG), &Fake::default(), &["cap", "sendmeter"]);
+    assert_ne!(code, 0, "{out}");
     let (_, help) = run(&ctx(&d, CONFIG), &Fake::default(), &["help", "--agent"]);
     let impl_ = drover::spawn::role_prompt("impl").replace("\n  ", " ");
+    let orch = drover::spawn::role_prompt("orchestrator");
     for t in [impl_.as_str(), help.as_str()] {
-        for w in [
-            "The cap in `ci/cap.toml` is a total for the repo",
-            "ask only when your own PR, merged onto current integration, would put the total over `line_cap`; trim first, then ask `--kind owner`.",
-            "Being near the cap, or another PR's growth, is never a reason to ask.",
-            "A `STAGING_WOULD_BREAK` from the cap after another merge is a fix round: trim, or ask under the same rule.",
-            "Never edit `ci/cap.toml` or add a raise in `ci/cap.d/` (the hook refuses both",
-            "`drover cap <fleet>`'s queue-wide view",
-            "in one orchestrator-filed issue (recommended), or trim.",
-        ] {
-            assert!(t.contains(w), "{w}");
+        assert!(
+            t.contains("The PR body states `src/ net +N (budget +M)` with one line on why; the budget is a guide, never a gate."),
+            "{t}"
+        );
+    }
+    for t in [impl_.as_str(), help.as_str(), orch] {
+        for w in ["line_cap", "CAP.toml", "drover cap", "cap ask"] {
+            assert!(!t.contains(w), "{w}");
         }
     }
 }
@@ -255,6 +240,7 @@ fn fleet_env_is_exported_into_the_lane() {
                 format!("CARGO_TARGET_DIR='{home}/.cache/drover/target/sendmeter'"),
                 "npm_config_cache='/c/npm'".into(),
             ],
+            claude(&["ANTHROPIC_MODEL='opus'"]),
             low()
         ]
         .concat()
@@ -271,14 +257,19 @@ fn shared_cache_is_exported_into_the_lane() {
     let _sh = on_shed(&c);
     assert_eq!(
         export(&plan(&c, &shed_fake(), "impl"))[3..],
-        [vec!["CARGO_TARGET_DIR='/c/cache/sendmeter/target'".to_string()], low()].concat()
+        [
+            vec!["CARGO_TARGET_DIR='/c/cache/sendmeter/target'".to_string()],
+            claude(&["ANTHROPIC_MODEL='opus'"]),
+            low()
+        ]
+        .concat()
     );
 }
 
 #[test]
 fn each_lane_gets_its_own_cargo_target_under_its_root() {
     let other = "[fleet.other]\nrepo = \"jirathip-dev/other\"\nlocal = \"/tmp/x/other\"\nintegration = \"staging\"\n\n\
-                 [fleet.other.role.impl]\nharness = \"hermes\"\nprofile = \"fleet-impl\"\n\n";
+                 [fleet.other.role.impl]\nharness = \"claude\"\nprofile = \"fleet-impl\"\n\n";
     let cfg = other.to_string() + CONFIG + "\n[hosts.mini]\nroot = \"/c\"\n";
     let c = ctx(&tmpdir("spawn-shared-target"), &cfg);
     let _sh = on_shed(&c);
@@ -386,6 +377,7 @@ fn fleet_env_expands_drover_port() {
         export(&plan(&c, &shed_fake(), "impl"))[3..],
         [
             vec![format!("PORT='{p}'"), format!("VITE='http://127.0.0.1:{p}/'")],
+            claude(&["ANTHROPIC_MODEL='opus'"]),
             low()
         ]
         .concat()
@@ -472,7 +464,7 @@ fn reopen_spawn_clones_no_build_folder() {
         .reply("cp ", "");
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
-    assert!(sh.called("run", "sendmeter-impl-12"), "the lane started");
+    assert!(sh.has("sendmeter-impl-12"), "the lane started");
     let calls = r.calls.borrow();
     assert!(
         !calls.iter().any(|c| c.contains(" worktree add ")),
@@ -488,9 +480,11 @@ struct Checkout<'a> {
     f: &'a Fake,
     wt: std::path::PathBuf,
     sh: &'a FakeShed,
+    kicking: Shared<bool>,
     beside: Shared<bool>,
+    waited: Shared<bool>,
     cloned: Shared<bool>,
-    typed: Shared<usize>,
+    started: Shared<bool>,
 }
 
 const LANE: &str = "sendmeter-impl-12";
@@ -509,16 +503,18 @@ impl drover::runner::Runner for Checkout<'_> {
             std::fs::create_dir_all(&self.wt).unwrap();
             std::fs::write(self.wt.join("Cargo.lock"), "a").unwrap();
         }
+        if prog == "shed" && args.first().is_some_and(|a| a == "send") {
+            self.kicking.set(true);
+            self.waited.set(within(|| self.cloned.get()));
+        }
         if prog == "cp" {
-            self.beside.set(within(|| !self.sh.all("wait").is_empty()));
-            self.typed.set(self.sh.sent(LANE).len());
-            self.sh.lock().waits.remove(LANE);
+            self.beside.set(within(|| self.kicking.get()));
+            self.started.set(self.sh.has(LANE));
             self.cloned.set(true);
         }
         self.f.run(prog, args)
     }
     fn sleep(&self, secs: u64) {
-        within(|| self.cloned.get());
         self.f.sleep(secs);
     }
 }
@@ -537,7 +533,6 @@ fn failed_clone_is_logged_and_the_spawn_succeeds() {
         );
     let c = ctx(&d, &cfg);
     let sh = on_shed(&c);
-    sh.wait_ends(LANE, "timeout");
     let wt = c.worktrees.join("sendmeter/issue-12");
     let f = shed_fake()
         .once(&format!("git -C {} rev-parse --verify", local.display()), 1, "")
@@ -548,18 +543,20 @@ fn failed_clone_is_logged_and_the_spawn_succeeds() {
         f: &f,
         wt,
         sh: &sh,
+        kicking: Shared::new(false),
         beside: Shared::new(false),
+        waited: Shared::new(false),
         cloned: Shared::new(false),
-        typed: Shared::new(0),
+        started: Shared::new(false),
     };
     let (code, out) = run(&c, &ck, &["spawn", "sendmeter", "12", "impl"]);
-    assert!(ck.beside.get(), "the clone runs beside the kick, not before it");
+    assert!(
+        ck.beside.get() && ck.waited.get(),
+        "the clone runs beside the kick, not before or after it"
+    );
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
     assert_eq!(f.count("cp "), 1, "one clone attempt, never a fallback copy");
-    assert!(
-        ck.typed.get() >= 2,
-        "the lane starts (its exports and harness typed) before the clone"
-    );
+    assert!(ck.started.get(), "the lane starts before the clone");
     let ev = read(&c.state).unwrap();
     let e = ev
         .iter()
@@ -577,8 +574,8 @@ fn failed_clone_is_logged_and_the_spawn_succeeds() {
 }
 
 #[test]
-fn hermes_role_dry_run_kicks_prompt_after_boot() {
-    let d = tmpdir("spawn-hermes");
+fn rev_role_dry_run_starts_on_the_issue_branch() {
+    let d = tmpdir("spawn-rev");
     let c = ctx(&d, CONFIG);
     let _sh = on_shed(&c);
     let p = plan(&c, &shed_fake(), "rev");
@@ -590,37 +587,29 @@ fn hermes_role_dry_run_kicks_prompt_after_boot() {
                 "DROVER_LANE='sendmeter:12:rev'".into(),
                 format!("DROVER_PORT={}", lane_port(None, "sendmeter/rev-12-r1", &[])),
             ],
+            claude(&[]),
             low()
         ]
         .concat()
     );
-    let start = launch(&p);
-    assert_eq!(
-        start[start.len() - 3..],
-        ["-p".to_string(), "fleet-rev".into(), "--accept-hooks".into()]
-    );
-    assert_eq!(start[..2], ["exec", "hermes"].map(String::from));
-    let q = requests(&p);
-    let at = q.iter().position(|r| r.0 == "wait").unwrap();
-    assert_eq!(
-        (&q[at].1["name"], &q[at].1["output"]),
-        (&json!("sendmeter-rev-12-r1"), &json!("❯"))
-    );
-    assert_eq!(q[at + 1].0, "send");
-    assert_eq!(q[at + 1].1, json!({"name": "sendmeter-rev-12-r1", "text": p["kick"]}));
+    let s = start(&p);
+    assert_eq!(s[6..8], ["--name", "sendmeter-rev-12-r1"].map(String::from));
     assert_eq!(p["base"], "origin/issue-12");
 }
 
 #[test]
 fn real_claude_spawn_writes_brief_and_logs_event() {
     let d = tmpdir("spawn-real");
-    let c = ctx(&d, &CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\""));
+    let c = ctx(&d, &CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\""));
     let sh = on_shed(&c);
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();
-    let (code, _) = run(&c, &shed_fake(), &["spawn", "sendmeter", "12", "impl"]);
-    assert_eq!(code, 1);
-    assert!(!sh.called("run", LANE));
+    let prof = c.config.parent().unwrap().join("claude/fleet-impl");
+    std::fs::remove_dir_all(&prof).unwrap();
+    let (code, out) = run(&c, &shed_fake(), &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("REFUSED ACP_UNGUARDED"), "{out}");
+    assert!(!sh.has(LANE));
     let (code, _) = run(&c, &Fake::default(), &["profiles", "sync"]);
     assert_eq!(code, 0);
     let settings = std::fs::read_to_string(c.config.parent().unwrap().join("claude/fleet-impl/settings.json")).unwrap();
@@ -635,19 +624,13 @@ fn real_claude_spawn_writes_brief_and_logs_event() {
         .reply("git -C", "");
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
-    let sent = sh.sent(LANE);
-    assert!(
-        sent.len() == 2
-            && sent[0].starts_with("export DROVER_LANE='sendmeter:12:impl'")
-            && sent[1].starts_with("exec 'claude'"),
-        "{sent:?}"
-    );
-    assert!(
-        sent[1].contains("'--name' 'sendmeter · impl #12 · Fix the meter' '--mcp-config'"),
-        "{}",
-        sent[1]
-    );
+    assert_eq!(r.count("shed run --acp claude-acp"), 1, "{:?}", r.calls.borrow());
     let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
+    assert_eq!(
+        sh.sent(LANE),
+        std::slice::from_ref(&brief),
+        "the brief is the one prompt"
+    );
     assert!(brief.contains("# ROLE: IMPLEMENTER") && brief.contains("AC: it works") && brief.contains("Closes #12"));
     let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
     assert_eq!(
@@ -665,7 +648,7 @@ fn real_claude_spawn_writes_brief_and_logs_event() {
 }
 
 #[test]
-fn unconfirmed_hermes_kick_presses_enter_then_exits_4() {
+fn an_acp_session_never_ready_gets_no_prompt_and_exits_4() {
     let d = tmpdir("spawn-unconfirmed");
     let c = ctx(&d, CONFIG);
     let sh = on_shed(&c);
@@ -676,16 +659,10 @@ fn unconfirmed_hermes_kick_presses_enter_then_exits_4() {
         .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
         .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
         .reply("git -C", "");
-    let (code, _) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
-    assert_eq!(code, 4);
-    let prompts = sh.sent(LANE).into_iter().filter(|t| t.starts_with("Read "));
-    assert_eq!(prompts.count(), 3, "3 attempts");
-    let enters = sh
-        .all("keys")
-        .into_iter()
-        .filter(|k| k["name"] == LANE && k["keys"] == json!(["Enter"]));
-    assert_eq!(enters.count(), 3);
-    assert_eq!(r.count("sleep 10"), 2, "attempts spaced ≥10 s apart");
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 4, "{out}");
+    assert!(sh.has(LANE), "{out}");
+    assert_eq!(sh.sent(LANE), Vec::<String>::new());
     let ev = read(&c.state).unwrap();
     assert_eq!(ev.last().unwrap().val("confirmed"), false);
 }
@@ -733,23 +710,18 @@ fn help_agent_doc_is_complete() {
 }
 
 #[test]
-fn effort_maps_to_each_harness_flag() {
+fn each_roles_effort_is_its_own_or_the_fleet_default() {
     let d = tmpdir("effort-claude");
     let cfg = CONFIG
         .replace(
-            "harness  =  \"hermes\"    # toggled in tests",
+            "harness  =  \"claude\"    # toggled in tests",
             "harness = \"claude\"\neffort = \"high\"",
         )
-        .replace("review_rounds = 3", "review_rounds = 3\neffort = \"xhigh\"");
+        .replace("stall_minutes = 30", "stall_minutes = 30\neffort = \"xhigh\"");
     let c = ctx(&d, &cfg);
     let _sh = on_shed(&c);
-    let p = plan(&c, &shed_fake(), "impl");
-    let start = launch(&p);
-    let at = start.iter().position(|w| w == "--effort").expect("--effort");
-    assert_eq!(start[at + 1], "high");
-    assert_eq!(p["effort"], "high");
-    let start = launch(&plan(&c, &shed_fake(), "rev"));
-    assert_eq!(start[start.len() - 2..], ["--reasoning", "xhigh"].map(String::from));
+    assert_eq!(plan(&c, &shed_fake(), "impl")["effort"], "high");
+    assert_eq!(plan(&c, &shed_fake(), "rev")["effort"], "xhigh");
 
     let d = tmpdir("effort-none");
     let c = ctx(
@@ -758,15 +730,13 @@ fn effort_maps_to_each_harness_flag() {
             .replace("effort = \"xhigh\"", "effort = \"none\""),
     );
     let _sh = on_shed(&c);
-    assert!(!launch(&plan(&c, &shed_fake(), "impl")).contains(&"--effort".to_string()));
-    let start = launch(&plan(&c, &shed_fake(), "rev"));
-    assert_eq!(start[start.len() - 2..], ["--reasoning", "none"].map(String::from));
+    assert_eq!(plan(&c, &shed_fake(), "impl")["effort"], "none");
+    assert_eq!(plan(&c, &shed_fake(), "rev")["effort"], "none");
 
     let d = tmpdir("effort-unset");
     let c = ctx(&d, CONFIG);
     let _sh = on_shed(&c);
-    let start = launch(&plan(&c, &shed_fake(), "rev"));
-    assert!(!start.contains(&"--reasoning".to_string()), "{start:?}");
+    assert!(plan(&c, &shed_fake(), "rev")["effort"].is_null());
 }
 
 #[test]
@@ -777,15 +747,8 @@ fn invalid_effort_is_refused_at_config_load() {
             "fleet.sendmeter.role.rev: effort \"max\" must be one of",
         ),
         (
-            CONFIG.replace("review_rounds = 3", "review_rounds = 3\neffort = \"ultra\""),
+            CONFIG.replace("stall_minutes = 30", "stall_minutes = 30\neffort = \"ultra\""),
             "limits.effort: \"ultra\" must be one of",
-        ),
-        (
-            CONFIG.replace(
-                "harness = \"hermes\"\nprofile = \"fleet-rev\"",
-                "harness = \"dsh\"\nprofile = \"fleet-rev\"\neffort = \"high\"",
-            ),
-            "fleet.sendmeter.role.rev: harness dsh does not support effort \"high\"",
         ),
     ] {
         let d = tmpdir("effort-bad");
@@ -801,9 +764,7 @@ fn invalid_effort_is_refused_at_config_load() {
 #[test]
 fn claude_dry_run_names_every_role() {
     let d = tmpdir("spawn-name");
-    let cfg = CONFIG
-        .replace("harness = \"hermes\"", "harness = \"claude\"")
-        .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+    let cfg = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"")
         + "\n[fleet.sendmeter.role.design]\nharness = \"claude\"\nprofile = \"fleet-design\"\n";
     let c = ctx(&d, &cfg);
     let _sh = on_shed(&c);
@@ -818,10 +779,7 @@ fn claude_dry_run_names_every_role() {
         let (code, out) = run(&c, &shed_fake(), args);
         assert_eq!(code, 0, "{out}");
         let p: Value = serde_json::from_str(&out).unwrap();
-        let start = launch(&p);
-        let at = start.iter().position(|w| w == "--name").expect("--name");
-        assert_eq!(start[at + 1], p["title"].as_str().unwrap());
-        start[at + 1].clone()
+        p["title"].as_str().unwrap().to_string()
     };
     let dry = |n: &str, role: &str| name(&["spawn", "sendmeter", n, role, "--dry-run", "--json"]);
     assert_eq!(dry("12", "impl"), "sendmeter · impl #12 · fix the meter");
@@ -862,10 +820,10 @@ fn lane_title_strips_prefixes_and_cuts_at_words() {
 
 #[test]
 fn a_spawned_lanes_build_command_runs_in_the_background_but_a_design_lanes_does_not() {
-    let stages = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\n\n[fleet.sendmeter.role.architect]\nharness = \"hermes\"\n";
+    let stages = "\n[fleet.sendmeter.role.design]\nharness = \"claude\"\n\n[fleet.sendmeter.role.architect]\nharness = \"claude\"\n";
     let c = ctx(&tmpdir("spawn-nice"), &format!("{CONFIG}{stages}"));
     let _sh = on_shed(&c);
-    let line = typed(&plan(&c, &shed_fake(), "impl"), "export ");
+    let line = exports(&plan(&c, &shed_fake(), "impl"));
     let build = "sh -c 'ps -o pri= -o nice= -p $$'";
     let out = std::process::Command::new("sh")
         .args(["-c", &format!("{line} && {build}")])
@@ -882,7 +840,7 @@ fn a_spawned_lanes_build_command_runs_in_the_background_but_a_design_lanes_does_
     };
     assert!(background, "the build's pri, nice: {got:?}");
     for role in ["design", "architect"] {
-        let line = typed(&plan(&c, &shed_fake(), role), "export ");
+        let line = exports(&plan(&c, &shed_fake(), role));
         assert!(
             !line.contains("taskpolicy") && !line.contains("renice"),
             "{role}: {line}"
@@ -897,7 +855,7 @@ fn a_new_lane_worktree_leaves_out_docs_archive_unless_opted_out() {
         let c = ctx(
             &d,
             &CONFIG
-                .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+                .replace("harness  =  \"claude\"", "harness = \"claude\"")
                 .replace("[limits]", cfg),
         );
         let _sh = on_shed(&c);

@@ -6,13 +6,25 @@ use serde_json::{json, Value};
 use shed_proto::{KeysParams, Method, ReadParams, RunParams, SendParams, Target, WaitParams};
 use std::path::PathBuf;
 
-/// An ACP lane's start: its adapter command, the role's MCP servers file (`--mcp`), the provider's session options (`--meta`) and whether shed may never hibernate it (`--no-hibernate`).
+/// An ACP lane's start: its adapter command, the role's MCP servers file (`--mcp`), the provider's session options (`--meta`), whether shed may never hibernate it (`--no-hibernate`) and its shed account (`--account`; none on another host).
 #[derive(Clone, Debug, Default)]
 pub struct Acp {
     pub cmd: Vec<String>,
     pub mcp: Option<PathBuf>,
     pub meta: Option<Value>,
     pub awake: bool,
+    pub account: Option<crate::config::Account>,
+    pub judge: Option<Judged>,
+}
+
+/// A judged lane's start: shed's `judge` policy runs `cmd` per permission request within `secs`; `env` is what the judge and the agent share.
+#[derive(Clone, Debug, Default)]
+pub struct Judged {
+    pub cmd: String,
+    pub secs: u64,
+    pub env: Vec<(String, String)>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
 }
 
 /// Shed's lanes: terminals named as their agents, labelled `fleet`, `issue`, `role` and `harness`.
@@ -43,6 +55,7 @@ impl Shed {
             parent: None,
             rows: None,
             cols: None,
+            ..RunParams::default()
         }
     }
     /// Start lane `name` (`run_params`), or with `[runtime] acp` that ACP agent (shed's CLI makes its bridge), its adapter `cmd` after `--`. A terminal of that name an earlier lane left exited is removed first.
@@ -93,17 +106,15 @@ impl Shed {
     /// The `shed run --acp` words that start ACP lane `name`.
     pub fn acp_argv(&self, name: &str, labels: &[(&str, String)], cwd: &str, acp: &Acp) -> Vec<String> {
         let id = self.0.acp.as_deref().unwrap_or_default();
-        let mut a = argv(&[
-            "run",
-            "--acp",
-            id,
-            "--policy",
-            &self.0.policy,
-            "--name",
-            name,
-            "--cwd",
-            cwd,
-        ]);
+        let policy = if acp.judge.is_some() { "judge" } else { &self.0.policy };
+        let mut a = argv(&["run", "--acp", id, "--policy", policy]);
+        if let Some(j) = &acp.judge {
+            a.extend(argv(&["--judge", &j.cmd, "--judge-secs", &j.secs.to_string()]));
+            a.extend(j.env.iter().flat_map(|(k, v)| ["--env".into(), format!("{k}={v}")]));
+            a.extend(j.model.iter().flat_map(|m| ["--model".into(), m.clone()]));
+            a.extend(j.effort.iter().flat_map(|e| ["--effort".into(), e.clone()]));
+        }
+        a.extend(argv(&["--name", name, "--cwd", cwd]));
         a.extend(
             acp.mcp
                 .iter()
@@ -111,6 +122,11 @@ impl Shed {
         );
         a.extend(acp.meta.iter().flat_map(|m| ["--meta".into(), m.to_string()]));
         a.extend(acp.awake.then(|| "--no-hibernate".to_string()));
+        a.extend(
+            acp.account
+                .iter()
+                .flat_map(|x| ["--account".into(), x.word().to_string()]),
+        );
         a.extend(labels.iter().flat_map(|(k, v)| ["--label".into(), format!("{k}={v}")]));
         a.extend(
             (!acp.cmd.is_empty())
@@ -164,6 +180,7 @@ fn request(a: &[String]) -> Option<(Method, Value)> {
                     events: false,
                     before: None,
                     n: None,
+                    since: None,
                 }),
             )
         }
@@ -209,20 +226,6 @@ fn request(a: &[String]) -> Option<(Method, Value)> {
                     name: t.into(),
                     until,
                     output: None,
-                    timeout: secs
-                }),
-            )
-        }
-        ["pane", "wait-output", t, ..] => {
-            let output = flag("--match").map(String::from);
-            (
-                Method::Wait,
-                json!(WaitParams {
-                    children: None,
-                    kind: None,
-                    name: t.into(),
-                    until: vec![],
-                    output,
                     timeout: secs
                 }),
             )
@@ -294,16 +297,6 @@ impl Shed {
     }
 }
 
-/// A harness launch (`start_cmd`, a `pane run` line) as the line a lane's shell runs: `exec <line>`.
-pub fn typed(pane: &str, start: &[String]) -> Vec<String> {
-    run_argv(pane, &["exec", &start.get(3..).unwrap_or_default().join(" ")])
-}
-
-/// Pane word `a` as the shed request a plan shows (`shed <method> <params>`).
-pub fn shed_line(a: &[String]) -> Vec<String> {
-    request(a).map_or_else(|| a.to_vec(), |(m, v)| argv(&["shed", m.name(), &v.to_string()]))
-}
-
 fn shed(r: &dyn Runner) -> Result<Shed> {
     r.shed()
         .map(Shed)
@@ -350,14 +343,9 @@ pub fn send_text_argv(pane: &str, text: &str) -> Vec<String> {
     argv(&["pane", "send-text", pane, text])
 }
 
-/// The page's reply: the text (dsh: `pane send-text`, else `agent prompt`), then Enter.
-pub fn reply(r: &dyn Runner, dsh: bool, agent: &str, pane: &str, text: &str) -> Result<()> {
-    let first = if dsh {
-        send_text_argv(pane, text)
-    } else {
-        prompt_argv(agent, text)
-    };
-    for a in [first, keys_argv(pane, "Enter")] {
+/// The page's reply: the text (`agent prompt`), then Enter.
+pub fn reply(r: &dyn Runner, agent: &str, pane: &str, text: &str) -> Result<()> {
+    for a in [prompt_argv(agent, text), keys_argv(pane, "Enter")] {
         let o = exec(r, &a)?;
         if o.code != 0 {
             bail!("{}: {}", a.get(..2).unwrap_or_default().join(" "), o.stderr.trim());
@@ -381,15 +369,15 @@ pub fn awake(r: &dyn Runner, agent: &str) -> Result<()> {
 }
 
 /// `reply` once `awake` lets drover's prompt through.
-pub fn tell(r: &dyn Runner, dsh: bool, agent: &str, pane: &str, text: &str) -> Result<()> {
+pub fn tell(r: &dyn Runner, agent: &str, pane: &str, text: &str) -> Result<()> {
     awake(r, agent)?;
-    reply(r, dsh, agent, pane, text)
+    reply(r, agent, pane, text)
 }
 
 /// Whether a prompt the caller just entered moved the agent off idle within 20 s, typing it once more if not.
 pub fn landed(r: &dyn Runner, agent: &str, pane: &str, text: &str) -> bool {
     let up = || exec(r, &wait_working_argv(agent, "20000")).is_ok_and(|o| o.code == 0);
-    up() || (reply(r, false, agent, pane, text).is_ok() && up())
+    up() || (reply(r, agent, pane, text).is_ok() && up())
 }
 
 /// Close the session, its log archived first (`session::transcript::archive`); one already gone is closed.
@@ -426,27 +414,8 @@ pub fn run_argv(pane: &str, words: &[&str]) -> Vec<String> {
     argv(&[&["pane", "run", pane][..], words].concat())
 }
 
-/// The harness `kind` launched in `pane` with `args`, as its shell line.
-pub fn start_argv(kind: &str, pane: &str, args: &[String]) -> Vec<String> {
-    run_argv(pane, &[&crate::hosts::quote(kind, args)])
-}
-
 /// `agent wait` until the kick shows as working or blocked.
 pub fn wait_working_argv(agent: &str, ms: &str) -> Vec<String> {
     let a = format!("agent wait {agent} --until working --until blocked --timeout {ms}");
     argv(&a.split(' ').collect::<Vec<_>>())
-}
-
-pub fn wait_output_argv(pane: &str, pattern: &str, ms: &str) -> Vec<String> {
-    argv(&[
-        "pane",
-        "wait-output",
-        pane,
-        "--match",
-        pattern,
-        "--source",
-        "visible",
-        "--timeout",
-        ms,
-    ])
 }

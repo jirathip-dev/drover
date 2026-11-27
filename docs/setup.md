@@ -24,7 +24,7 @@ harness = "claude"
 profile = "lane-rev"
 
 [runtime]
-kind = "shed"
+kind = "shed-acp"
 EOF
 drover profiles sync                # per-role profiles and the lane hook
 drover spawn app 12 impl --dry-run  # print the plan; drop --dry-run to launch it
@@ -37,10 +37,10 @@ Self-update installs CI's signed release build of the `[self_update] branch` hea
 
 | Command | What it does |
 |---|---|
-| `drive` / `timer` / `tick` | one pass; the job that runs it; check, then drive |
+| `drive` / `timer` / `tick` | one pass; the job that runs it; drive only (`housekeep` runs check and the chores) |
 | `queue` / `next` / `pause` / `resume` | the ordered queue; the first ready issue; hold a fleet |
 | `spawn` / `adopt` / `turn` | start a lane; record a running one; a lane's end of turn |
-| `verdict` / `merge` / `cap` | a verdict pinned to the head sha; merge if every gate passes; the line cap |
+| `verdict` / `merge` | a verdict pinned to the head sha; merge if every gate passes |
 | `status` / `board` / `waiting` / `serve` | per-issue state; compact board; who waits on whom; the server |
 | `ask` / `answer` / `asks` / `thread` / `card` | decisions; orchestrator threads; run cards |
 | `check` / `clean` / `reclaim` / `kill` | alerts; reclaim done lanes and build folders; stop a lane, work saved |
@@ -50,7 +50,7 @@ Self-update installs CI's signed release build of the `[self_update] branch` hea
 ## 1. Install
 
 You need `git`, `gh` (logged in), shed (its server job running, [runtimes](runtimes.md)), a Rust toolchain, and
-at least one harness: Claude Code and/or Hermes. Every lane terminal call goes through `crates/core/src/term.rs`, the
+Claude Code. Every lane call goes through `crates/core/src/term.rs`, the
 one adapter.
 
 ```sh
@@ -123,15 +123,14 @@ runs it every 5 minutes. Check it worked:
 
 One command, safe to run again: `drover setup`. It writes and loads the tick job and the board
 job ([6](#6-board-on-the-phone-tailscale)), sets up `tailscale serve`, runs `drover profiles sync`,
-plus the self-update and daily clean jobs ([below](#self-update-and-the-daily-clean-557)), makes sure each fleet's
+plus the housekeeping and self-update jobs ([below](#housekeeping-and-self-update-1805-557)), makes sure each fleet's
 `merge_label` exists in its repo ([ci.md](ci.md)), then runs
 `drover doctor` and exits with its code. Each step prints `✓ done`, `= already` or
 `✗ <error> → <fix>`; `--no-load` writes the jobs without loading them.
 
-Run it every 5 minutes: `drover timer install`. That is the tick job alone: `drover tick` every
-5 minutes runs `drover check` (alerts once per stall, dead lane or unmerged ready issue), then
-`drover drive` (every fleet's loop, [lanes/drive.md](lanes/drive.md)). No cron and
-no Hermes needed.
+Run it every 5 minutes: `drover timer install`. The tick job: `drover tick` every 5 minutes starts
+`drover drive` (every fleet's loop, [lanes/drive.md](lanes/drive.md)) and nothing else; housekeeping
+has its own job ([below](#housekeeping-and-self-update-1805-557)). No cron needed.
 
 - macOS: `~/Library/LaunchAgents/dev.drover.tick.plist` (`--label` picks another label),
   `StartInterval 300`, `RunAtLoad`, loaded with `launchctl bootstrap gui/$(id -u) <plist>`.
@@ -146,27 +145,23 @@ no Hermes needed.
 
 `drover timer status` prints loaded or not and the last tick. Undo: `drover timer remove`
 (unloads it and deletes its files). Check it worked: `drover doctor` shows `✓ timer` and a
-`watchdog check` that ran under 15 minutes ago.
+`watchdog tick` and a `housekeep` row that ran under 10 minutes ago.
 
-### Self-update and the daily clean (#557)
+### Housekeeping and self-update (#1805, #557)
 
-drover needs no Hermes: `drover setup` (or `timer install`) also writes two jobs of its own.
+`drover setup` (or `timer install`) also writes two jobs of its own, and removes the old
+`dev.drover.clean` job.
 
+- `dev.drover.housekeep` runs `drover housekeep` every `[limits] slow_secs` (5 minutes): `check` (the alerts
+  `drover check` sends), `clean` (worktrees of merged or closed issues, never a live one; unsaved work goes to
+  `wip/` first, as `clean --yes`; a failure alerts `clean-failed` once), `budget` (frees idle lanes' build folders
+  over `worktree_budget_gb`), `hogs`, `backlog`, `trim` (other hosts' build folders), then the scheduled `jobs`,
+  `soak`, `hotspots` and `compact`. Each chore gets its own `slow_secs` budget: one past it is logged
+  (`housekeep: <chore> past its N s budget; skipped`) and the next starts. A drive pass never calls a chore and
+  never waits on one; it reads their results from the event log and state files. `drover housekeep --only <chore>`
+  runs one. Doctor's `housekeep` row shows the last run, its length and any chore past its budget.
 - `dev.drover.update` runs `drover self-update` every 5 minutes: it installs CI's signed release build of the
   `[self_update] branch` head on every host, staged first and swapped together. See [releases](releases.md).
-- `dev.drover.clean` runs `drover clean --scheduled` daily at 03:30: worktrees of merged or closed issues idle
-  3 days or more, at most 10 a run, never a live one; unsaved work goes to `wip/` first, as `clean --yes`. A refusal or failure alerts `clean-failed` once; a clean
-  no-op is silent.
-
-Moving off Hermes: once both jobs have run (`self-updated` in the log after a staging merge),
-remove the old Hermes fleet jobs, once:
-
-```sh
-hermes -p orchestrator cron remove d8bbecd490d7   # fleet-check (auto-install)
-hermes -p orchestrator cron remove 064cdd00dc56   # the old worktree-prune job
-```
-
-Other Hermes cron jobs (a one-off reminder) stay.
 
 ## 5. Alerts
 

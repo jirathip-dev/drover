@@ -241,9 +241,13 @@ impl Real {
             })
         };
         if let Some(dir) = dir.filter(|d| hung(d, probe_wait(), list)) {
-            return fail(format!("{dir} is on a disk that is not answering"));
+            return Ok(Out {
+                code: 124,
+                stderr: format!("{dir} is on a disk that is not answering: {}", listed(dir)),
+                ..Out::default()
+            });
         }
-        let mut pipes = None;
+        let (mut pipes, mut pid) = (None, None);
         let end = crate::clock::instant() + limit;
         let start = || {
             use std::os::unix::process::CommandExt;
@@ -255,11 +259,17 @@ impl Real {
                 .stderr(Stdio::piped())
                 .spawn()
                 .with_context(|| format!("cannot run {prog}"))?;
+            pid = Some(c.id());
+            running().insert(c.id());
             let _ = c.stdin.take().map(|mut s| s.write_all(input));
             pipes = Some((drain(c.stdout.take()), drain(c.stderr.take())));
             Ok(c)
         };
-        let ended = settle(dir.map(String::as_str), limit, start)?;
+        let ended = settle(dir.map(String::as_str), limit, start);
+        if let Some(p) = pid {
+            running().remove(&p);
+        }
+        let ended = ended?;
         let text = |b: std::sync::mpsc::Receiver<Vec<u8>>| {
             let left = end.saturating_duration_since(crate::clock::instant());
             let v = b.recv_timeout(left).ok()?;
@@ -286,6 +296,19 @@ impl Real {
     }
 }
 
+fn running() -> std::sync::MutexGuard<'static, std::collections::BTreeSet<u32>> {
+    static RUNNING: std::sync::Mutex<std::collections::BTreeSet<u32>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    RUNNING.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// SIGKILL to the process group of every call still running here, as a pass ending on its deadline leaves none behind.
+pub fn kill_running() {
+    for p in running().iter() {
+        drover_sys::kill_group(*p);
+    }
+}
+
 /// The argv a `git` really gets (graft-blind: drover never sees a lane's baseline view); every other program's is unchanged.
 pub fn plain(prog: &str, args: &[String]) -> Vec<String> {
     let git = std::path::Path::new(prog).file_name().is_some_and(|n| n == "git");
@@ -293,7 +316,7 @@ pub fn plain(prog: &str, args: &[String]) -> Vec<String> {
     flag.into_iter().chain(args.iter().cloned()).collect()
 }
 
-/// Every call's time limit by the program's file name, unless `run_for` gives one: a call that hits it is killed and exits 124. - `security`, `codesign`: 10 s; they wait on the login Keychain, which can stop answering (11-08). - `git clone|fetch|pull|push`: 10 min; a large repo over the network. - `cp`, `rm`: 10 min; copying (spawn's build cache) or deleting a worktree's build folder of many GB. - `cargo`: 30 min; self-update's release build. - `ssh` through `hosts::On`: the limit of the command it carries; `hosts bootstrap`'s installs 30 min by `run_for`. - anything else: 60 s.
+/// Every call's time limit by the program's file name, unless `run_for` gives one: a call that hits it is killed and exits 124. - `security`, `codesign`: 10 s; they wait on the login Keychain, which can stop answering (11-08). - `git clone|fetch|pull|push`: 10 min; a large repo over the network. - `cp`, `rm`: 10 min; copying (spawn's build cache) or deleting a worktree's build folder of many GB. - `compact`: 10 min; its dry run mirrors the repo. - `cargo`: 30 min; self-update's release build. - `ssh` through `hosts::On`: the limit of the command it carries. - arch-check's `generate`: `gate_check_minutes` by `run_for`. - anything else: 60 s.
 pub fn limit(prog: &str, args: &[String]) -> Duration {
     let net = |w: &String| ["clone", "fetch", "pull", "push"].contains(&w.as_str());
     let name = std::path::Path::new(prog)
@@ -310,7 +333,7 @@ pub fn limit(prog: &str, args: &[String]) -> Duration {
     let secs = match &*name {
         "security" | "codesign" => 10,
         "git" if args.iter().any(net) => 600,
-        "cp" | "rm" => 600,
+        "cp" | "rm" | "compact" => 600,
         "cargo" => 1800,
         _ => 60,
     };
@@ -325,6 +348,19 @@ pub fn probe_wait() -> Duration {
 /// `dir` listed within `disk_probe_secs` (`hung`'s probe); a dead disk's root is skipped for the pass.
 pub fn answers(dir: &std::path::Path) -> bool {
     !hung(&dir.to_string_lossy(), probe_wait(), list)
+}
+
+fn listed(dir: &str) -> String {
+    let idle = crate::host::idle().map_or("?".into(), |i| format!("{i:.0}%"));
+    match probes().get(dir) {
+        Some(p) if !p.done.load(std::sync::atomic::Ordering::Relaxed) => {
+            format!(
+                "folder listing still running after {:.1} s at cpu idle {idle}",
+                p.at.elapsed().as_secs_f64()
+            )
+        }
+        _ => format!("a call on its disk ran out of time; cpu idle {idle}"),
+    }
 }
 
 fn sick_for() -> Duration {
@@ -394,19 +430,19 @@ pub fn sicken(dir: &str) {
     }
 }
 
-/// Whether `dir`'s disk has stopped answering: `probe(dir)` (its disk and a listing) runs on its own thread and must finish within `wait`. A probe still running is never repeated: the folder stays hung, with no new thread, until it ends. A folder whose disk `sicken` marked is hung; one that answered is otherwise trusted for a minute.
+/// Whether `dir`'s disk has stopped answering: `probe(dir)` (its disk and a listing) runs on its own thread and must finish within `wait`, or within `disk_hung_secs` of its start while the host is over its load limit. A probe still running is never repeated: the folder stays hung, with no new thread, until it ends. A folder whose disk `sicken` marked is hung; one that answered is otherwise trusted for a minute.
 pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> + Send + 'static) -> bool {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
     use std::sync::Arc;
-    let (done, dev, end) = {
+    let (done, dev, at, end) = {
         let mut m = probes();
         if let Some(p) = m.get(dir) {
-            if !p.done.load(Relaxed) && crate::clock::instant() < p.end {
-                let (done, dev, end) = (p.done.clone(), p.dev.clone(), p.end);
+            if !p.done.load(Relaxed) {
+                let (done, dev, at, end) = (p.done.clone(), p.dev.clone(), p.at, p.end);
                 drop(m);
-                return hangs_past(&done, &dev, end);
+                return hangs_past(&done, &dev, at, end);
             }
-            if !p.done.load(Relaxed) || is_sick(p.dev.load(Relaxed)) {
+            if is_sick(p.dev.load(Relaxed)) {
                 return true;
             }
             if p.at.elapsed() < Duration::from_secs(crate::config::limits().disk_trust_secs) {
@@ -414,28 +450,36 @@ pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> +
             }
         }
         let (done, dev) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicU64::new(0)));
-        let end = crate::clock::instant() + wait;
+        let at = crate::clock::instant();
+        let end = at + wait;
         m.insert(
             dir.into(),
             Probe {
                 done: done.clone(),
                 dev: dev.clone(),
-                at: crate::clock::instant(),
+                at,
                 end,
             },
         );
-        (done, dev, end)
+        (done, dev, at, end)
     };
     let (d, v, owned) = (done.clone(), dev.clone(), dir.to_string());
     std::thread::spawn(move || {
         v.store(probe(&owned).unwrap_or(0), Relaxed);
         d.store(true, Relaxed);
     });
-    hangs_past(&done, &dev, end)
+    hangs_past(&done, &dev, at, end)
 }
 
-fn hangs_past(done: &std::sync::atomic::AtomicBool, dev: &std::sync::atomic::AtomicU64, end: Instant) -> bool {
+fn hangs_past(
+    done: &std::sync::atomic::AtomicBool,
+    dev: &std::sync::atomic::AtomicU64,
+    at: Instant,
+    end: Instant,
+) -> bool {
     use std::sync::atomic::Ordering::Relaxed;
+    let never = at + Duration::from_secs(crate::config::limits().disk_hung_secs);
+    let end = if crate::host::loaded() { end.max(never) } else { end };
     while crate::clock::instant() < end {
         if done.load(Relaxed) {
             return is_sick(dev.load(Relaxed));

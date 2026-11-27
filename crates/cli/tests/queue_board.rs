@@ -75,7 +75,7 @@ fn every_queue_write_posts_through_api_v1() {
         json!({"ts": T - 60, "issues": {"30": issue(30), "31": issue(31)}}).to_string(),
     )
     .unwrap();
-    let r = OnShed::new(Fake::default().reply("which hermes", "/usr/local/bin/hermes\n"));
+    let r = OnShed::new(Fake::default().reply("which claude", "/usr/local/bin/claude\n"));
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let queue = || api(&s, ADDR, "", T, "queue");
@@ -130,7 +130,7 @@ fn every_queue_write_posts_through_api_v1() {
         "set",
         &[
             ("role", "impl"),
-            ("harness", "hermes"),
+            ("harness", "claude"),
             ("model", "sonnet"),
             ("effort", ""),
         ],
@@ -147,8 +147,8 @@ fn every_queue_write_posts_through_api_v1() {
 fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
     let sh = FakeShed::new();
     let cfg = format!(
-        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\naccount = \"C\"\n\n\
-         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n\n\
+         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n",
         sh.sock.display()
     );
     let mut c = ctx(&tmpdir("queue-thread-ask"), &cfg);
@@ -192,7 +192,7 @@ fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
         "{:?}",
         host.calls.borrow()
     );
-    let chat: Value = serde_json::from_str(&api(&s, ADDR, &cookie, T, "chat")).unwrap();
+    let chat: Value = chat_all(&s, ADDR, &cookie, T);
     let t = (chat["threads"].as_array().unwrap().iter())
         .find(|t| t["id"] == "t6")
         .unwrap_or_else(|| panic!("{chat}"));

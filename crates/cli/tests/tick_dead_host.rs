@@ -48,7 +48,7 @@ impl Runner for Dead {
 }
 
 fn setup(name: &str, air_cfg: &str) -> (drover::Ctx, FakeShed) {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n{air_cfg}");
     let c = ctx(&tmpdir(name), &toml);
     let st = c.state.parent().unwrap();
@@ -93,7 +93,7 @@ fn main_host() -> Fake {
 }
 
 #[test]
-fn a_host_whose_ssh_never_connects_with_50_worktrees_costs_the_tick_under_a_minute() {
+fn a_host_whose_ssh_never_connects_with_50_worktrees_costs_the_tick_and_its_clean_under_a_minute() {
     for (name, air_cfg, probe_ok) in [("dead-on", "", true), ("dead-off", "enabled = false\n", false)] {
         let (c, sh) = setup(name, air_cfg);
         let r = Dead {
@@ -104,26 +104,33 @@ fn a_host_whose_ssh_never_connects_with_50_worktrees_costs_the_tick_under_a_minu
         };
         let (code, out) = run(&c, &r, &["tick"]);
         assert_eq!(code, 0, "{name}: {out}");
-        assert!(
-            sh.called("run", "sendmeter-impl-12"),
-            "{name}: drive's step runs: {out}"
-        );
+        assert!(sh.has("sendmeter-impl-12"), "{name}: drive's step runs: {out}");
         let sent = r.sent.borrow();
         assert!(r.spent.get() < 60, "{name}: {}s on the Air: {sent:#?}", r.spent.get());
         assert!(
             sent.len() <= 2,
             "{name}: one probe or one failed call, not one per worktree: {sent:#?}"
         );
+        drop(sent);
+        let r = Dead {
+            f: main_host(),
+            probe_ok,
+            spent: Shared::new(0),
+            sent: Shared::default(),
+        };
+        let (code, out) = run(&c, &r, &["housekeep", "--only", "clean"]);
+        assert_eq!(code, 0, "{name}: {out}");
+        let sent = r.sent.borrow();
+        assert!(r.spent.get() < 60, "{name}: {}s on the Air: {sent:#?}", r.spent.get());
+        assert!(sent.len() <= 2, "{name}: one probe or one failed call: {sent:#?}");
         if probe_ok {
             continue;
         }
-        for n in 100..150u64 {
-            let wt = format!("air:/Users/me/.herdr/worktrees/sendmeter/issue-{n}");
-            assert!(
-                out.contains(&format!("keep {wt}: host unreachable")),
-                "{name} {n}: {out}"
-            );
-        }
+        assert!(out.contains("air: 50 lanes, host off — not checked"), "{name}: {out}");
+        assert!(
+            !out.contains("herdr/worktrees/sendmeter/issue-1"),
+            "{name}: one line, not one per worktree: {out}"
+        );
     }
 }
 

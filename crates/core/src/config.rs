@@ -37,14 +37,12 @@ pub struct Config {
     pub telegram: Option<toml::Value>,
     /// `[chat]`, new threads' orchestrator defaults over the fleet's `role.orchestrator` (`orchestrator::defaults`).
     pub chat: Chat,
-    /// `[ci_runners]`, the owner's CI runner VMs (`crate::runners`, docs/hosts.md).
-    pub ci_runners: Option<CiRunners>,
-    /// `[proxy]`, the token proxy remote ACP lanes' model calls go through (`crate::proxy`, docs/hosts.md).
-    pub proxy: ProxyCfg,
     /// `[self_update]`, the release branch the live install follows and the optional staging serve.
     pub self_update: SelfUpdate,
     /// `[hygiene]`, the history and issue convention every fleet follows unless its own `[fleet.<n>.hygiene]` key says otherwise.
     pub hygiene: Hygiene,
+    /// `[job.<name>]`, a scheduled job for every fleet over the built-in entry (`crate::jobs`).
+    pub job: BTreeMap<String, toml::Table>,
 }
 
 /// `branch` (default `main`) `self-update` installs; `staging_serve` adds a read-only staging build on `staging_addr`.
@@ -64,55 +62,6 @@ impl Default for SelfUpdate {
             staging_addr: "127.0.0.1:7787".into(),
         }
     }
-}
-
-/// The proxy's port (on this host, and on each `shed-acp` host through an ssh tunnel), where it forwards, how long a lane key lives; `token-file`, the one 0600 token it signs with (`Proxy::setup`'s).
-#[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
-pub struct ProxyCfg {
-    pub port: u16,
-    pub upstream: String,
-    pub key_hours: u64,
-    #[serde(rename = "token-file")]
-    pub token_file: Option<String>,
-}
-
-impl Default for ProxyCfg {
-    fn default() -> Self {
-        ProxyCfg {
-            port: 41990,
-            upstream: crate::providers::proxied().map_or("", |p| p.upstream).into(),
-            key_hours: 12,
-            token_file: None,
-        }
-    }
-}
-
-/// The repo's runner VMs: their recipe (`provider`), spec, slots per VM, label, and the `max_vms` / `usd_day` cap; `vms` are the ones made by hand (`runners add|remove` change the set in the log); `local_*` the mini's runners.
-#[derive(Clone, Debug, Deserialize)]
-pub struct CiRunners {
-    pub provider: String,
-    pub repo: String,
-    pub label: String,
-    pub size: String,
-    #[serde(default)]
-    pub ttl_hours: u64,
-    #[serde(default)]
-    pub snapshots: bool,
-    pub slots: u64,
-    pub max_vms: u64,
-    pub usd_day: f64,
-    #[serde(default)]
-    pub vms: Vec<String>,
-    pub local_label: Option<String>,
-    pub local_stop: Option<String>,
-    /// The VMs' runner service (the recipe's `{service}`).
-    #[serde(default = "ci_service")]
-    pub service: String,
-}
-
-fn ci_service() -> String {
-    "ci-runner".into()
 }
 
 /// The harness, model and effort a new thread's orchestrator starts on; each unset one is the role's.
@@ -177,26 +126,27 @@ impl OrchestratorCfg {
 #[serde(try_from = "String")]
 pub enum RuntimeKind {
     #[default]
-    Shed,
     ShedAcp,
-    Berth,
 }
 
 /// The load error for the retired runtime, with its migration.
-pub const NO_RUNTIME: &str = "no shed runtime: set [runtime] kind = \"shed-acp\" or \"shed\" (docs/runtimes.md)";
+pub const NO_RUNTIME: &str = "no shed runtime: set [runtime] kind = \"shed-acp\" (docs/runtimes.md)";
 
 pub const RETIRED_RUNTIME: &str = "runtime \"herdr\" is retired (#721): set kind = \"shed-acp\" (each lane an ACP \
-     session) or \"shed\" (each lane a shed terminal); docs/runtimes.md has the migration";
+     session); docs/runtimes.md has the migration";
+
+/// The load error for `kind = "shed"` (and its old name `berth`): terminal lanes are gone, every lane is an ACP session.
+pub const TERMINAL_RUNTIME: &str = "runtime \"shed\" (terminal lanes) is retired (#1726): use kind = \"shed-acp\", \
+     each lane an ACP session (docs/runtimes.md)";
 
 impl TryFrom<String> for RuntimeKind {
     type Error = String;
     fn try_from(k: String) -> std::result::Result<Self, String> {
         match k.as_str() {
-            "shed" => Ok(Self::Shed),
             "shed-acp" => Ok(Self::ShedAcp),
-            "berth" => Ok(Self::Berth),
+            "shed" | "berth" => Err(TERMINAL_RUNTIME.into()),
             "herdr" => Err(RETIRED_RUNTIME.into()),
-            _ => Err(format!("unknown runtime \"{k}\": \"shed-acp\" or \"shed\"")),
+            _ => Err(format!("unknown runtime \"{k}\": \"shed-acp\"")),
         }
     }
 }
@@ -213,17 +163,13 @@ pub struct Runtime {
 impl Runtime {
     /// The shed runtime it names.
     pub fn shed(&self) -> crate::shed::Shed {
-        let acp = self.kind == RuntimeKind::ShedAcp;
         crate::shed::Shed {
             wire: crate::shed::Wire::Socket(self.socket.as_deref().map_or_else(crate::shed::default_socket, expand)),
             acp: self
                 .acp
                 .clone()
-                .or_else(|| acp.then(crate::providers::default_acp).flatten().map(Into::into)),
-            policy: self
-                .acp_policy
-                .clone()
-                .unwrap_or_else(|| if acp { "allow" } else { "ask" }.into()),
+                .or_else(|| crate::providers::default_acp().map(Into::into)),
+            policy: self.acp_policy.clone().unwrap_or_else(|| "allow".into()),
         }
     }
 }
@@ -246,19 +192,11 @@ pub struct HostCfg {
     pub roots: Vec<String>,
     #[serde(default = "yes")]
     pub enabled: bool,
-    /// A cloud host's recipe (`boat`, or `<config>/recipes/<name>.toml`), size, limits and idle stop (20 min).
-    pub cloud: Option<String>,
-    pub size: Option<String>,
-    pub budget_usd_month: Option<f64>,
-    pub max_hours_day: Option<f64>,
-    pub idle_stop_minutes: Option<u64>,
-    /// Its lanes' command rules: `deny_commands` replaces the fleet's list, `deny_commands_add` extends it, and `allow_commands` drops entries (unset: a cloud host allows `CLOUD_ALLOW`, a Mac nothing).
+    /// Its lanes' command rules: `deny_commands` replaces the fleet's list, `deny_commands_add` extends it, and `allow_commands` drops entries.
     pub deny_commands: Option<Vec<Deny>>,
     #[serde(default)]
     pub deny_commands_add: Vec<Deny>,
     pub allow_commands: Option<Vec<String>>,
-    /// `shed-acp`: the runtime its lanes start in (unset: the fleet's, as before).
-    pub runtime: Option<RuntimeKind>,
     /// Lanes running a turn at once on this host, all fleets (unset: no cap).
     pub max_working: Option<usize>,
     /// Lanes starting at once on this host (unset: `[limits] start_max`; the main host: `max_parallel_spawns`).
@@ -274,18 +212,10 @@ pub struct HostCfg {
     pub heavy_kind_max: BTreeMap<String, usize>,
     /// Minutes a heavy check waits for a slot before it runs anyway, logged `heavy-timeout` (unset: 30).
     pub heavy_wait_minutes: Option<u64>,
-    /// Who issues gh's token here: `managed` (default) warns before it expires, `external` never does.
-    #[serde(default)]
-    pub github_token: GithubToken,
-}
-
-/// Who issues a host's GitHub token.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum GithubToken {
-    #[default]
-    Managed,
-    External,
+    /// Admission limits on this host over `[limits]`' (unset: those).
+    pub min_cpu_idle: Option<f64>,
+    pub min_free_mem_gb: Option<f64>,
+    pub swapout_rate: Option<f64>,
 }
 
 /// The point a starting lane frees its start slot.
@@ -296,9 +226,6 @@ pub enum StartRelease {
     Confirmed,
 }
 
-/// A cloud host is a disposable machine: its lanes may start containers.
-pub const CLOUD_ALLOW: [&str; 3] = ["docker", "docker compose", "supabase start"];
-
 impl HostCfg {
     /// Its workspace roots in order, as written (none set: empty).
     pub fn roots(&self) -> Vec<String> {
@@ -306,19 +233,8 @@ impl HostCfg {
         v.extend(self.root.clone().filter(|_| v.is_empty()));
         v
     }
-    /// Whether health looks at gh's token here: a cloud host whose token drover manages.
-    pub fn watches_token(&self) -> bool {
-        self.cloud.is_some() && self.github_token == GithubToken::Managed
-    }
     pub fn allow(&self) -> Vec<String> {
-        let def = || {
-            CLOUD_ALLOW
-                .iter()
-                .filter(|_| self.cloud.is_some())
-                .map(ToString::to_string)
-                .collect()
-        };
-        self.allow_commands.clone().unwrap_or_else(def)
+        self.allow_commands.clone().unwrap_or_default()
     }
     /// The lane hook's deny list on this host, from the fleet's (`fleet`).
     pub fn deny(&self, fleet: Vec<Deny>) -> Vec<Deny> {
@@ -418,6 +334,8 @@ pub struct Fleet {
     pub max_in_flight: Option<usize>,
     #[serde(default)]
     pub role: BTreeMap<String, Role>,
+    /// The shed account its roles' ACP runs use unless a role names one: a name or `auto`; unset is `auto`.
+    pub account: Option<String>,
     /// Replace the global `[[notify]]` for this fleet's events; `notify_global` sends to both.
     #[serde(default)]
     pub notify: Vec<Notify>,
@@ -462,34 +380,47 @@ pub struct Fleet {
     pub form_rounds: Option<u32>,
     /// This fleet's `respawn_per_pass`; `Config::parse` fills in `[limits]`'s when absent.
     pub respawn_per_pass: Option<usize>,
+    /// This fleet's `ci_flaky_retries`; `Config::parse` fills in `[limits]`'s when absent.
+    pub ci_flaky_retries: Option<u32>,
     /// This fleet's `stall_restart_hours`; unset = `[limits]`'s.
     pub stall_restart_hours: Option<u64>,
     /// Replaces `[limits] deny_commands` (empty = off); `deny_commands_add` adds to whichever applies.
     pub deny_commands: Option<Vec<Deny>>,
     #[serde(default)]
     pub deny_commands_add: Vec<Deny>,
-    /// Fast checks `merge` runs on the PR merged into current integration; unset = the cap check if `ci/cap.toml`.
+    /// Fast checks `merge` runs on the PR merged into current integration; unset = none.
     pub premerge: Option<Vec<Premerge>>,
-    /// Commands `turn done` runs in the lane's worktree before any review; unset = `./.gatekeeper/run check` with `.gatekeeper/run`, else `drover arch-check` with `.drover/arch.toml`, `cargo fmt --check` with `Cargo.toml`.
+    /// Commands `turn done` runs in the lane's worktree before any review; unset = the light checks only, `drover arch-check` with `.drover/arch.toml` and `cargo fmt --check` with `Cargo.toml` (never `./.gatekeeper/run check`): CI is the one full run.
     pub done_checks: Option<Vec<String>>,
-    /// The repo's own line-cap script `drover cap` reads `N / cap M` lines from; unset = the first `premerge` check naming a cap, else the built-in Rust count.
-    pub cap_script: Option<String>,
     /// `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
     pub land: Option<Land>,
     /// How `merge` lands a PR: `squash` (default) or `merge`.
     #[serde(default)]
     pub merge: MergeMode,
-    /// `weekly` (unset) has `tick` run `drover lesson` every 7 days; `off` opts out.
+    /// Old: `off` is `[fleet.<n>.job.lesson] every = "off"` (`Config::warnings`).
     pub lessons: Option<String>,
     /// `weekly` (unset) has `tick` run `drover hotspots` every 7 days; `off` opts out.
     pub hotspots: Option<String>,
-    /// `weekly` has `tick` run `drover triage` every 7 days; unset or `off`: only on demand.
+    /// Old: `weekly` or `off` is `[fleet.<n>.job.triage] every` (`Config::warnings`).
     pub triage: Option<String>,
-    /// `monthly` has `tick` run `drover deps` every 30 days and the advisory check daily; unset or `off`: only on demand.
+    /// Old: `monthly` or `off` is `[fleet.<n>.job.deps]` and `.advisory` `every` (`Config::warnings`).
     pub deps: Option<String>,
+    /// `[fleet.<n>.job.<name>]`, this fleet's keys over `[job.<name>]` and the built-in entry.
+    #[serde(default)]
+    pub job: BTreeMap<String, toml::Table>,
+    /// The jobs after their layers are merged and checked (`Config::parse`).
+    #[serde(skip)]
+    pub jobs: BTreeMap<String, crate::jobs::Job>,
+    /// `[fleet.<n>.soak]`: `tick` runs `drover soak` nightly against these targets; unset: never.
+    pub soak: Option<crate::soak::Soak>,
     /// `[fleet.<n>.heavy]`: kind → command patterns (`*` any text) its lanes run in a host's heavy slots.
     #[serde(default)]
     pub heavy: BTreeMap<String, Vec<String>>,
+    /// `[fleet.<n>.remote.<kind>]`: a heavy kind's commands run on `runners` build machines of a tag first.
+    #[serde(default)]
+    pub remote: BTreeMap<String, crate::heavy::Route>,
+    #[serde(default)]
+    pub remote_deny: Vec<String>,
     /// Globs of UI files: a PR touching one goes through the verify stage.
     #[serde(default)]
     pub ui_paths: Vec<String>,
@@ -511,6 +442,45 @@ pub struct Fleet {
     pub sandbox: Option<Sandbox>,
     /// lanes see history since this commit only (`drover baseline`); unset = all of it.
     pub baseline: Option<Baseline>,
+    /// `flow`: `shadow` (default) runs the flow table beside today's drive and only logs; `legacy` turns it off (#1649).
+    #[serde(default, rename = "flow")]
+    pub engine: Engine,
+}
+
+/// `[fleet.<n>] flow`: until slice 5 only today's drive acts, so `on` logs as `shadow` does.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Engine {
+    #[default]
+    Shadow,
+    On,
+    Legacy,
+}
+
+fn jobs(name: &str, all: &BTreeMap<String, toml::Table>, f: &Fleet) -> Result<BTreeMap<String, crate::jobs::Job>> {
+    let every = |j: &str| {
+        Some((
+            j.into(),
+            toml::Table::from_iter([("every".into(), old_every(f, j)?.into())]),
+        ))
+    };
+    let was = ["lesson", "triage", "deps", "advisory"]
+        .into_iter()
+        .filter_map(every)
+        .collect();
+    crate::jobs::entries(name, &[all, &was, &f.job])
+}
+
+fn old_every(f: &Fleet, job: &str) -> Option<&'static str> {
+    match (job, f.lessons.as_deref(), f.triage.as_deref(), f.deps.as_deref()) {
+        ("lesson", Some("off"), ..) | ("triage", _, Some("off"), _) | ("deps" | "advisory", .., Some("off")) => {
+            Some("off")
+        }
+        ("triage", _, Some("weekly"), _) => Some("7d"),
+        ("deps", .., Some("monthly")) => Some("30d"),
+        ("advisory", .., Some("monthly")) => Some("1d"),
+        _ => None,
+    }
 }
 
 /// One key unset falls back to `[hygiene]`, then to `HYGIENE`; `"off"` (`docs_trust = []`) opts out.
@@ -555,12 +525,8 @@ impl Hygiene {
 
     /// Doctor's line: `merge squash · comments strict · …`, `docs_trust` as its deny list.
     pub fn line(&self) -> String {
-        let deny = self.docs_trust.clone().unwrap_or_default();
-        let deny = if deny.is_empty() {
-            "off".into()
-        } else {
-            format!("deny {}", deny.join(","))
-        };
+        let deny = self.docs_trust.as_ref().filter(|d| !d.is_empty());
+        let deny = deny.map_or_else(|| "off".into(), |d| format!("deny {}", d.join(",")));
         let o = |v: &Option<String>| v.clone().unwrap_or_default();
         format!(
             "merge {} · comments {} · baseline {} · triage {} · docs_trust {deny} · issue_spec {} · docs {}",
@@ -694,6 +660,8 @@ pub struct Role {
     pub needs: Vec<String>,
     /// The host its lanes always run on (`main`: the one without `machine`); `design` defaults to `main`.
     pub host: Option<String>,
+    /// The shed account its ACP runs use: a name or `auto`; unset is the fleet's.
+    pub account: Option<String>,
     /// The default orchestrator `Config::parse` adds for a fleet without one: its impl role on `lane-orchestrator`.
     #[serde(skip)]
     pub default: bool,
@@ -712,13 +680,21 @@ impl Role {
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct Limits {
-    pub review_rounds: u32,
-    pub update_rounds: u32,
+    /// Retired (#1809): read only so doctor can say no round limit is left.
+    #[serde(skip_serializing)]
+    pub review_rounds: Option<u32>,
+    /// Retired (#1809), as `review_rounds`.
+    #[serde(skip_serializing)]
+    pub update_rounds: Option<u32>,
     pub stall_minutes: u64,
     pub silent_minutes: u64,
     pub ci_start_minutes: u64,
     pub ci_stuck_minutes: u64,
-    pub load_per_cpu: f64,
+    pub ci_flaky_retries: u32,
+    pub min_cpu_idle: f64,
+    /// Retired (#1780): read only so doctor can name `min_cpu_idle` instead.
+    #[serde(skip_serializing)]
+    pub load_per_cpu: Option<f64>,
     pub overload_minutes: u64,
     pub swapout_rate: f64,
     pub min_free_gb: f64,
@@ -740,14 +716,14 @@ pub struct Limits {
     pub slow_secs: u64,
     pub form_categories: Vec<String>,
     pub form_rounds: u32,
-    pub overflow_after_minutes: u64,
     pub import_max_age_hours: u64,
     pub max_pushes_per_pass: usize,
     pub max_parallel_spawns: usize,
+    pub max_in_flight_total: usize,
+    pub fleet_priority: Vec<String>,
     pub start_max: usize,
     pub start_release: StartRelease,
     pub spawn_pending_max_secs: u64,
-    pub admit_wait_secs: u64,
     pub acp_start_minutes: u64,
     pub webhook_poll_minutes: u64,
     pub keychain_readers: usize,
@@ -759,9 +735,11 @@ pub struct Limits {
     pub runtime_down_failures: u64,
     pub runtime_down_minutes: u64,
     pub pass_max_secs: u64,
+    pub fetch_fresh_secs: u64,
     pub ssh_connect_secs: u64,
     pub ssh_quick_secs: u64,
     pub ssh_call_secs: u64,
+    pub shed_call_secs: u64,
     pub ssh_sessions: usize,
     pub ssh_retry_secs: u64,
     pub link_beat_secs: u64,
@@ -772,14 +750,14 @@ pub struct Limits {
     pub link_down_minutes: u64,
     pub db_busy_secs: u64,
     pub db_retry_millis: u64,
-    pub cloud_idle_stop_minutes: u64,
     pub notify_secs: u64,
     pub gate_check_minutes: u64,
     pub shed_read_millis: u64,
-    pub proxy_connect_secs: u64,
-    pub proxy_retry_secs: u64,
+    pub acp_judge_secs: u64,
+    pub acp_probe_seconds: u64,
     pub service_call_secs: u64,
     pub disk_probe_secs: u64,
+    pub disk_hung_secs: u64,
     pub disk_sick_secs: u64,
     pub disk_trust_secs: u64,
     pub lane_read_secs: u64,
@@ -790,7 +768,6 @@ pub struct Limits {
     pub orchestrator_idle_minutes: u64,
     pub orchestrator_reply_minutes: u64,
     pub orchestrator_change_minutes: u64,
-    pub token_refresh_minutes: u64,
     pub ask_waiting_minutes: u64,
     pub outbox_stale_minutes: u64,
     pub host_offline_minutes: u64,
@@ -811,9 +788,13 @@ pub struct Limits {
     pub slo_pass_minutes: u64,
     pub stall_restart_hours: u64,
     pub self_update_wait_minutes: u64,
-    pub self_update_lag_minutes: u64,
     pub self_update_stage_secs: u64,
-    pub self_update_swap_secs: u64,
+    pub act_minutes: u64,
+    pub escalate_minutes: u64,
+    pub start_minutes: u64,
+    pub check_quiet_minutes: u64,
+    pub host_wait_minutes: u64,
+    pub card_ttl_minutes: u64,
 }
 
 /// A `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -845,13 +826,15 @@ pub const ORCHESTRATOR_CHANGE_MINUTES: u64 = 30;
 impl Default for Limits {
     fn default() -> Self {
         Limits {
-            review_rounds: 3,
-            update_rounds: 3,
+            review_rounds: None,
+            update_rounds: None,
             stall_minutes: 30,
             silent_minutes: 10,
             ci_start_minutes: 10,
             ci_stuck_minutes: 30,
-            load_per_cpu: 2.5,
+            ci_flaky_retries: 1,
+            min_cpu_idle: 15.0,
+            load_per_cpu: None,
             overload_minutes: 10,
             swapout_rate: 2000.0,
             min_free_gb: 10.0,
@@ -874,7 +857,6 @@ impl Default for Limits {
                 .unwrap_or_default(),
             fast_secs: 60,
             slow_secs: 300,
-            overflow_after_minutes: 10,
             form_categories: ["trailer", "stale-baseline", "docs-fresh", "migration-redate", "infra"]
                 .map(String::from)
                 .into(),
@@ -882,10 +864,11 @@ impl Default for Limits {
             import_max_age_hours: 24,
             max_pushes_per_pass: 3,
             max_parallel_spawns: 6,
+            max_in_flight_total: 6,
+            fleet_priority: vec![],
             start_max: 2,
             start_release: StartRelease::Started,
             spawn_pending_max_secs: 300,
-            admit_wait_secs: 5,
             acp_start_minutes: 3,
             webhook_poll_minutes: 10,
             keychain_readers: 3,
@@ -897,9 +880,11 @@ impl Default for Limits {
             runtime_down_failures: 5,
             runtime_down_minutes: 30,
             pass_max_secs: 60,
+            fetch_fresh_secs: 30,
             ssh_connect_secs: 10,
             ssh_quick_secs: 5,
             ssh_call_secs: 20,
+            shed_call_secs: 30,
             ssh_sessions: 8,
             ssh_retry_secs: 1,
             link_beat_secs: 5,
@@ -910,14 +895,14 @@ impl Default for Limits {
             link_down_minutes: 5,
             db_busy_secs: 60,
             db_retry_millis: 10,
-            cloud_idle_stop_minutes: 20,
             notify_secs: 15,
             gate_check_minutes: 30,
             shed_read_millis: 300,
-            proxy_connect_secs: 1,
-            proxy_retry_secs: 300,
+            acp_judge_secs: 30,
+            acp_probe_seconds: 120,
             service_call_secs: 2,
             disk_probe_secs: 2,
+            disk_hung_secs: 6,
             disk_sick_secs: 300,
             disk_trust_secs: 60,
             lane_read_secs: 5,
@@ -928,7 +913,6 @@ impl Default for Limits {
             orchestrator_idle_minutes: 30,
             orchestrator_reply_minutes: 10,
             orchestrator_change_minutes: ORCHESTRATOR_CHANGE_MINUTES,
-            token_refresh_minutes: 30,
             ask_waiting_minutes: 30,
             outbox_stale_minutes: 5,
             host_offline_minutes: 15,
@@ -949,358 +933,19 @@ impl Default for Limits {
             slo_pass_minutes: 5,
             stall_restart_hours: 2,
             self_update_wait_minutes: 45,
-            self_update_lag_minutes: 30,
             self_update_stage_secs: 300,
-            self_update_swap_secs: 120,
+            act_minutes: 10,
+            escalate_minutes: 30,
+            start_minutes: 10,
+            check_quiet_minutes: 120,
+            host_wait_minutes: 30,
+            card_ttl_minutes: 15,
         }
     }
 }
 
-/// Every `[limits]` key and what it sets, in docs/config/limits.md's order; `drover config show` prints them.
-pub const LIMIT_DOCS: &[(&str, &str)] = &[
-    (
-        "review_rounds",
-        "review rounds before an issue goes needs-human (ROUND_LIMIT)",
-    ),
-    (
-        "update_rounds",
-        "PASSed update rounds before `spawn --update` refuses UPDATE_LIMIT",
-    ),
-    ("stall_minutes", "a working lane with no event this long is stalled"),
-    (
-        "silent_minutes",
-        "an ACP lane's open turn with no session event this long is cancelled and nudged",
-    ),
-    (
-        "ci_start_minutes",
-        "a PR head with no checks this long after its push alerts `ci-missing`",
-    ),
-    (
-        "ci_stuck_minutes",
-        "a ready PR's check still pending this long after its run completed is re-run once, then alerts `ci-stuck`",
-    ),
-    ("load_per_cpu", "spawn refuses HOST_BUSY over this load per CPU"),
-    (
-        "overload_minutes",
-        "load per CPU over `load_per_cpu` this long alerts `host-overloaded` once, with the 5 busiest processes",
-    ),
-    (
-        "swapout_rate",
-        "pages swapped out per 2 s sample that count as swapping",
-    ),
-    ("min_free_gb", "spawn refuses DISK_LOW under this many GB free on `/`"),
-    (
-        "worktree_budget_gb",
-        "over this many GB of worktrees drive frees build folders, then spawn refuses DISK_BUDGET",
-    ),
-    (
-        "build_budget_gb",
-        "over this many GB of lane build folders drive trims their unlocked profiles",
-    ),
-    (
-        "sweep_remote",
-        "the scratch sweep runs on every enabled remote host too",
-    ),
-    (
-        "stray_roots",
-        "where `drover clean` looks for stray build folders and temp dirs",
-    ),
-    (
-        "min_free_mem_gb",
-        "spawn refuses MEM_LOW under this many GB of free + inactive memory",
-    ),
-    ("effort", "default reasoning effort for roles that set none"),
-    (
-        "ask_default_minutes",
-        "a routine ask unanswered this long takes its recommended option",
-    ),
-    (
-        "ask_expire_hours",
-        "an ask no live lane waits on expires after this many hours",
-    ),
-    (
-        "thread_resend_minutes",
-        "a new-thread send repeating a request id this soon gets the thread it made",
-    ),
-    (
-        "idle_reap_minutes",
-        "a lane done or idle this long loses the processes its agent started",
-    ),
-    (
-        "done_close_minutes",
-        "a done lane handed off this long closes its session",
-    ),
-    (
-        "idle_merged_minutes",
-        "a merged or closed issue's idle lane has its pane closed after this long",
-    ),
-    ("transcript_days", "a lane's agent keeps its transcripts this many days"),
-    ("deny_commands", "commands the lane hook refuses (default: containers)"),
-    (
-        "fast_secs",
-        "the fast job (`drive`) starts every fleet's pass every this many seconds",
-    ),
-    ("slow_secs", "the slow tick runs every this many seconds"),
-    ("form_categories", "the finding tags a `FAIL (form-only)` may carry"),
-    (
-        "form_rounds",
-        "form-only FAILs per issue that don't count as a review round",
-    ),
-    (
-        "overflow_after_minutes",
-        "every local host refused this long lets placement start a stopped cloud host",
-    ),
-    (
-        "import_max_age_hours",
-        "a remote host's asks older than this are never imported",
-    ),
-    (
-        "max_pushes_per_pass",
-        "push alerts `check` sends a pass before a summary",
-    ),
-    (
-        "max_parallel_spawns",
-        "concurrent detached spawn kicks on the main host (0: in the pass)",
-    ),
-    (
-        "start_max",
-        "lanes starting at once on a remote host that sets no `start_max`",
-    ),
-    (
-        "start_release",
-        "a start frees its slot once its harness is up (`started`) or its prompt is confirmed (`confirmed`)",
-    ),
-    (
-        "spawn_pending_max_secs",
-        "a spawn marker older than this is stale",
-    ),
-    (
-        "admit_wait_secs",
-        "a spawn's admission waits this long for another admission on its host before `SPAWN_PENDING`",
-    ),
-    (
-        "acp_start_minutes",
-        "an ACP lane with no event back this long after its first turn is a failed start",
-    ),
-    (
-        "webhook_poll_minutes",
-        "with GitHub webhooks on, the fast step re-reads PRs only this often",
-    ),
-    (
-        "keychain_readers",
-        "more Keychain readers up over 60 s alert `keychain-jammed`",
-    ),
-    ("reap_keychain_readers", "kill those stuck Keychain readers too"),
-    (
-        "respawn_max",
-        "failed starts of an issue's role in the window before spawn refuses RESPAWN_LOOP",
-    ),
-    (
-        "respawn_window_minutes",
-        "the window `respawn_max` counts failed starts in",
-    ),
-    (
-        "respawn_per_pass",
-        "respawns a drive pass starts, each through admission (a fleet may set its own)",
-    ),
-    (
-        "crash_wave_minutes",
-        "3+ lanes of one host dying by an adapter crash within it are one `lane-wave`: respawned together, one alert",
-    ),
-    (
-        "runtime_down_failures",
-        "lanes on one host failing to start or ending without a push in the window before drive trips `runtime-down` there",
-    ),
-    (
-        "runtime_down_minutes",
-        "the window `runtime_down_failures` counts in",
-    ),
-    (
-        "pass_max_secs",
-        "a fleet's pass ends itself here, `pass-slow` naming its step; a lock held past 2 × it logs `pass-stuck` and is taken over",
-    ),
-    ("ssh_connect_secs", "every host ssh's `-oConnectTimeout`"),
-    (
-        "ssh_quick_secs",
-        "a maintenance ssh's connect timeout and each pass's `ssh <host> true` probe",
-    ),
-    ("ssh_call_secs", "a remote call in a pass is killed after this long"),
-    (
-        "ssh_sessions",
-        "remote calls open at once to one host over its shared connection; more wait their turn (under sshd's `MaxSessions`)",
-    ),
-    (
-        "ssh_retry_secs",
-        "a call the shared connection refused (`Session open refused by peer`) runs again on it after this long, up to 3 times",
-    ),
-    ("link_beat_secs", "a host's watcher with nothing to say writes a beat this often"),
-    ("link_stale_secs", "no frame from a host's link for this long: it is cut and dialled again"),
-    ("link_retry_max_secs", "the longest wait between a link's dials (1 s, doubling)"),
-    ("link_poll_millis", "how often a watcher looks at each outbox, verdict.md and shed session for a change"),
-    ("link_sample_secs", "a watcher sends a whole report this often, changed or not"),
-    ("link_down_minutes", "a host with lanes whose link is not live this long alerts `link-down`"),
-    ("db_busy_secs", "the SQLite busy timeout"),
-    (
-        "db_retry_millis",
-        "the pause between a new database's WAL switch retries",
-    ),
-    (
-        "cloud_idle_stop_minutes",
-        "a cloud host's `idle_stop_minutes` when it sets none",
-    ),
-    (
-        "notify_secs",
-        "a notifier command or web push send is killed after this long",
-    ),
-    (
-        "gate_check_minutes",
-        "a premerge or gate check (a build or test run) is killed after this long",
-    ),
-    (
-        "shed_read_millis",
-        "how long drive's intake waits for shed's state changes",
-    ),
-    ("proxy_connect_secs", "the token proxy's liveness connect timeout"),
-    (
-        "proxy_retry_secs",
-        "a proxy lane's sign-out holds its host only if no call gets through the token proxy this long after it",
-    ),
-    (
-        "service_call_secs",
-        "a call to the running service's socket times out after this long",
-    ),
-    (
-        "disk_probe_secs",
-        "a folder listing slower than this marks its disk as not answering",
-    ),
-    (
-        "disk_sick_secs",
-        "a disk that let a call run out of time stays hung this long",
-    ),
-    (
-        "disk_trust_secs",
-        "a folder that answered is trusted this long before it is probed again",
-    ),
-    (
-        "lane_read_secs",
-        "a lane worktree read slower than this skips the lane for the pass (`root-hung`)",
-    ),
-    (
-        "guard_secs",
-        "`turn done`'s UI check (`just guard`) runs this long at most; past it the turn ends and `ui-check` logs a timeout",
-    ),
-    (
-        "poll_millis",
-        "the pause between polls of a child process or disk probe",
-    ),
-    (
-        "hold_sample_secs",
-        "`drover hold` at the front of the heavy line samples the host's admission this often",
-    ),
-    ("tick_beat_secs", "a running tick writes `tick.beat` this often"),
-    (
-        "orchestrator_idle_minutes",
-        "an orchestrator whose thread is quiet this long closes on the next `check`",
-    ),
-    (
-        "orchestrator_reply_minutes",
-        "an owner message with no orchestrator reply this long gets a `no reply yet` row",
-    ),
-    (
-        "orchestrator_change_minutes",
-        "an orchestrator's answer may not change one this long after it",
-    ),
-    (
-        "token_refresh_minutes",
-        "`check` pushes a fresh runner registration token to every VM this often",
-    ),
-    (
-        "ask_waiting_minutes",
-        "an owner ask open this long alerts `ask-waiting`",
-    ),
-    (
-        "outbox_stale_minutes",
-        "a remote lane's outbox line undelivered this long alerts `outbox-stale`",
-    ),
-    (
-        "host_offline_minutes",
-        "a remote host unreachable this long has its open lanes restarted on the main host",
-    ),
-    (
-        "host_down_secs",
-        "a host a pass could not reach gets no ssh from any drover command this long",
-    ),
-    (
-        "kick_max_secs",
-        "a kick running this long is ended by the next tick and logged `kick-killed` (a merge's: `gate_check_minutes`)",
-    ),
-    ("job_max", "issue jobs of one fleet running at once"),
-    (
-        "promise_passes",
-        "drive passes a promise of each kind may stay open before `promise-missed` (default 2)",
-    ),
-    (
-        "serve_shed_secs",
-        "serve re-reads shed's lanes in the background this often",
-    ),
-    (
-        "serve_remote_secs",
-        "serve re-reads the remote hosts (ssh) in the background this often",
-    ),
-    (
-        "serve_host_secs",
-        "serve re-samples this host's load in the background this often",
-    ),
-    (
-        "serve_heartbeat_secs",
-        "`/live` pings this often; a stream whose last 2 pings are still unsent is dropped",
-    ),
-    (
-        "serve_handover_secs",
-        "how long serve waits for a held port's serve to answer, hand over, or let go of the port (#1244)",
-    ),
-    (
-        "serve_mem_mb",
-        "serve over this much RSS logs `serve-mem-high` once and hands over to a fresh copy of itself",
-    ),
-    (
-        "slo_api_p95_ms",
-        "`/api/v1` p95 over this many ms for `slo_api_minutes` alerts `slo-api` once",
-    ),
-    (
-        "slo_api_minutes",
-        "how long `/api/v1` p95 must stay over `slo_api_p95_ms` before `slo-api`",
-    ),
-    (
-        "slo_idle_minutes",
-        "no lane working this long while the queue has spawnable work breaches `slo-idle`",
-    ),
-    (
-        "slo_tick_minutes",
-        "a tick with no progress (no step or call) for this long breaches `slo-tick`; the next fast job stops it",
-    ),
-    (
-        "slo_pass_minutes",
-        "no finished pass of a fleet for this long stops that fleet's pass (never another's) and shows on the board's drive-health line",
-    ),
-    (
-        "stall_restart_hours",
-        "an issue with no push, verdict or lane event and no named wait this long restarts once (a load wait moves host); again: a stuck card (a fleet may set its own)",
-    ),
-    (
-        "self_update_wait_minutes",
-        "a head with no release build this long alerts `self-update-waiting`",
-    ),
-    (
-        "self_update_lag_minutes",
-        "how long a rollout waits for an enabled host that is not staged before the rest swap",
-    ),
-    ("self_update_stage_secs", "one host's download and gate of a release build"),
-    (
-        "self_update_swap_secs",
-        "how long a `self-update-swapping` mark holds remote placement when no `self-updated` follows",
-    ),
-];
+mod limit_docs;
+pub use limit_docs::LIMIT_DOCS;
 
 static ACTIVE: std::sync::RwLock<Option<std::sync::Arc<Limits>>> = std::sync::RwLock::new(None);
 
@@ -1397,14 +1042,56 @@ impl Config {
 
     /// Each retired key still set, as `(key, what to do)`: doctor's `!` rows, the board's line, `check`'s `config-warning`; never a load error.
     pub fn warnings(&self) -> Vec<(&'static str, String)> {
-        let gone = "removed (#923): lanes run on the host's own CLI login; delete";
+        let gone = "removed (#1576): accounts are shed's, a role or fleet names one with `account`; delete";
         let acct = (!self.retired.is_empty()).then(|| ("[accounts]", format!("{gone} {}", self.retired.join(", "))));
         let tg = "removed (#557): drover has no Telegram bridge now; drop the table".to_string();
         let tg = self.telegram.as_ref().map(|_| ("[telegram]", tg));
         let old =
             "renamed (#780): call it [orchestrator] and role.orchestrator; the old names are read for one release";
         let old = self.old_names.then(|| ("[conductor]", old.to_string()));
-        acct.into_iter().chain(tg).chain(old).collect()
+        let jobs = self.fleet.iter().flat_map(|(n, f)| {
+            let old = [
+                ("lessons", &f.lessons, &["lesson"][..]),
+                ("triage", &f.triage, &["triage"]),
+                ("deps", &f.deps, &["deps", "advisory"]),
+            ];
+            old.into_iter().filter(|k| k.1.is_some()).map(move |(k, _, jobs)| {
+                let add = |j: &&str| Some(format!(", add [fleet.{n}.job.{j}] every = \"{}\"", old_every(f, j)?));
+                let add: String = jobs.iter().filter_map(add).collect();
+                (k, format!("fleet.{n}.{k} is read for now (#1790): delete it{add}"))
+            })
+        });
+        let load = "replaced (#1780): load average is no gate now; set `min_cpu_idle` (percent of the CPUs idle, default 15) and delete it";
+        let load = self
+            .limits
+            .load_per_cpu
+            .map(|_| ("[limits] load_per_cpu", load.to_string()));
+        let rounds = "retired (#1809): no round limit; an issue goes needs-human only when stuck; delete it";
+        let rounds = [
+            ("[limits] review_rounds", self.limits.review_rounds),
+            ("[limits] update_rounds", self.limits.update_rounds),
+        ]
+        .into_iter()
+        .filter(|k| k.1.is_some())
+        .map(move |k| (k.0, rounds.to_string()));
+        acct.into_iter()
+            .chain(tg)
+            .chain(old)
+            .chain(load)
+            .chain(rounds)
+            .chain(jobs)
+            .collect()
+    }
+
+    /// `[limits]` with host `machine`'s (`None`: the main host) `min_cpu_idle`, `min_free_mem_gb` and `swapout_rate` over them.
+    pub fn limits_on(&self, machine: Option<&str>) -> Limits {
+        let mut l = self.limits.clone();
+        if let Some(h) = self.hosts.values().find(|h| h.machine.as_deref() == machine) {
+            l.min_cpu_idle = h.min_cpu_idle.unwrap_or(l.min_cpu_idle);
+            l.min_free_mem_gb = h.min_free_mem_gb.unwrap_or(l.min_free_mem_gb);
+            l.swapout_rate = h.swapout_rate.unwrap_or(l.swapout_rate);
+        }
+        l
     }
 
     pub fn load(path: &Path) -> Result<Config> {
@@ -1501,9 +1188,6 @@ impl Config {
         if raw.get("limits").and_then(|l| l.get("max_agents")).is_some() {
             crate::stderr!("drover: [limits].max_agents is no longer used; ignoring it");
         }
-        if c.runtime.as_ref().is_some_and(|r| r.kind == RuntimeKind::Berth) {
-            crate::stderr!("drover: [runtime] kind = \"berth\" is deprecated, berth is now shed: set kind = \"shed\"");
-        }
         let levels = crate::providers::EFFORTS;
         if let Some(e) = c.limits.effort.as_deref().filter(|e| !levels.contains(e)) {
             bail!("limits.effort: \"{e}\" must be one of {levels:?}");
@@ -1514,6 +1198,9 @@ impl Config {
             .any(|n| n.webpush() && n.sub.as_deref().is_none_or(str::is_empty))
         {
             bail!("notify: a type = \"webpush\" notifier needs sub = \"mailto:you@example.com\"");
+        }
+        if let Some(n) = c.fleet.keys().find(|n| matches!(n.as_str(), "all" | "none")) {
+            bail!("fleet.{n}: `all` and `none` are reserved: a chat attaches to a repo, `all` or `none`");
         }
         orchestrator_ids(&c)?;
         if let Some(g) = c
@@ -1543,6 +1230,7 @@ impl Config {
                 bail!("chat.effort: harness {h} does not support effort \"{e}\"");
             }
         }
+        accounts_ok(&c)?;
         let mut c = c;
         c.retired = retired(&raw);
         c.old_names = raw.contains_key("conductor");
@@ -1554,7 +1242,7 @@ impl Config {
             let mut p = f
                 .pipeline
                 .take()
-                .unwrap_or_else(|| crate::pipeline::Pipeline::builtin(&c.limits, f.role.contains_key("verify")));
+                .unwrap_or_else(|| crate::pipeline::Pipeline::builtin(f.role.contains_key("verify")));
             let head = format!("[[fleet.{name}.pipeline.stage]]");
             let lines = text
                 .lines()
@@ -1563,20 +1251,18 @@ impl Config {
             for (s, (i, _)) in p.stage.iter_mut().zip(lines) {
                 s.line = i + 1;
             }
-            for g in p.stage.iter_mut().filter(|s| s.kind == "gate" && s.rounds.is_none()) {
-                g.rounds = Some(c.limits.update_rounds);
-            }
             f.form_categories
                 .get_or_insert_with(|| c.limits.form_categories.clone());
             f.form_rounds.get_or_insert(c.limits.form_rounds);
             f.respawn_per_pass.get_or_insert(c.limits.respawn_per_pass);
-            f.bad = p.validate(name, &f.role);
-            f.pipeline = Some(p);
+            f.ci_flaky_retries.get_or_insert(c.limits.ci_flaky_retries);
+            (f.bad, f.pipeline, f.jobs) = (p.validate(name, &f.role), Some(p), jobs(name, &c.job, f)?);
         }
         for (name, f) in &mut c.fleet {
             if let Some(r) = f.role.get("impl").filter(|_| !f.role.contains_key("orchestrator")) {
                 let r = Role {
                     profile: Some("lane-orchestrator".into()),
+                    account: None,
                     default: true,
                     ..r.clone()
                 };
@@ -1605,7 +1291,7 @@ impl Config {
             for (role, r) in &mut f.role {
                 let id = r.agent.as_deref();
                 match (id.map(|a| (a, crate::providers::of_agent(a))), r.harness.is_empty()) {
-                    (Some((a, None)), _) => bail!("fleet.{name}.role.{role}: agent {a}: no harness adapter guards it"),
+                    (Some((_, None)), false) => r.harness.clear(),
                     (Some((_, Some(h))), true) => r.harness = h.into(),
                     (Some((a, Some(h))), false) if h != r.harness => {
                         bail!(
@@ -1620,7 +1306,10 @@ impl Config {
                 if role == "orch" || role.is_empty() || !role.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
                     bail!("fleet.{name}.role.{role}: a role name is letters, digits and `-`, not orch");
                 }
-                if !crate::providers::known().any(|h| h == r.harness) {
+                if r.agent.is_none() && r.harness.is_empty() {
+                    bail!("fleet.{name}.role.{role}: names no agent; set `agent = \"<shed agent id>\"`");
+                }
+                if r.agent.is_none() && !crate::providers::lane_names().contains(&r.harness.as_str()) {
                     bail!(
                         "fleet.{name}.role.{role}: harness must be one of {:?}",
                         crate::providers::lane_names()
@@ -1640,43 +1329,25 @@ impl Config {
                 }
             }
         }
-        for name in c.fleet.keys() {
-            c.same_provider(name, text)?;
-        }
-        Ok(c)
+        c.routes_ok().map(|()| c)
     }
 
-    fn same_provider(&self, name: &str, text: &str) -> Result<()> {
-        let f = self.fleet.get(name).ok_or_else(|| anyhow!("unknown fleet '{name}'"))?;
-        let (Some(i), Some(v)) = (f.role.get("impl"), f.role.get("rev")) else {
-            return Ok(());
-        };
-        let run = self.shed_for(name).and_then(|b| b.acp);
-        let of = |r: &Role| r.agent.clone().or_else(|| run.clone());
-        let p = (of(i), of(v));
-        let p = (
-            p.0.as_deref().and_then(crate::providers::vendor_of_agent),
-            p.1.as_deref().and_then(crate::providers::vendor_of_agent),
-        );
-        if i.agent.is_none() && v.agent.is_none() || p.0.is_none() || p.0 != p.1 {
-            return Ok(());
-        }
-        let mut head = "";
-        let ok = text.lines().any(|l| {
-            let t = l.trim();
-            if t.starts_with('[') {
-                head = t;
+    fn routes_ok(&self) -> Result<()> {
+        for (name, f) in &self.fleet {
+            let (never, hits) = (f.never_routed(), crate::heavy::hits);
+            for kind in f.remote.keys() {
+                let Some(ps) = f.heavy_kinds().remove(kind) else {
+                    bail!("fleet.{name}.remote.{kind}: no [fleet.{name}.heavy] kind \"{kind}\" to route");
+                };
+                if let Some((p, n)) = ps
+                    .iter()
+                    .find_map(|p| Some((p, never.iter().find(|n| hits(n, p) || hits(p, n))?)))
+                {
+                    bail!("fleet.{name}.remote.{kind}: pattern \"{p}\" hits never-routed \"{n}\"");
+                }
             }
-            head == format!("[fleet.{name}]") && t.starts_with("rev_same_provider") && t.contains('#')
-        });
-        if f.rev_same_provider == Some(true) && ok {
-            return Ok(());
         }
-        let why = format!(
-            "fleet.{name}: rev runs on impl's provider {}; give rev another agent, or set rev_same_provider = true # <why>",
-            p.0.unwrap_or_default()
-        );
-        crate::gate::refused("REVIEW_SAME_PROVIDER", why)
+        Ok(())
     }
 
     /// Notifiers for `fleet`'s events: its own if any (plus the global ones with `notify_global`), else the global.
@@ -1700,10 +1371,21 @@ impl Config {
         own.or(self.runtime.as_ref()).map(Runtime::shed)
     }
 
+    /// The account role `role` of fleet `fleet` runs on: the role's, else the fleet's, else `auto`.
+    pub fn account(&self, fleet: &str, role: &str) -> Account {
+        let f = self.fleet.get(fleet);
+        let own = f
+            .and_then(|f| f.role.get(f.role_key(role)))
+            .and_then(|r| r.account.as_deref());
+        match own.or_else(|| f?.account.as_deref()) {
+            None | Some("auto") => Account::Auto,
+            Some(n) => Account::Named(n.into()),
+        }
+    }
+
     pub fn shed(&self) -> Option<crate::shed::Shed> {
         let first = || self.fleet.values().find_map(|f| f.runtime.as_ref());
-        let host = || self.hosts.keys().find_map(|h| self.host_acp(h));
-        self.runtime.as_ref().or_else(first).map(Runtime::shed).or_else(host)
+        self.runtime.as_ref().or_else(first).map(Runtime::shed)
     }
 
     /// Lanes that may start at once on host `name` (a name no `[hosts]` entry has, or a machine-less one, is the main host).
@@ -1719,25 +1401,6 @@ impl Config {
     pub fn start_release(&self, name: &str) -> StartRelease {
         let h = self.hosts.get(name).and_then(|h| h.start_release);
         h.unwrap_or(self.limits.start_release)
-    }
-
-    /// Host `name`'s own `runtime = "shed-acp"`: the shed-acp runtime (shed's defaults), else None.
-    pub fn host_acp(&self, name: &str) -> Option<crate::shed::Shed> {
-        self.hosts
-            .get(name)
-            .filter(|h| h.runtime == Some(RuntimeKind::ShedAcp))?;
-        Some(
-            Runtime {
-                kind: RuntimeKind::ShedAcp,
-                ..Runtime::default()
-            }
-            .shed(),
-        )
-    }
-
-    /// The runtime fleet `fleet`'s new lanes start in on host `host`: the host's own, else the fleet's.
-    pub fn shed_on(&self, fleet: &str, host: Option<&str>) -> Option<crate::shed::Shed> {
-        host.and_then(|h| self.host_acp(h)).or_else(|| self.shed_for(fleet))
     }
 
     /// The fleet, refused `BAD_PIPELINE` while its pipeline breaks a rule (that fleet stops, the others run).
@@ -1798,6 +1461,21 @@ impl Fleet {
         d.extend(self.deny_commands_add.iter().cloned());
         d
     }
+    /// Its heavy kinds: `[fleet.<n>.heavy]` plus, with any kind or route, `heavy::CARGO` as `cargo` unless it sets its own.
+    pub fn heavy_kinds(&self) -> BTreeMap<String, Vec<String>> {
+        let mut k = self.heavy.clone();
+        if !k.is_empty() || !self.remote.is_empty() {
+            let cargo = || crate::heavy::CARGO.split(',').map(String::from).collect();
+            k.entry("cargo".into()).or_insert_with(cargo);
+        }
+        k
+    }
+    /// Commands its lanes never send to a build machine: `heavy::NEVER_ROUTED` plus `remote_deny`.
+    pub fn never_routed(&self) -> Vec<String> {
+        let mut n: Vec<String> = crate::heavy::NEVER_ROUTED.split(',').map(String::from).collect();
+        n.extend(self.remote_deny.iter().cloned());
+        n
+    }
     /// The `[land]` table when this fleet lands fast-first.
     pub fn fast_first(&self) -> Option<&Land> {
         self.land.as_ref().filter(|l| l.mode == "fast-first")
@@ -1817,9 +1495,9 @@ impl Fleet {
             .get(self.role_key(role))
             .ok_or_else(|| anyhow!("role '{role}' not configured"))
     }
-    /// The configured role a lane runs as: a lesson, triage or deps lane is impl's unless its own role is set.
+    /// The configured role a lane runs as: a role only a job names is impl's unless its own role is set.
     pub fn role_key<'a>(&self, role: &'a str) -> &'a str {
-        if matches!(role, "lesson" | "triage" | "deps") && !self.role.contains_key(role) {
+        if !self.role.contains_key(role) && self.jobs.values().any(|j| j.role == role) {
             "impl"
         } else {
             role
@@ -1830,6 +1508,45 @@ impl Fleet {
     }
     pub fn repo_name(&self) -> &str {
         self.repo.rsplit('/').next().unwrap_or(&self.repo)
+    }
+}
+
+fn accounts_ok(c: &Config) -> Result<()> {
+    let ok = |a: &str| {
+        !a.is_empty()
+            && a.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "-_".contains(c))
+    };
+    let named = c.fleet.iter().flat_map(|(n, f)| {
+        let roles = f
+            .role
+            .iter()
+            .map(move |(r, x)| (format!("fleet.{n}.role.{r}"), &x.account));
+        std::iter::once((format!("fleet.{n}"), &f.account)).chain(roles)
+    });
+    if let Some((at, a)) = named
+        .filter_map(|(at, a)| Some((at, a.as_deref()?)))
+        .find(|(_, a)| !ok(a))
+    {
+        bail!("{at}.account: \"{a}\" is no shed account name (a-z, 0-9, -, _)");
+    }
+    Ok(())
+}
+
+/// The shed account an ACP run asks for: `auto` (shed picks a signed-in named one, moving at a limit) or one by name.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Account {
+    Auto,
+    Named(String),
+}
+
+impl Account {
+    /// The word `run`'s `account` carries.
+    pub fn word(&self) -> &str {
+        match self {
+            Account::Auto => "auto",
+            Account::Named(n) => n,
+        }
     }
 }
 
@@ -1845,6 +1562,7 @@ fn retired(raw: &toml::Table) -> Vec<String> {
         out.extend(
             keys.iter()
                 .filter(|k| t.is_some_and(|t| t.contains_key(**k)))
+                .filter(|k| at == "chat" || **k != "account")
                 .map(|k| format!("{at}.{k}")),
         );
     };

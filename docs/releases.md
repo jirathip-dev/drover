@@ -43,35 +43,24 @@ Set by the owner in the repo's `release` environment (branches main and staging)
 
 `dev.drover.update` runs `drover self-update` every 5 minutes (`drover setup` or `timer install` writes it). It
 fetches `[self_update] branch` (default `main`) of the drover fleet and reads that head's release (`SHA256SUMS`, one
-`gh release download`). The hosts are the main host plus every `[hosts]` entry with a `machine`.
+`gh release download`).
 
 1. **No release yet:** nothing changes and nothing is built. The pass prints that it waits, and logs
    `self-update-waiting` once per head when the release is still missing `[limits] self_update_wait_minutes` (45)
    after the head was first seen (`self-update-seen`).
-2. **Stage:** each reachable host that is not on the head (#1296: or, on macOS, whose binary is not Developer ID signed,
-   as `drover doctor`'s signature row shows) downloads its asset to `drover.new` beside its live binary,
+2. **Stage:** when the main host is not on the head (#1296: or, on macOS, its binary is not Developer ID signed,
+   as `drover doctor`'s signature row shows), it downloads its asset to `drover.new` beside its live binary,
    checks it against `SHA256SUMS`, checks that `drover.new --version` names the head's sha and, where a fleet.toml is,
    runs `drover.new doctor --config-only`. Any failure removes `drover.new`, keeps the live binary and alerts
-   `self-update-failed` once per host and head. A host needs `curl` and `sha256sum` or `shasum`.
-3. **Swap together:** when every waited-for host is staged, the same pass logs `self-update-swapping`, swaps each
-   remote host (`mv drover.new drover`, the PATH links, its `profiles sync`, logged `host-sync`), then the main host
-   last (`self-updated`), runs `profiles sync` and hands serve over: the running serve starts the new binary on its
-   listening sockets, drains and execs it in place. A serve that does not answer on `<state dir>/serve-<port>.sock`
+   `self-update-failed` once per head; a release with no asset for it (a Linux-only release) is such a failure. The
+   host needs `curl` and `sha256sum` or `shasum`.
+3. **Swap:** once staged, the same pass swaps the binary (`self-updated`), runs `profiles sync` and hands serve
+   over: the running serve starts the new binary on its listening sockets, drains and execs it in place. A serve that does not answer on `<state dir>/serve-<port>.sock`
    is restarted instead. A restarted serve must run with a pid and answer on its port; else it is bootstrapped
    again once, and a serve still down alerts `serve-down` with the launchctl error. `drover check` bootstraps an
    installed serve job that is not loaded (`serve-revived`).
-4. **A lagging host:** a disabled host, or a cloud host that is not running, is not waited for. An enabled host that is
-   unreachable or whose stage fails is waited for up to `[limits] self_update_lag_minutes` (30) after the release was
-   first found (`self-update-staging`); then the rest swap and it gets one `host-behind`. A later pass stages and swaps
-   it alone (or a cloud start installs this build); meanwhile it takes lanes on its old build. If the main host's own
-   stage fails, nobody swaps, unless the release has no asset for it (a Linux-only release): then the remote hosts swap
-   and the main host stays on its build (`self-update-failed`).
 
-`HOST_UPDATING` holds lanes only during the swap's seconds: placement passes over every remote host
-(`[limits] self_update_swap_secs`, 120, if no `self-updated` follows), a hold like `HOST_BUSY` that never marks a host
-sick. A host on another build otherwise takes lanes as before; `drover hosts` and its health show the skew. `drover hosts` shows each remote host's drover sha, with `✓` when it matches the main host's.
-
-`drover self-update --dry-run` prints each host's build and what the pass would do; `--pause` / `--resume` toggle it
+`drover self-update --dry-run` prints the build and what the pass would do; `--pause` / `--resume` toggle it
 (logged). #1031: the doctor gate also says `hello` to the local `shed serve`; a server on another shed protocol fails
 it, so the old drover stays and the alert goes out once per mismatch.
 

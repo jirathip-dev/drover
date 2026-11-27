@@ -1,0 +1,438 @@
+{
+  "more": false,
+  "rows": [
+    {
+      "block": {
+        "blocks": [
+          {
+            "id": "m-4-t",
+            "markdown": "retry the flaky gate?",
+            "type": "text"
+          },
+          {
+            "id": "m-4-a",
+            "markdown": "✓ **retry** · owner · 16m",
+            "type": "text"
+          }
+        ],
+        "id": "m-4",
+        "kind": "ask",
+        "meta": {
+          "label": "{}",
+          "since": "1970-01-12T13:30:03Z"
+        },
+        "title": "q1",
+        "tone": "",
+        "type": "card"
+      },
+      "fleet": "sendmeter",
+      "handoff": null,
+      "issue": 12,
+      "key": "ask-sendmeter-q1",
+      "kind": "ask",
+      "open": false,
+      "prompt": null,
+      "push": {
+        "body": "q1 · retry the flaky gate?",
+        "tag": "ask-sendmeter-q1",
+        "title": "sendmeter #12"
+      },
+      "seq": 4,
+      "text": "q1 · retry the flaky gate?",
+      "to": {
+        "id": "t1",
+        "k": "thread"
+      },
+      "ts": 999003
+    },
+    {
+      "block": {
+        "blocks": [
+          {
+            "id": "m-5-t",
+            "markdown": "lane ask q1 on #12",
+            "type": "text"
+          }
+        ],
+        "id": "m-5",
+        "kind": "sys",
+        "type": "card"
+      },
+      "fleet": "sendmeter",
+      "handoff": null,
+      "issue": null,
+      "key": "system-5",
+      "kind": "system",
+      "open": false,
+      "prompt": "lane ask q1 on #12",
+      "push": {
+        "body": "lane ask q1 on #12",
+        "tag": "system-5",
+        "title": "sendmeter"
+      },
+      "seq": 5,
+      "text": "lane ask q1 on #12",
+      "to": {
+        "id": "t1",
+        "k": "thread"
+      },
+      "ts": 999004
+    },
+    {
+      "block": {
+        "blocks": [
+          {
+            "id": "m-4-t",
+            "markdown": "retry the flaky gate?",
+            "type": "text"
+          },
+          {
+            "id": "m-4-a",
+            "markdown": "✓ **retry** · owner · 16m",
+            "type": "text"
+          }
+        ],
+        "id": "m-4",
+        "kind": "ask",
+        "meta": {
+          "label": "{}",
+          "since": "1970-01-12T13:30:03Z"
+        },
+        "title": "q1",
+        "tone": "",
+        "type": "card"
+      },
+      "fleet": "sendmeter",
+      "handoff": null,
+      "issue": 12,
+      "key": "ask-sendmeter-q1",
+      "kind": "decision",
+      "open": false,
+      "prompt": null,
+      "push": null,
+      "seq": 7,
+      "text": "sendmeter #12 decision q1 by owner: retry",
+      "to": {
+        "id": "t1",
+        "k": "thread"
+      },
+      "ts": 999006
+    },
+    {
+      "block": {
+        "blocks": [
+          {
+            "id": "m-9-cmd",
+            "markdown": "```\njust gen\n```",
+            "type": "text"
+          },
+          {
+            "id": "m-9-s",
+            "markdown": "on local · ~/p · touches the branch  \n**running** by owner",
+            "type": "text"
+          }
+        ],
+        "buttons": [],
+        "id": "m-9",
+        "kind": "run",
+        "meta": {
+          "label": "{}",
+          "since": "1970-01-12T13:30:08Z"
+        },
+        "title": "regenerate",
+        "tone": "",
+        "type": "card"
+      },
+      "fleet": "sendmeter",
+      "handoff": null,
+      "issue": null,
+      "key": "run-r1",
+      "kind": "run-card",
+      "open": true,
+      "prompt": null,
+      "push": {
+        "body": "sendmeter run-card",
+        "tag": "run-r1",
+        "title": "sendmeter"
+      },
+      "seq": 9,
+      "text": "sendmeter run-card",
+      "to": {
+        "id": "t1",
+        "k": "thread"
+      },
+      "ts": 999008
+    },
+    {
+      "block": {
+        "blocks": [
+          {
+            "id": "m-9-cmd",
+            "markdown": "```\njust gen\n```",
+            "type": "text"
+          },
+          {
+            "id": "m-9-s",
+            "markdown": "on local · ~/p · touches the branch  \n**running** by owner",
+            "type": "text"
+          }
+        ],
+        "buttons": [],
+        "id": "m-9",
+        "kind": "run",
+        "meta": {
+          "label": "{}",
+          "since": "1970-01-12T13:30:08Z"
+        },
+        "title": "regenerate",
+        "tone": "",
+        "type": "card"
+      },
+      "fleet": "sendmeter",
+      "handoff": null,
+      "issue": null,
+      "key": "run-r1",
+      "kind": "run-card",
+      "open": false,
+      "prompt": null,
+      "push": null,
+      "seq": 10,
+      "text": "sendmeter run-settled",
+      "to": {
+        "id": "t1",
+        "k": "thread"
+      },
+      "ts": 999009
+    },
+    {
+      "block": {
+        "blocks": [
+          {
+            "id": "m-11-d",
+            "markdown": "```diff\n+x = 1\n```",
+            "type": "text"
+          }
+        ],
+        "buttons": [
+          {
+            "action": "config-card",
+            "id": "m-11-discard",
+            "label": "discard",
+            "style": "",
+            "type": "button",
+            "values": {
+              "act": "discard",
+              "id": "c1",
+              "thread": "t1"
+            }
+          }
+        ],
+        "id": "m-11",
+        "kind": "config",
+        "meta": {
+          "label": "{}",
+          "since": "1970-01-12T13:30:10Z"
+        },
+        "subtitle": "stale: fleet.toml changed since, it can no longer apply",
+        "title": "config proposal c1",
+        "tone": "bad",
+        "type": "card"
+      },
+      "fleet": "sendmeter",
+      "handoff": null,
+      "issue": null,
+      "key": "config-c1",
+      "kind": "config-card",
+      "open": true,
+      "prompt": null,
+      "push": {
+        "body": "sendmeter config-propose",
+        "tag": "config-c1",
+        "title": "sendmeter"
+      },
+      "seq": 11,
+      "text": "sendmeter config-propose",
+      "to": {
+        "id": "t1",
+        "k": "thread"
+      },
+      "ts": 999010
+    },
+    {
+      "block": {
+        "blocks": [
+          {
+            "id": "m-12-t",
+            "markdown": "the deploy",
+            "type": "text"
+          },
+          {
+            "fields": [
+              {
+                "label": "",
+                "name": "text",
+                "placeholder": "value of API_KEY",
+                "type": "secret",
+                "value": ""
+              }
+            ],
+            "id": "m-12-f",
+            "submit": {
+              "action": "secret-card",
+              "label": "save",
+              "values": {
+                "act": "save",
+                "name": "API_KEY",
+                "thread": "t1"
+              }
+            },
+            "type": "form"
+          }
+        ],
+        "buttons": [
+          {
+            "action": "secret-card",
+            "id": "m-12-dismiss",
+            "label": "dismiss",
+            "style": "",
+            "type": "button",
+            "values": {
+              "act": "dismiss",
+              "name": "API_KEY",
+              "thread": "t1"
+            }
+          }
+        ],
+        "id": "m-12",
+        "kind": "secret",
+        "meta": {
+          "label": "{}",
+          "since": "1970-01-12T13:30:11Z"
+        },
+        "title": "secret API_KEY",
+        "tone": "warn",
+        "type": "card"
+      },
+      "fleet": "sendmeter",
+      "handoff": null,
+      "issue": null,
+      "key": "secret-t1-API_KEY",
+      "kind": "secret-card",
+      "open": true,
+      "prompt": null,
+      "push": {
+        "body": "sendmeter secret-request",
+        "tag": "secret-t1-API_KEY",
+        "title": "sendmeter"
+      },
+      "seq": 12,
+      "text": "sendmeter secret-request",
+      "to": {
+        "id": "t1",
+        "k": "thread"
+      },
+      "ts": 999011
+    },
+    {
+      "block": {
+        "blocks": [
+          {
+            "id": "m-13-t",
+            "markdown": "go ahead",
+            "type": "text"
+          }
+        ],
+        "id": "m-13",
+        "kind": "you",
+        "meta": {
+          "label": "✓ {}",
+          "since": "1970-01-12T13:30:12Z"
+        },
+        "title": "you",
+        "type": "card"
+      },
+      "fleet": "sendmeter",
+      "handoff": null,
+      "issue": null,
+      "key": "said-13",
+      "kind": "said",
+      "open": false,
+      "prompt": "go ahead",
+      "push": {
+        "body": "go ahead",
+        "tag": "said-13",
+        "title": "sendmeter"
+      },
+      "seq": 13,
+      "text": "go ahead",
+      "to": {
+        "id": "t1",
+        "k": "thread"
+      },
+      "ts": 999012
+    },
+    {
+      "block": {
+        "blocks": [
+          {
+            "id": "m-14-t",
+            "markdown": "sendmeter #12 merged → ? ? (PR #?)",
+            "type": "text"
+          }
+        ],
+        "id": "m-14",
+        "kind": "sys",
+        "type": "card"
+      },
+      "fleet": "sendmeter",
+      "handoff": null,
+      "issue": 12,
+      "key": "merged-14",
+      "kind": "merged",
+      "open": false,
+      "prompt": null,
+      "push": {
+        "body": "sendmeter #12 merged → ? ? (PR #?)",
+        "tag": "merged-14",
+        "title": "sendmeter #12"
+      },
+      "seq": 14,
+      "text": "sendmeter #12 merged → ? ? (PR #?)",
+      "to": {
+        "id": "t1",
+        "k": "thread"
+      },
+      "ts": 999013
+    },
+    {
+      "block": {
+        "blocks": [
+          {
+            "id": "m-15-t",
+            "markdown": "sendmeter #12 rollout-open",
+            "type": "text"
+          }
+        ],
+        "id": "m-15",
+        "kind": "sys",
+        "type": "card"
+      },
+      "fleet": "sendmeter",
+      "handoff": null,
+      "issue": 12,
+      "key": "rollout-sendmeter-12",
+      "kind": "rollout",
+      "open": true,
+      "prompt": null,
+      "push": null,
+      "seq": 15,
+      "text": "sendmeter #12 rollout-open",
+      "to": {
+        "id": "t1",
+        "k": "thread"
+      },
+      "ts": 999014
+    }
+  ],
+  "seq": 17
+}

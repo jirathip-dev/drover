@@ -21,6 +21,12 @@ pub fn lane_of(events: &[Event], m: Option<&str>, wt: &str) -> Option<(Event, St
     Some((sp.clone(), lane))
 }
 
+fn seen(events: &[Event], lane: &str, mtime: u64) -> bool {
+    let seen =
+        |e: &Event| e.kind == "verdict-seen" && e.str("lane") == Some(lane) && e.val("mtime").as_u64() == Some(mtime);
+    events.iter().any(seen)
+}
+
 /// Whether the log holds the `outbox` event of `lane`'s line sent at `sent`.
 pub fn ran(events: &[Event], lane: &str, sent: u64) -> bool {
     let ran = |e: &Event| e.kind == "outbox" && e.str("lane") == Some(lane) && e.val("sent").as_u64() == Some(sent);
@@ -128,6 +134,7 @@ pub fn apply(
         .filter_map(|s| Some((key(s)?, serde_json::to_string(s).ok()?)))
         .collect();
     let why = rep.shed.or_else(|| (link != "live").then(|| super::NO_SERVICE.into()));
+    let events = working(&ctx.state)?;
     let h = HostSeen {
         host: host.into(),
         link: link.into(),
@@ -137,18 +144,24 @@ pub fn apply(
         n: Some(f.n),
         heard: Some(ctx.now),
         build: Some(rep.build),
+        sample: rep.sample,
+        drain: crate::hosts::drain(cfg, &events, host),
     };
     crate::db::view_put(&ctx.state, &h, Some(&rows))?;
-    let worktrees = rep.lanes.iter().filter_map(|s| s.worktree.as_ref());
-    let (mut events, mut acks) = (None, vec![]);
-    for w in worktrees.filter(|w| !w.lines.is_empty()) {
-        let ev = match &events {
-            Some(ev) => ev,
-            None => events.insert(working(&ctx.state)?),
-        };
-        let Some((sp, lane)) = lane_of(ev, m, &w.path) else {
+    let mut acks = vec![];
+    for w in rep.lanes.iter().filter_map(|s| s.worktree.as_ref()) {
+        let Some((sp, lane)) = lane_of(&events, m, &w.path) else {
             continue;
         };
+        if let Some(v) = w.verdict.as_ref().filter(|v| !seen(&events, &lane, v.mtime)) {
+            let first = v.text.split_whitespace().next().unwrap_or_default();
+            let head = w.head.as_ref().map(|h| h.0.as_str());
+            let d = json!({"lane": lane, "head": head, "first": first, "mtime": v.mtime});
+            append(
+                &ctx.state,
+                &Event::new(ctx.now, &sp.fleet, sp.issue, "verdict-seen", d).passive(),
+            )?;
+        }
         for l in &w.lines {
             run(ctx, cfg, r, out, (&sp, &lane), l)?;
             acks.push(format!("{}\t{}", w.path, l.sent));

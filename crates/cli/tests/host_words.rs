@@ -78,24 +78,16 @@ fn every_refusal_and_outcome_has_its_plain_words() {
             ],
         ),
         (
-            Some("ROUND_LIMIT"),
-            "merge",
+            Some("STUCK"),
+            "conflict",
             12,
-            "REFUSED ROUND_LIMIT: review rounds ran out (4/3)",
+            "REFUSED STUCK: PR still conflicts after 2 update rounds in a row",
             "serial",
             [
                 "r",
                 "needs you",
-                "#12: review rounds ran out (4/3) · your call on its card",
+                "#12: PR still conflicts after 2 update rounds in a row · your call on its card",
             ],
-        ),
-        (
-            Some("UPDATE_LIMIT"),
-            "conflict",
-            12,
-            "REFUSED UPDATE_LIMIT: 3 update rounds passed",
-            "serial",
-            ["r", "needs you", "#12: 3 update rounds passed · your call on its card"],
         ),
         (
             Some("WORKTREE_DIRTY"),
@@ -206,13 +198,9 @@ fn every_refusal_and_outcome_has_its_plain_words() {
             Some("NO_HOST"),
             "start",
             12,
-            "REFUSED NO_HOST: no host with docker (cloud host stopped or over budget)",
+            "REFUSED NO_HOST: no host with docker",
             "serial",
-            [
-                "a",
-                "waiting",
-                "no host with docker (cloud host stopped or over budget)",
-            ],
+            ["a", "waiting", "no host with docker"],
         ),
     ];
     for (code, step, issue, result, serial, want) in golden {

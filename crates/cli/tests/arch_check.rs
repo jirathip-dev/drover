@@ -798,3 +798,90 @@ fn a_frozen_file_missing_at_the_base_may_be_created_and_then_only_shrinks() {
         "{out}"
     );
 }
+
+#[test]
+fn a_removed_or_retyped_line_of_an_append_only_file_fails_but_an_added_one_passes() {
+    let keys = "a: string\nb: number\n";
+    let d = committed(
+        "arch-append-only",
+        "append_only = [\"contract/*.keys\"]\n",
+        &[("contract/rows.keys", keys)],
+    );
+    std::fs::write(d.join("contract/rows.keys"), "a: string\nb: number\nc: boolean\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    std::fs::write(d.join("contract/rows.keys"), "a: string\nb: string\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("contract/rows.keys:2: `b: number` removed or changed in an append-only file"),
+        "{out}"
+    );
+    std::fs::write(d.join(".drover/arch.toml"), "").unwrap();
+    std::fs::write(d.join("contract/rows.keys"), "a: string\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("contract/rows.keys:2: `b: number` removed"), "{out}");
+}
+
+struct Slow;
+
+impl drover_core::runner::Runner for Slow {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover_core::runner::Out> {
+        self.run_for(prog, args, "", drover_core::runner::limit(prog, args))
+    }
+    fn run_for(
+        &self,
+        _: &str,
+        args: &[String],
+        _: &str,
+        limit: std::time::Duration,
+    ) -> anyhow::Result<drover_core::runner::Out> {
+        let secs: u64 = args[1].strip_prefix("takes ").unwrap().parse().unwrap();
+        let late = secs > limit.as_secs();
+        Ok(drover_core::runner::Out {
+            code: if late { 124 } else { 0 },
+            stdout: String::new(),
+            stderr: if late {
+                format!("no answer in {limit:?}")
+            } else {
+                String::new()
+            },
+        })
+    }
+}
+
+#[test]
+fn generate_gets_the_gate_check_limit_not_the_60s_default() {
+    let gate = drover_core::config::limits().gate_check_minutes * 60;
+    let check = |secs: u64| {
+        let d = tmpdir("arch-generate-limit");
+        let conf = format!("generated = [\"gen/never-written.ts\"]\ngenerate = \"takes {secs}\"\n");
+        std::fs::write(d.join("arch.toml"), conf).unwrap();
+        let mut out = vec![];
+        let code = drover_core::arch::check(&d.join("arch.toml"), false, None, None, &Slow, &mut out).unwrap();
+        std::fs::remove_dir_all(&d).unwrap();
+        (code, String::from_utf8(out).unwrap())
+    };
+    let (code, out) = check(90);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    let (code, out) = check(gate + 1);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains(&format!("`takes {}` exited 124", gate + 1)), "{out}");
+}
+
+#[test]
+fn drovers_own_docs_name_only_real_commands_and_flags() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let d = tmpdir("docs-cli");
+    let config = d.join("arch.toml");
+    let skip = r#"skip = [".drover/**", "roles/usage-tail.md", "scripts/test-shards.txt"]"#;
+    std::fs::write(
+        &config,
+        format!("[docs]\npaths = [\"docs/**/*.md\", \"README.md\"]\ncli = true\n{skip}\n"),
+    )
+    .unwrap();
+    let (code, out) = arch(&root, &["--config", config.to_str().unwrap()]);
+    std::fs::remove_dir_all(&d).ok();
+    assert_eq!(code, 0, "{out}");
+}

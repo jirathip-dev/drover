@@ -5,6 +5,7 @@ use crate::runner::Runner;
 use crate::Ctx;
 use anyhow::Result;
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
@@ -17,9 +18,59 @@ const BROKEN: [&str; 4] = [
 
 const RACE: [&str; 2] = ["incorrect old value provided", "cannot lock ref"];
 
-/// `git -C <dir> fetch <args>` in a fleet clone, one drover process at a time; a fetch losing a ref race to another (a lane's, a remote host's) is logged and run again. A fetch failing on a missing or bad object, or any fetch while an earlier heal is due, heals the clone first, logs it, and fetches again.
+/// `+refs/heads/<branch>:refs/remotes/origin/<branch>`: a fetch that writes `origin/<branch>` whatever the clone's own `remote.origin.fetch`.
+pub fn refspec(branch: &str) -> String {
+    format!("+refs/heads/{branch}:refs/remotes/origin/{branch}")
+}
+
+/// The refspec writing every `origin/<branch>`.
+pub const ALL: &str = "+refs/heads/*:refs/remotes/origin/*";
+
+/// `git -C <dir> fetch -q origin` of every branch but `wip/*` by explicit refspec, so each `origin/<branch>` exists whatever the clone's own `remote.origin.fetch`.
+pub fn fetch_branches(ctx: &Ctx, r: &dyn Runner, dir: &Path) -> Result<String> {
+    fetch(ctx, r, dir, &["-q", "origin", ALL, "^refs/heads/wip/*"])
+}
+
+/// `git -C <dir> fetch <args>` in a fleet clone, one drover process at a time, skipped when the same refspecs were fetched within `fetch_fresh_secs` and their refs are there; a fetch losing a ref race to another (a lane's, a remote host's) is logged and run again. A fetch failing on a missing or bad object, or any fetch while an earlier heal is due, heals the clone first, logs it, and fetches again.
 pub fn fetch(ctx: &Ctx, r: &dyn Runner, dir: &Path, args: &[&str]) -> Result<String> {
     let _held = lock(r, dir)?;
+    let (key, spec) = (format!("fetched:{}", dir.display()), specs(args));
+    let mut done = crate::db::get::<BTreeMap<String, u64>>(&ctx.state, &key).map_or_else(BTreeMap::new, |d| d.1);
+    let secs =
+        Config::load(&ctx.config).map_or(crate::config::limits().fetch_fresh_secs, |c| c.limits.fetch_fresh_secs);
+    if fresh(r, dir, (&done, secs), &spec) {
+        return Ok(String::new());
+    }
+    let res = fetched(ctx, r, dir, args)?;
+    let now = crate::clock::now();
+    done.retain(|_, t| now.saturating_sub(*t) < secs);
+    done.insert(spec, now);
+    crate::db::put(&ctx.state, &key, now, &done).ok();
+    Ok(res)
+}
+
+fn specs(args: &[&str]) -> String {
+    let spec: Vec<&str> = args
+        .iter()
+        .copied()
+        .filter(|a| a.contains(':') || a.starts_with('^'))
+        .collect();
+    spec.join(" ")
+}
+
+fn fresh(r: &dyn Runner, dir: &Path, (done, secs): (&BTreeMap<String, u64>, u64), spec: &str) -> bool {
+    let now = crate::clock::now();
+    let recent = |s: &str| done.get(s).is_some_and(|t| now.saturating_sub(*t) < secs);
+    let one = spec
+        .split_once(':')
+        .filter(|(src, dst)| !spec.contains(' ') && !dst.contains('*') && !src.contains("wip/"));
+    let all = || done.keys().any(|k| k.starts_with(ALL) && recent(k));
+    let there = |dst: &str| dst.contains('*') || git(r, dir, &["rev-parse", "--verify", "--quiet", dst]).is_ok();
+    let dsts = || spec.split(' ').filter_map(|s| s.split_once(':')).all(|(_, d)| there(d));
+    !spec.is_empty() && (recent(spec) || one.is_some() && all()) && dsts()
+}
+
+fn fetched(ctx: &Ctx, r: &dyn Runner, dir: &Path, args: &[&str]) -> Result<String> {
     let key = format!("clone-heal:{}", dir.display());
     let due = crate::db::get::<String>(&ctx.state, &key).filter(|(_, e)| !e.is_empty());
     let fetch = || raced(ctx, r, dir, args);
@@ -80,7 +131,11 @@ fn lock(r: &dyn Runner, dir: &Path) -> Result<Option<std::fs::File>> {
         .truncate(false)
         .write(true)
         .open(gitdir.join("drover-fetch.lock"))?;
-    let (t, wait) = (crate::clock::instant(), crate::runner::limit("git", &["fetch".into()]));
+    let wait = crate::runner::limit("git", &["fetch".into()]);
+    let (t, wait) = (
+        crate::clock::instant(),
+        crate::clock::left().map_or(wait, |l| l.min(wait)),
+    );
     while t.elapsed() < wait {
         match f.try_lock() {
             Ok(()) => return Ok(Some(f)),

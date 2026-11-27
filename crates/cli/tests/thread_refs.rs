@@ -13,9 +13,6 @@ fn setup(name: &str, extra: u64) -> drover::Ctx {
         &d,
         &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
-    std::fs::create_dir_all(&profile).unwrap();
-    std::fs::write(profile.join("settings.json"), "{}").unwrap();
     let r = Fake::default();
     for i in 1..=27 {
         let title = format!("Thread {i}");
@@ -70,7 +67,7 @@ fn only_the_archived_thread_reads_archived_in_the_chat_api() {
     let r = Fake::default();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let tab: Value = serde_json::from_str(&api(&s, ADDR, &cookie, T + 5, "chat")).unwrap();
+    let tab: Value = chat_all(&s, ADDR, &cookie, T + 5);
     let pages: Vec<(String, bool)> = tab["threads"]
         .as_array()
         .unwrap()

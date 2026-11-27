@@ -16,7 +16,7 @@ pub fn git() -> String {
 }
 
 /// The oldest shed protocol drover accepts: any shed at or above it passes, whatever its build.
-pub const MIN_PROTOCOL: u32 = 1;
+pub const MIN_PROTOCOL: u32 = 5;
 
 /// The fix a `SHED_VERSION` refusal names: drover never installs shed.
 pub const UPDATE: &str = "update shed (it updates itself from its own releases and hands serve over)";
@@ -121,6 +121,37 @@ pub fn line(r: &dyn Runner, w: &Wire) -> String {
     }
 }
 
+/// The accounts shed keeps on `w` (`account.ls`).
+pub fn accounts(r: &dyn Runner, w: &Wire) -> Result<Vec<proto::Account>> {
+    let ls = json!(proto::AccountsParams::default());
+    Ok(serde_json::from_value(call(r, w, Method::AccountLs, ls)?)?)
+}
+
+/// Doctor's account rows from `account.ls` on `w`: per agent, its signed-in named accounts or `✗` with the `shed account add` line.
+pub fn account_rows(r: &dyn Runner, w: &Wire, agents: &std::collections::BTreeSet<String>) -> Vec<String> {
+    let all = match accounts(r, w) {
+        Ok(all) => all,
+        Err(e) if format!("{e:#}").starts_with("SHED_VERSION") => return vec![format!("✗ account — {e:#}")],
+        Err(e) => return vec![format!("! account — account.ls: {e:#}")],
+    };
+    let signed = |a: &&proto::Account| {
+        a.name != "default" && matches!(a.state, proto::AccountState::Ready | proto::AccountState::Limited)
+    };
+    agents
+        .iter()
+        .map(|id| {
+            let names: Vec<&str> = (all.iter().filter(|a| a.provider == *id).filter(signed))
+                .map(|a| a.name.as_str())
+                .collect();
+            if names.is_empty() {
+                format!("✗ account {id}: no signed-in named account → shed account add {id} <name>")
+            } else {
+                format!("✓ account {id}: {}", names.join(", "))
+            }
+        })
+        .collect()
+}
+
 fn on_path(r: &dyn Runner) -> Option<Hello> {
     let o = r.run("shed", &argv(&["--version"])).ok().filter(|o| o.code == 0)?;
     let (version, build) = o.stdout.trim().strip_prefix("shed ")?.split_once(" (")?;
@@ -193,16 +224,36 @@ pub fn calls(r: &dyn Runner, w: &Wire, qs: &[(Method, Value)]) -> Result<Vec<Res
 fn exchange(r: &dyn Runner, w: &Wire, qs: &[(Method, Value)]) -> Result<String> {
     Ok(match w {
         Wire::Socket(p) => {
-            let mut s = UnixStream::connect(p).with_context(|| format!("no shed server on {}", p.display()))?;
-            s.write_all(lines(qs).as_bytes())?;
-            let (mut rd, mut text) = (BufReader::new(s), String::new());
+            let waits: f64 = qs.iter().filter_map(|q| q.1.get("timeout")?.as_f64()).sum();
+            let limit = bound().saturating_add(Duration::try_from_secs_f64(waits).unwrap_or_default());
+            let (mut rd, mut text) = (dial(p, limit)?, String::new());
+            rd.get_mut().write_all(lines(qs).as_bytes())?;
             for _ in 0..=qs.len() {
-                rd.read_line(&mut text)?;
+                rd.read_line(&mut text).with_context(|| silent(p, limit))?;
             }
             text
         }
         Wire::Connect => connect(r, &lines(qs))?,
     })
+}
+
+fn bound() -> Duration {
+    Duration::from_secs(crate::config::limits().shed_call_secs)
+}
+
+fn dial(p: &std::path::Path, limit: Duration) -> Result<BufReader<UnixStream>> {
+    let s = UnixStream::connect(p).with_context(|| format!("no shed server on {}", p.display()))?;
+    s.set_read_timeout(Some(limit))?;
+    s.set_write_timeout(Some(limit))?;
+    Ok(BufReader::new(s))
+}
+
+fn silent(p: &std::path::Path, limit: Duration) -> String {
+    format!(
+        "shed: no answer from the server on {} in {} s (shed_call_secs)",
+        p.display(),
+        limit.as_secs()
+    )
 }
 
 fn connect(r: &dyn Runner, q: &str) -> Result<String> {
@@ -281,35 +332,6 @@ pub fn cli(r: &dyn Runner, a: &[&str]) -> Result<Out> {
     Ok(o)
 }
 
-/// Each enabled `[hosts]` machine missing from this host's shed (`shed machine ls --json`).
-pub fn unlisted(cfg: &Config, r: &dyn Runner) -> Result<Vec<String>> {
-    let on = cfg.hosts.values().filter(|h| h.enabled);
-    let wanted: Vec<String> = on.filter_map(|h| h.machine.clone()).collect();
-    if wanted.is_empty() {
-        return Ok(wanted);
-    }
-    let listed: Vec<Value> = serde_json::from_str(cli(r, &["machine", "ls", "--json"])?.stdout.trim())?;
-    let has = |m: &String| listed.iter().any(|l| l["name"] == m.as_str());
-    Ok(wanted.into_iter().filter(|m| !has(m)).collect())
-}
-
-/// `shed machine add <m> <m>` for each `unlisted` machine (never a `machine rm`): those it added.
-pub fn add_machines(cfg: &Config, r: &dyn Runner) -> Result<Vec<String>> {
-    let missing = unlisted(cfg, r)?;
-    for m in &missing {
-        cli(r, &["machine", "add", m, m])?;
-    }
-    Ok(missing)
-}
-
-/// An agent's installed adapter command from `shed agents --json`: under `installed` since shed#129, else top level.
-pub fn adapter(r: &dyn Runner, id: &str) -> Result<Option<Vec<String>>> {
-    let agents: Value = serde_json::from_str(&cli(r, &["agents", "--json"])?.stdout)?;
-    let a = agents.as_array().into_iter().flatten().find(|a| a["id"] == id);
-    let a = a.map(|a| a.get("installed").unwrap_or(a));
-    Ok(a.and_then(|a| serde_json::from_value(a.get("cmd")?.clone()).ok()))
-}
-
 /// The kept events after `since` (shed keeps the last 1,000), read until the stream is quiet for `quiet`.
 pub fn events(w: &Wire, since: u64, quiet: Duration) -> Result<Vec<shed_proto::Event>> {
     let mut out = vec![];
@@ -327,18 +349,18 @@ pub fn follow(
     let Wire::Socket(p) = w else {
         bail!("shed events: this host's server only");
     };
-    let mut s = UnixStream::connect(p).with_context(|| format!("no shed server on {}", p.display()))?;
     let params = EventsParams {
         since: Some(since),
         ..Default::default()
     };
-    s.write_all(lines(&[(Method::Events, json!(params))]).as_bytes())?;
-    s.set_read_timeout(quiet)?;
-    let (mut rd, mut head) = (BufReader::new(s), String::new());
+    let (mut rd, mut head) = (dial(p, bound())?, String::new());
+    rd.get_mut()
+        .write_all(lines(&[(Method::Events, json!(params))]).as_bytes())?;
     for _ in 0..2 {
-        rd.read_line(&mut head)?;
+        rd.read_line(&mut head).with_context(|| silent(p, bound()))?;
     }
     one(&head)?;
+    rd.get_ref().set_read_timeout(quiet)?;
     f(None);
     let mut l = String::new();
     while rd.read_line(&mut l).is_ok_and(|n| n > 0) {

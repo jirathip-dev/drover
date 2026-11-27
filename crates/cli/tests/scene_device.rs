@@ -13,7 +13,8 @@ struct Serve {
 
 impl Drop for Serve {
     fn drop(&mut self) {
-        let _ = (self.p.kill(), self.p.wait());
+        self.p.kill().ok();
+        self.p.wait().ok();
     }
 }
 

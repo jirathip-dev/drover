@@ -1,0 +1,6 @@
+about = "the verify lane's browser evidence in Chrome (#731: console error, 500, known noise, design diff)"
+fix = "fix the evidence step the test names"
+budget_secs = 600
+leg = "ui"
+setup = ["rust", "node"]
+run = "scripts/chrome.sh cargo test --locked --test verify_browser"

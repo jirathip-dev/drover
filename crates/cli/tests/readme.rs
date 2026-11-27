@@ -130,7 +130,9 @@ fn quick_start_runs_as_written() {
     let bindir = Path::new(BIN).parent().unwrap();
     let shed = home.join("bin/shed");
     std::fs::create_dir_all(shed.parent().unwrap()).unwrap();
-    std::fs::write(&shed, "#!/bin/sh\n").unwrap();
+    let script = "#!/bin/sh\ncase \"$*\" in\n'help run') echo '--meta <JSON>';;\n\
+'agents --json') echo '[{\"id\": \"claude-acp\", \"cmd\": [\"claude-acp\"]}]';;\nesac\n";
+    std::fs::write(&shed, script).unwrap();
     let mode = std::os::unix::fs::PermissionsExt::from_mode(0o755);
     std::fs::set_permissions(&shed, mode).unwrap();
     let path = format!(
@@ -146,7 +148,6 @@ fn quick_start_runs_as_written() {
             "FLEET_CONFIG",
             "FLEET_STATE",
             "FLEET_WORKTREES",
-            "FLEET_HERMES_PROFILES",
             "DROVER_LANE",
             "FLEET_LANE",
         ] {
@@ -198,8 +199,8 @@ fn quick_start_runs_as_written() {
         assert!(Instant::now() < deadline, "serve never listened on {addr}");
         std::thread::sleep(Duration::from_millis(100));
     };
-    let _ = child.kill();
-    let _ = child.wait();
+    child.kill().ok();
+    child.wait().ok();
     assert!(body.starts_with("HTTP/1.") && body.contains(" 200 "), "{body}");
 }
 

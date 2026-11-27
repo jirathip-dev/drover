@@ -1,0 +1,10 @@
+about = "no fleet-test-* temp dir left behind by the shard's tests, pass or fail (#535); CI only: a lane's host shares its temp dir"
+fix = "make the test remove its fleet-test-* dirs, a failing one included"
+budget_secs = 5
+leg = "test"
+shards = { hosted = 4, self-hosted = 4 }
+run = '''
+if [ -z "${CI:-}" ]; then echo "CI's test leg runs it"; exit 0; fi
+left=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fleet-test-*')
+if [ -n "$left" ]; then echo "test temp dirs left behind:"; echo "$left"; exit 1; fi
+'''

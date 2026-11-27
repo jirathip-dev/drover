@@ -1,0 +1,4 @@
+code: string
+job: null
+message: string
+ok: boolean

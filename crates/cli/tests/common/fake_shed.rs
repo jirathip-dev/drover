@@ -25,7 +25,25 @@ pub struct State {
     pub hello: Option<Hello>,
     /// A `send`, `keys` or `kill` naming this terminal waits until the test clears it and notifies `FakeShed::moved`.
     pub held: Option<String>,
+    /// What the link does to each connection (`Fault::None`: answers at once).
+    pub fault: Fault,
+    /// The accounts `account.ls` answers with.
+    pub accounts: Vec<Value>,
 }
+
+/// A fault the fake link injects into each connection: `Hang` reads and never answers, `Latency` answers late, `Loss(n)` closes the next n unanswered, `Gone` takes the socket away.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Fault {
+    #[default]
+    None,
+    Hang,
+    Latency(std::time::Duration),
+    Loss(u32),
+    Gone,
+}
+
+/// A shared handle on a server that never removes its socket (`FakeShed::twin`).
+pub type Twin = Arc<std::mem::ManuallyDrop<FakeShed>>;
 
 pub struct FakeShed {
     pub sock: PathBuf,
@@ -35,7 +53,7 @@ pub struct FakeShed {
 
 impl Drop for FakeShed {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.sock);
+        std::fs::remove_file(&self.sock).ok();
     }
 }
 
@@ -52,7 +70,7 @@ impl FakeShed {
             std::process::id(),
             N.fetch_add(1, Ordering::SeqCst)
         ));
-        let _ = std::fs::remove_file(&sock);
+        std::fs::remove_file(&sock).ok();
         let l = UnixListener::bind(&sock).unwrap();
         let state = Arc::new(Mutex::new(State {
             events,
@@ -60,6 +78,7 @@ impl FakeShed {
                 version: version.into(),
                 ..Hello::ours()
             }),
+            accounts: vec![json!({"provider": "claude", "name": "work", "state": "ready"})],
             ..State::default()
         }));
         let (s, moved) = (state.clone(), Arc::new(Condvar::new()));
@@ -72,28 +91,32 @@ impl FakeShed {
         });
         FakeShed { sock, state, moved }
     }
-    /// The runtime on this server, as `[runtime] kind = "shed"` makes it.
+    /// The runtime on this server, as `[runtime] kind = "shed-acp"` makes it.
     pub fn shed(&self) -> Shed {
         Shed {
             wire: Wire::Socket(self.sock.clone()),
-            acp: None,
-            policy: "ask".into(),
+            acp: Some("claude-acp".into()),
+            policy: "allow".into(),
         }
     }
     /// Runner `r` with its lanes on this server, as the CLI and `serve` wrap theirs (for a caller that skips them).
     pub fn on<'a>(&self, r: &'a dyn Runner) -> drover::shed::With<'a> {
         drover::shed::With(r, self.shed())
     }
-    /// Fleet config `base` with its lanes on this server (`[runtime] kind = "shed"`).
+    /// Fleet config `base` with its lanes on this server (`[runtime] kind = "shed-acp"`); this thread's unscripted `shed` CLI calls reach it (`acp_cli`).
     pub fn config(&self, base: &str) -> String {
+        ATTACHED.with(|a| *a.borrow_mut() = Some(self.state.clone()));
         format!(
-            "{base}\n[runtime]\nkind = \"shed\"\nsocket = \"{}\"\n",
+            "{base}\n[runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n",
             self.sock.display()
         )
     }
     pub fn attach(&self, c: &drover::Ctx) {
         let base = std::fs::read_to_string(&c.config).unwrap();
-        let base = base.split("\n[runtime]\nkind = \"shed\"\n").next().unwrap_or_default();
+        let base = base
+            .split("\n[runtime]\nkind = \"shed-acp\"\n")
+            .next()
+            .unwrap_or_default();
         std::fs::write(&c.config, self.config(base)).unwrap();
     }
     /// A new server, ctx `c`'s lanes on it (`attach`).
@@ -109,6 +132,26 @@ impl FakeShed {
         std::fs::write(bin.join("shed"), "#!/bin/sh\nexit 0\n").unwrap();
         std::fs::set_permissions(bin.join("shed"), std::fs::Permissions::from_mode(0o755)).unwrap();
         format!("{}:/usr/bin:/bin", bin.display())
+    }
+    /// The lanes sent a brief (`# Brief…`, a lane's first prompt), in order: the starts an ACP spawn made.
+    pub fn briefed(&self) -> Vec<String> {
+        let briefs = self
+            .all("send")
+            .into_iter()
+            .filter(|p| p["text"].as_str().is_some_and(|t| t.starts_with("# Brief")));
+        briefs.filter_map(|p| p["name"].as_str().map(String::from)).collect()
+    }
+    /// A second handle on this server that never removes its socket, for a thread that must `config` it again.
+    pub fn twin(&self) -> Twin {
+        let (sock, state, moved) = (self.sock.clone(), self.state.clone(), self.moved.clone());
+        Arc::new(std::mem::ManuallyDrop::new(FakeShed { sock, state, moved }))
+    }
+    /// Inject `f` into every connection from now on.
+    pub fn fault(&self, f: Fault) {
+        if f == Fault::Gone {
+            std::fs::remove_file(&self.sock).ok();
+        }
+        self.lock().fault = f;
     }
     pub fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().unwrap()
@@ -207,7 +250,24 @@ fn answer(st: &Mutex<State>, q: &Request) -> String {
 
 fn conn(c: UnixStream, st: &Mutex<State>, moved: &Condvar) {
     let mut w = c.try_clone().unwrap();
+    let fault = {
+        let mut s = st.lock().unwrap();
+        let f = s.fault;
+        if let Fault::Loss(n) = f {
+            s.fault = if n > 1 { Fault::Loss(n - 1) } else { Fault::None };
+        }
+        f
+    };
+    if matches!(fault, Fault::Loss(_) | Fault::Gone) {
+        return;
+    }
     for line in BufReader::new(c).lines().map_while(Result::ok) {
+        match st.lock().unwrap().fault {
+            Fault::Hang => continue,
+            Fault::Gone => return,
+            Fault::Latency(d) => std::thread::sleep(d),
+            _ => {}
+        }
         let q: Request = serde_json::from_str(&line).unwrap();
         let writes = matches!(q.method.as_str(), "send" | "keys" | "kill");
         let held = |s: &mut State| writes && s.held.is_some() && s.held.as_deref() == q.params["name"].as_str();
@@ -237,6 +297,16 @@ fn handle(m: &str, p: &Value, st: &mut State) -> Result<Value, RpcError> {
         }
         "ls" => Ok(json!(terms.values().collect::<Vec<_>>())),
         "events" => Ok(json!({})),
+        "account.ls" => Ok(json!(st.accounts)),
+        "account.login" => {
+            let pane = format!(
+                "login-{}-{}",
+                p["provider"].as_str().unwrap_or_default(),
+                p["name"].as_str().unwrap_or_default()
+            );
+            terms.insert(pane.clone(), json!({"name": pane, "labels": {}, "cwd": "/", "cmd": [], "keep": false, "state": "running", "exit": null, "pid": 9, "redacted": true}));
+            Ok(json!({"terminal": pane}))
+        }
         _ if !terms.contains_key(&name) => Err(gone()),
         "get" => Ok(terms[&name].clone()),
         "read" if p["events"] == true && terms[&name]["acp"].is_string() => {
@@ -244,9 +314,12 @@ fn handle(m: &str, p: &Value, st: &mut State) -> Result<Value, RpcError> {
             let kept = terms[&name]["events"].as_array().cloned().unwrap_or_default();
             let all: Vec<&Value> = kept.iter().filter(|e| e["seq"].as_u64() < Some(before)).collect();
             let n = p["n"].as_u64().map_or(all.len(), |n| usize::try_from(n).unwrap());
-            Ok(json!({"text": "", "events": all[all.len().saturating_sub(n)..]}))
+            Ok(json!({"text": "", "events": all[all.len().saturating_sub(n)..], "cursor": {"seq": 0, "screen": 0}}))
         }
-        "read" => Ok(json!({"text": terms[&name]["text"].as_str().map_or(format!("screen of {name}"), String::from)})),
+        "read" => Ok(json!({
+            "text": terms[&name]["text"].as_str().map_or(format!("screen of {name}"), String::from),
+            "cursor": {"seq": 0, "screen": 0},
+        })),
         "send" | "keys" => Ok(json!({})),
         "wait" => {
             let outcome = st.waits.get(&name).map_or("matched", String::as_str);
@@ -421,4 +494,48 @@ impl Runner for OnShed {
     fn shed(&self) -> Option<Shed> {
         Some(self.1.shed())
     }
+}
+
+thread_local!(static ATTACHED: std::cell::RefCell<Option<Arc<Mutex<State>>>> = const { std::cell::RefCell::new(None) });
+
+/// shed's CLI as an ACP lane calls it, on the server this thread's config last named (`FakeShed::config`): `help run`, `agents --json`, `run --acp` (the session added), `send`, `cancel` and `kill`.
+pub fn acp_cli(args: &[String]) -> Option<Out> {
+    let st = ATTACHED.with(|a| a.borrow().clone())?;
+    let w: Vec<&str> = args.iter().map(String::as_str).collect();
+    let stdout = match w[..] {
+        ["help", "run", ..] => "--meta <JSON>".to_string(),
+        ["agents", "--json"] => json!([{"id": "claude-acp", "version": "0.101.0", "cmd": ["claude-acp"]}]).to_string(),
+        ["run", "--acp", ..] => {
+            let at = |k: &str| w.iter().position(|a| *a == k).map(|i| w[i + 1]).unwrap_or_default();
+            let labels: serde_json::Map<String, Value> = w
+                .windows(2)
+                .filter(|p| p[0] == "--label")
+                .filter_map(|p| p[1].split_once('='))
+                .map(|(k, v)| (k.to_string(), json!(v)))
+                .collect();
+            let t = json!({"name": at("--name"), "labels": labels, "cwd": at("--cwd"), "cmd": ["shed"], "keep": false,
+                "state": "running", "exit": null, "pid": 3, "acp": at("--acp")});
+            st.lock().unwrap().terms.insert(at("--name").into(), t);
+            String::new()
+        }
+        ["send", name, text] => {
+            st.lock()
+                .unwrap()
+                .seen
+                .push(("send".into(), json!({"name": name, "text": text})));
+            String::new()
+        }
+        ["cancel", _] => String::new(),
+        ["kill", name] => {
+            if let Some(t) = st.lock().unwrap().terms.get_mut(name) {
+                t["state"] = json!("exited");
+            }
+            String::new()
+        }
+        _ => return None,
+    };
+    Some(Out {
+        stdout,
+        ..Out::default()
+    })
 }

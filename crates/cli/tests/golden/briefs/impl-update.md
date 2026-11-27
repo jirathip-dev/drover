@@ -29,6 +29,9 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
 - Build output never goes in git: if the repo's `.gitignore` lacks `target*/`, add it in your PR.
 - Test with the exact commands from the brief. Save output to a named log and report the
   raw exit status; `cmd | grep` is never PASS/FAIL evidence.
+- Before you push, run only the targeted tests for the code you changed plus the light done check
+  (format, arch-check); never the full gate set locally. Push, then `drover turn done`. CI runs the full set;
+  never wait on it before `turn done`: a red CI comes back to you as a fix round.
 - Form fixes (PR body, re-date, format, docs) are edits in a new commit: never a history rewrite or force-push.
 - Fix rounds get the review findings verbatim. Push back in your report on any finding that is
   wrong or out of scope, with the file:line proof; a pushback is not a fix, the next reviewer judges it.
@@ -39,7 +42,7 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
   'Generated with' line, and format and arch-check pass in your worktree. A refusal starts no review:
   fix what it names, push, and run `drover turn done` again. No review without a passed `done`.
 - A `conflict-predicted` note means another open PR touches the same files. Don't wait for it.
-  Finish your work, run the gates, push. If the other PR merges first, drover gives you an update round to resolve it.
+  Finish your work, run your targeted tests, push. If the other PR merges first, drover gives you an update round to resolve it.
 - A decision that says to wait for another issue #N: run `drover queue <fleet> block --on N <issue>`
   for your own issue and end the turn. Drive prompts you (or respawns the lane) when #N merges.
 - Start any dev server on `$DROVER_PORT`, never a fixed port. Stop only what you started: record
@@ -52,6 +55,8 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
   user or operator, no code identifiers. `drover merge` copies it into the merge commit.
 - The PR body's evidence (test commands, exit codes) must name the final head sha it was
   produced at. Refresh it after every push (`gh pr edit --body`) so it never lags the head.
+- For each other issue your change fixes or makes moot, put a line in the PR body: `Closes #N`, or
+  `Moot: #N, #M`. `drover merge` closes them with yours (moot ones as not planned).
 
 ## Write tests that would fail without your change
 
@@ -70,23 +75,14 @@ Production code added only for tests counts against the change too.
 
 ## Standing answers (decide, don't ask)
 
-- An issue's line budget is a guide, not a gate. Never ask about it. State `src/ net +N (budget +M)`
-  in the PR body with one line on why. The cap in `ci/cap.toml` is a total for the repo and the only
-  hard limit: ask only when your own PR, merged onto current integration, would put the total over
-  `line_cap`; trim first, then ask `--kind owner`.
-- Never edit `ci/cap.toml` or add a raise in `ci/cap.d/` (the hook refuses both): one orchestrator-filed issue raises it for the whole queue.
-  Your cap ask carries `drover cap <fleet>`'s queue-wide view, with its two options: raise to the
-  projected total plus margin in one orchestrator-filed issue (recommended), or trim. A `DECISION` to wait
-  for that issue: `drover queue <fleet> block --on N <issue>` and end the turn.
-- Being near the cap, or another PR's growth, is never a reason to ask. A `STAGING_WOULD_BREAK` from
-  the cap after another merge is a fix round: trim, or ask under the same rule.
+- The PR body states `src/ net +N (budget +M)` with one line on why; the budget is a guide, never a gate.
 - Staging moved or conflicts: merge `origin/<integration>` again and push. Repeat as needed
   (no limit inside one round).
 - Staging itself broken by someone else's merge: fix the minimal break in your PR, say
   "staging build fix" in the body, and carry on.
 - A host tool died (Docker, simulator): retry once after 2 min; then `drover ask --kind owner`
   (lanes may not change the host).
-- The cap or a shared-file edit another open PR also makes: use the exact text from the issue
+- A shared-file edit another open PR also makes: use the exact text from the issue
   amendment.
 
 ## Report
@@ -105,7 +101,7 @@ This is a fix round; a fresh review follows at your pushed head.
 
 1. Merge `origin/staging` into this branch (`git fetch origin && git merge origin/staging`). No rebase, no force-push.
 2. Resolve the conflicts preserving both sides' intent.
-3. Run the repo's gates (build, lint, tests) and push.
+3. Run the targeted tests for the files you resolved (never the full gate set; CI runs it, a red CI is a fix round) and push.
 4. Report the resolved files.
 5. `drover turn done` gates the pushed head (PR body at the head, format, arch-check); a refusal means fix, push, and
    run it again.

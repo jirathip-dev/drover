@@ -1,0 +1,20 @@
+flow = "issue"
+states = ["merged", "closed"]
+reads = ["lane"]
+ignores = ["host", "pr", "verdict", "ask", "turn"]
+
+[[row]]
+id = "leftover"
+when = { lane = ["running", "limited", "asleep", "done"] }
+do = "clean"
+owner = "drive"
+timeout = "done_close_minutes"
+say = "ended: close its lane and clean up"
+
+[[row]]
+id = "finished"
+when = { lane = ["none", "exited", "gone"] }
+do = "clean"
+owner = "drive"
+timeout = "done_close_minutes"
+say = "ended: clean up"

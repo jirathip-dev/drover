@@ -254,7 +254,7 @@ fn an_issue_carries_its_latest_why_owner_line() {
 #[test]
 fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
     let d = tmpdir("api-issue");
-    let verify = "\n[fleet.sendmeter.role.verify]\nharness = \"hermes\"\nprofile = \"fleet-verify\"\n";
+    let verify = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
     let c = ctx(&d, &(CONFIG.to_string() + verify));
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--repro"]).0,
@@ -328,7 +328,7 @@ fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
 fn lessons_show_the_last_run_and_the_next_due_date() {
     let (c, r) = fixture("api-lessons");
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    drover::lesson::weekly(&c, &cfg, &Fake::default(), &mut vec![]).unwrap();
+    assert!(drover::timer::due(&c, "lesson-sendmeter", cfg.fleet["sendmeter"].jobs["lesson"].every).unwrap());
     let d = json!({"role": "lesson", "stage": "impl", "agent": "sendmeter-lesson-30", "harness": "claude"});
     append(&c.state, &Event::new(900_400, "sendmeter", Some(30), "spawn", d)).unwrap();
     let s = Server::new(&c, &r, Some(ADDR.into()));

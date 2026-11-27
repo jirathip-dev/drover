@@ -84,7 +84,7 @@ impl Runner for Air {
 }
 
 fn setup(name: &str) -> (drover::Ctx, FakeShed) {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n");
     let c = ctx(&tmpdir(name), &toml);
     let st = c.state.parent().unwrap();
@@ -141,11 +141,11 @@ fn checks(r: &Air) -> usize {
 }
 
 #[test]
-fn a_drive_pass_checks_500_remote_worktrees_with_one_ssh_call() {
-    let (c, _sh) = setup("exists-drive");
+fn housekeepings_clean_checks_500_remote_worktrees_with_one_ssh_call() {
+    let (c, _sh) = setup("exists-housekeep");
     let r = air(&[], false);
-    let (code, out) = run(&c, &r, &["drive"]);
-    eprintln!("drive: {} existence ssh call(s) to the Air", checks(&r));
+    let (code, out) = run(&c, &r, &["housekeep", "--only", "clean"]);
+    eprintln!("housekeep: {} existence ssh call(s) to the Air", checks(&r));
     assert_eq!(code, 0, "{out}");
     assert_eq!(
         checks(&r),
@@ -182,7 +182,7 @@ fn a_hung_host_is_logged_over_budget_and_the_other_hosts_spawn_goes_ahead() {
     let r = air(&[], true);
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
-    assert!(sh.called("run", "sendmeter-impl-12"), "the spawn goes ahead: {out}");
+    assert!(sh.has("sendmeter-impl-12"), "the spawn goes ahead: {out}");
     assert!(
         out.contains("tick: air: over budget; skipped for the rest of this pass"),
         "{out}"

@@ -158,7 +158,6 @@ fn rendered_page_has_no_inline_px() {
         config: demo.join("fleet.toml"),
         state: demo.join("events.jsonl"),
         worktrees: d.join("wt"),
-        homes: [("hermes", d.join("hermes"))].into(),
         exe: "drover".into(),
         now: 1,
         home: d.join("home"),
@@ -186,6 +185,6 @@ fn the_lint_bites() {
     let d = decls(css);
     assert_eq!(d.len(), 3, "{d:?}");
     assert_eq!((d[0].0, px(&d[0].3)), (2, vec!["14px".to_string()]));
-    assert_eq!(px(&d[1].3), [] as [std::string::String; 0]);
+    assert_eq!(px(&d[1].3), <[std::string::String; 0]>::default());
     assert_eq!(px(&d[2].3), ["4px"]);
 }

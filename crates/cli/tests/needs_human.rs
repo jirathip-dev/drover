@@ -21,7 +21,7 @@ fn fixture(name: &str, last: &str) -> drover::Ctx {
     );
     for (i, sha) in ["2", "3", "4"].iter().enumerate() {
         ev(
-            20 + i as u64,
+            20 + u64::try_from(i).unwrap(),
             "verdict",
             json!({"verdict": "FAIL", "sha": sha.repeat(40)}),
         );
@@ -31,7 +31,7 @@ fn fixture(name: &str, last: &str) -> drover::Ctx {
     ev(
         31,
         "needs-human",
-        json!({"code": "ROUND_LIMIT", "reason": "review rounds ran out (4/3)"}),
+        json!({"code": "STUCK", "reason": "review rounds ran out (4/3)"}),
     );
     let checks = json!([{"__typename": "CheckRun", "name": "build", "status": "COMPLETED", "conclusion": "SUCCESS"}]);
     let pr = json!({"number": 34, "state": "OPEN", "baseRefName": "staging", "headRefOid": HEAD, "mergeable": "MERGEABLE", "statusCheckRollup": checks});
@@ -230,7 +230,7 @@ fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
     assert!(post("extend").contains("not%20needs"), "a second tap decides nothing");
     assert_eq!(extended(), 1, "the decision is logged once");
     let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
-    assert_eq!((st.extra, st.state.as_str()), (1, "queued"));
+    assert_eq!(st.state, "queued");
     let failed = read(&c.state)
         .unwrap()
         .iter()

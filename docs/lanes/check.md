@@ -50,5 +50,4 @@ signs in there and turns the host back on ([accounts](../accounts.md)). It is id
 
 Each `[[notify]]` entry gets one plain line on stdin for the events in its `on` list, or
 the raw event JSON with `format = "json"`. A fleet's own `[[fleet.<name>.notify]]`
-replaces the global list for its events; `notify_global = true` sends to both. Notifiers
-run without the caller's `HERMES_*` environment.
+replaces the global list for its events; `notify_global = true` sends to both.
