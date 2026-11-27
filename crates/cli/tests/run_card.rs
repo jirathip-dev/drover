@@ -272,7 +272,6 @@ fn a_hard_no_is_refused_at_posting() {
         "git push origin +staging",
         "git filter-repo --path secrets",
         "gh api -X DELETE repos/o/r/branches/main/protection",
-        "drover merge sendmeter 5 --owner-override",
     ] {
         let (code, out) = post(&c, cmd);
         assert_eq!(

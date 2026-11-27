@@ -11,6 +11,9 @@ skip = [".drover/**", "roles/usage-tail.md", "scripts/test-shards.txt"]
 projects = ["web"]
 install = "npm --prefix web ci --no-audit --no-fund"
 
+[off]
+"core/cap" = "#1812: drover has no line cap; size is watched by arch.toml size rules and hotspots"
+
 [budgets]
 "core/arch" = 600
 

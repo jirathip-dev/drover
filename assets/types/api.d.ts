@@ -419,7 +419,7 @@ export type Backlog = { issues: { [key in string]: BacklogIssue }, ago: string, 
 /**
  * A fleet's [config] sheet: the config file (`path`, `file`), GENERAL, the Pipeline group's data (`pipe`), LIMITS, ROLES (with `rw`, pickers from `models`, `harnesses` and their efforts), the Conductor, ALERTS.
  */
-export type ConfigSheet = { path: string, file: string, repo: string, local: string, integration: string, effort?: string | null, color_set: boolean, env: Array<string>, node_modules: boolean, builtin: boolean, review_rounds: number, update_rounds: number, stall_minutes: number, ask_minutes: number, max_impl?: number | null, max_rev?: number | null, line_cap?: number | null, serial: Array<string>, deny: Array<string>, required: Array<string>, merge_label?: string | null, notify: Array<string>, global: Array<string>, pipe: JsonValue, models: Array<string>, harnesses: Array<Harness>, roles: Array<RoleRow>, conductor?: Conductor | null, };
+export type ConfigSheet = { path: string, file: string, repo: string, local: string, integration: string, effort?: string | null, color_set: boolean, env: Array<string>, node_modules: boolean, builtin: boolean, stall_minutes: number, ask_minutes: number, max_impl?: number | null, max_rev?: number | null, serial: Array<string>, deny: Array<string>, required: Array<string>, merge_label?: string | null, notify: Array<string>, global: Array<string>, pipe: JsonValue, models: Array<string>, harnesses: Array<Harness>, roles: Array<RoleRow>, conductor?: Conductor | null, };
 
 export type Harness = { name: string, efforts: Array<string>, };
 
@@ -627,17 +627,9 @@ export type IssueState = { fleet: string, issue: number, state: string, lane?: s
  */
 effort?: string | null, rounds: number, 
 /**
- * Extra rounds the owner allowed (`round-extended`); the latest grants the round after any stage's.
- */
-extra: number, granted: number, 
-/**
  * Passed `--update` rounds, apart from `rounds`; `updating` while one is open (state `fix(n)+uk`).
  */
-updates: number, updating: boolean, 
-/**
- * Update rounds the owner allowed past `update_rounds` (`round-extended` on an `UPDATE_LIMIT` card).
- */
-update_extra: number, last_ts: number, last_event: string, 
+updates: number, updating: boolean, last_ts: number, last_event: string, 
 /**
  * Latest agent per role (impl, rev).
  */

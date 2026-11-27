@@ -1,0 +1,1 @@
+- STUCK: no round limit (#1809); an issue goes needs-human (one card naming it) only when stuck: the same blocking finding (category and file) in 3 FAILs in a row (2 fix rounds), CI red at the same check for 2 fix rounds, or `spawn --update` with the PR still conflicting after 2 update rounds in a row; `extend` gives it one more round

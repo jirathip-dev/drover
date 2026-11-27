@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 /// The fleet.toml knobs a what-if carries into the sim's fleet, read (never written) from one config.
 #[derive(Debug, Clone)]
 pub struct Knobs {
-    pub rounds: u32,
     pub spawns: usize,
     pub max_impl: Option<usize>,
     pub max_rev: Option<usize>,
@@ -21,7 +20,6 @@ impl Knobs {
         let c = Config::parse(text)?;
         let f = c.fleet(fleet)?;
         Ok(Knobs {
-            rounds: c.limits.review_rounds,
             spawns: c.limits.max_parallel_spawns,
             max_impl: f.max_impl,
             max_rev: f.max_rev,
@@ -38,11 +36,8 @@ impl Knobs {
             .filter_map(|(k, v)| v.map(|v| format!("{k} = {v}\n")))
             .collect();
         let at = "integration = \"staging\"\n";
-        let mut cfg = crate::scenario::config(u64::try_from(self.spawns).unwrap(), self.rounds.into()).replacen(
-            at,
-            &format!("{at}{caps}"),
-            1,
-        );
+        let mut cfg =
+            crate::scenario::config(u64::try_from(self.spawns).unwrap(), 0).replacen(at, &format!("{at}{caps}"), 1);
         for g in &self.serial {
             cfg += &format!(
                 "\n[[fleet.{FLEET}.serial]]\nname = {:?}\npaths = {:?}\nmax = {}\n",
@@ -55,7 +50,6 @@ impl Knobs {
     fn rows(&self) -> Vec<(String, String)> {
         let opt = |v: Option<usize>| v.map_or("-".into(), |v| v.to_string());
         let mut rows = vec![
-            ("review_rounds".into(), self.rounds.to_string()),
             ("max_parallel_spawns".into(), self.spawns.to_string()),
             ("max_impl".into(), opt(self.max_impl)),
             ("max_rev".into(), opt(self.max_rev)),

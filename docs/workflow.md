@@ -31,7 +31,7 @@ stateDiagram-v2
     impl --> review : pushed, no-change
     impl --> ready : no-change
     review --> merged : merged-outside
-    review --> needs_human : pr-closed
+    review --> needs_human : pr-closed, record
     review --> ready : record
     review --> fix : record
     fix --> merged : merged-outside
@@ -39,7 +39,7 @@ stateDiagram-v2
     fix --> review : pushed, no-change
     fix --> ready : no-change
     ready --> merged : merged-outside, merge
-    ready --> needs_human : pr-closed
+    ready --> needs_human : pr-closed, ci-red, conflict
     ready --> review : next-check
     ready --> fix : merge, ci-red, conflict
     blocked --> merged : merged-outside
@@ -61,7 +61,7 @@ stateDiagram-v2
 ```mermaid
 flowchart TD
     j0["dev.drover.tick: drover tick"] --> t0
-    j1["dev.drover.fast: drover drive"] --> d0
+    j1["dev.drover.service: drover service --api 127.0.0.1:7779"] --> d0
     t0["check"] --> t1
     t1["drive"] --> t2
     t2["clean"] --> t3
@@ -98,14 +98,11 @@ flowchart TD
     d2 -.- k_ci_stuck_minutes(["ci_stuck_minutes = 30"])
     d2 -.- k_ci_flaky_retries(["ci_flaky_retries = 1"])
     d2 -.- k_gate_check_minutes(["gate_check_minutes = 30"])
-    d2 -.- k_review_rounds(["review_rounds = 3"])
-    d2 -.- k_update_rounds(["update_rounds = 3"])
     d2 -.- k_job_max(["job_max = 4"])
     d3 -.- k_max_parallel_spawns(["max_parallel_spawns = 6"])
     d3 -.- k_start_max(["start_max = 2"])
     d3 -.- k_start_release(["start_release = "started""])
     d3 -.- k_spawn_pending_max_secs(["spawn_pending_max_secs = 300"])
-    d3 -.- k_admit_wait_secs(["admit_wait_secs = 5"])
     d3 -.- k_respawn_max(["respawn_max = 3"])
     d3 -.- k_respawn_window_minutes(["respawn_window_minutes = 60"])
     other -.- k_overload_minutes(["overload_minutes = 10"])

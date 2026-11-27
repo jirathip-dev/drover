@@ -115,7 +115,10 @@ fn settled_issues_and_archived_threads_are_read_from_the_snapshot_only() {
                 assert_eq!(clean_me.len(), 1, "{out}");
                 assert!(clean_me[0].contains("#2002"), "{out}");
             }
-            "clean" => assert!(out.contains("issue-kept") && out.lines().count() == 2, "{out}"),
+            "clean" => {
+                assert_eq!(out.lines().filter(|l| l.contains("/sendmeter/")).count(), 1, "{out}");
+                assert!(out.contains("issue-kept") && out.contains("1 lanes checked"), "{out}");
+            }
             "thread" => assert_eq!(out.lines().count(), usize::try_from(OPEN_THREADS).unwrap() + 1, "{out}"),
             _ => {}
         }

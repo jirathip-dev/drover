@@ -4,7 +4,7 @@ use crate::sched::{Rng, World};
 
 /// The "sometimes" states: the gate scenarios fail the run unless one of them reaches each.
 pub const SOMETIMES: &[&str] = &[
-    "round-limit",
+    "stuck",
     "head-moved-after-pass",
     "merge-after-retried-verdict",
     "done-refused-card",
@@ -119,8 +119,8 @@ pub fn on_append(w: &mut World) {
     };
     let n = ev.issue.unwrap_or(0);
     let data = serde_json::to_string(&ev.data).unwrap_or_default();
-    if ev.kind == "needs-human" && (data.contains("ROUND_LIMIT") || data.contains("review rounds ran out (3")) {
-        w.model.reached.insert("round-limit");
+    if ev.kind == "needs-human" && ev.str("code") == Some("STUCK") {
+        w.model.reached.insert("stuck");
     }
     if ev.kind == "needs-human" && ev.str("code") == Some("DONE_REFUSED") && data.contains("PR_BODY") {
         let reviewed = (w.wrote.iter()).any(|x| x.ev.kind == "pushed" && x.ev.issue == Some(n));

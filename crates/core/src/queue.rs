@@ -473,7 +473,7 @@ fn flying(ctx: &crate::Ctx, events: &[Event], st: &States, fleet: &str) -> Vec<u
     st.values().filter(flies).map(|s| s.issue).collect()
 }
 
-/// Every fleet's PRs in flight as (fleet, issue) and `max_in_flight_total`, unless `0` turns it off.
+/// Every unpaused fleet's PRs in flight as (fleet, issue) and `max_in_flight_total`, unless `0` turns it off.
 pub fn total(
     ctx: &crate::Ctx,
     events: &[Event],
@@ -483,8 +483,9 @@ pub fn total(
     let cap = Some(cfg.limits.max_in_flight_total).filter(|&n| n > 0)?;
     let all = cfg
         .fleet
-        .keys()
-        .flat_map(|f| flying(ctx, events, st, f).into_iter().map(|n| (f.clone(), n)));
+        .iter()
+        .filter(|(_, f)| !f.paused)
+        .flat_map(|(f, _)| flying(ctx, events, st, f).into_iter().map(|n| (f.clone(), n)));
     Some((all.collect(), cap))
 }
 
@@ -651,11 +652,12 @@ pub fn startable(events: &[Event], fleet: &str) -> Vec<String> {
 pub fn skipped(
     events: &[Event],
     st: &States,
-    f: Option<&Fleet>,
+    cfg: Option<&crate::config::Config>,
     fleet: &str,
     (n, ctx): (u64, &crate::Ctx),
     slots: &str,
 ) -> Option<(String, String)> {
+    let f = cfg.and_then(|c| c.fleet.get(fleet));
     let s = |e: &&Event| e.kind == "driven" && e.fleet == fleet && e.issue == Some(n) && e.str("step") == Some("start");
     let is = st.get(&(fleet.to_string(), n)).filter(|s| s.state == "queued")?;
     let free = view(events, st, fleet)
@@ -707,6 +709,9 @@ pub fn skipped(
         _ => why.to_string(),
     };
     let ago = age(now.saturating_sub(e.ts));
+    if let Some((k, at)) = cfg.and_then(|c| crate::starts::place(c, events, now, (fleet, n))) {
+        return Some((format!("line {k} {code}"), format!("{code} ({why}) · {ago} ago · {at}")));
+    }
     Some((format!("skip {code}"), format!("{code} ({why}) · {ago} ago")))
 }
 
@@ -754,7 +759,7 @@ pub fn board(
     let row = |pos: String, n: u64, last: Option<String>| {
         let s = st.get(&(fleet.to_string(), n));
         let f = cfg.and_then(|c| c.fleet.get(fleet));
-        let skip = skipped(events, &st, f, fleet, (n, ctx), slots).map(|s| s.0);
+        let skip = skipped(events, &st, cfg, fleet, (n, ctx), slots).map(|s| s.0);
         let lane: String = s
             .and_then(|s| s.lane.clone())
             .or(skip)

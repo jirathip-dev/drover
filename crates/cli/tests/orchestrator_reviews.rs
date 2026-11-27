@@ -79,7 +79,7 @@ fn design_ask(c: &drover::Ctx, ts: u64) {
 }
 
 fn needs_human(c: &drover::Ctx, ts: u64) {
-    let d = json!({"code": "ROUND_LIMIT", "reason": "review rounds exceed 3"});
+    let d = json!({"code": "STUCK", "reason": "review rounds exceed 3"});
     log(c, ts, "sendmeter", Some(36), "needs-human", d);
 }
 

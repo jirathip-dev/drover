@@ -1,13 +1,5 @@
 /// Every `[limits]` key and what it sets, in docs/config/limits.md's order; `drover config show` prints them.
 pub const LIMIT_DOCS: &[(&str, &str)] = &[
-    (
-        "review_rounds",
-        "review rounds before an issue goes needs-human (ROUND_LIMIT)",
-    ),
-    (
-        "update_rounds",
-        "PASSed update rounds before `spawn --update` refuses UPDATE_LIMIT",
-    ),
     ("stall_minutes", "a working lane with no event this long is stalled"),
     (
         "silent_minutes",
@@ -126,10 +118,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "spawn_pending_max_secs",
         "a spawn marker older than this is stale",
-    ),
-    (
-        "admit_wait_secs",
-        "a spawn's admission waits this long for another admission on its host before `SPAWN_PENDING`",
     ),
     (
         "acp_start_minutes",

@@ -7,8 +7,6 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 
 | key | default | what it sets |
 | --- | --- | --- |
-| `review_rounds` | `3` | review rounds before an issue goes needs-human (ROUND_LIMIT) |
-| `update_rounds` | `3` | PASSed update rounds before `spawn --update` refuses UPDATE_LIMIT |
 | `stall_minutes` | `30` | a working lane with no event this long is stalled |
 | `silent_minutes` | `10` | an ACP lane's open turn with no session event this long is cancelled and nudged |
 | `ci_start_minutes` | `10` | a PR head with no checks this long after its push alerts `ci-missing` |
@@ -44,7 +42,6 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `start_max` | `2` | lanes starting at once on a remote host that sets no `start_max` |
 | `start_release` | `"started"` | a start frees its slot once its harness is up (`started`) or its prompt is confirmed (`confirmed`) |
 | `spawn_pending_max_secs` | `300` | a spawn marker older than this is stale |
-| `admit_wait_secs` | `5` | a spawn's admission waits this long for another admission on its host before `SPAWN_PENDING` |
 | `acp_start_minutes` | `3` | an ACP lane with no event back this long after its first turn is a failed start |
 | `webhook_poll_minutes` | `10` | with GitHub webhooks on, the fast step re-reads PRs only this often |
 | `keychain_readers` | `3` | more Keychain readers up over 60 s alert `keychain-jammed` |

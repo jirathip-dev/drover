@@ -99,7 +99,7 @@ budget of 150. It did not measure a copy of the live state either. The hub's per
   `spawn_blocking` around every SQLite read and a hand-written request reader. The workspace's tokio features
   (`rt-multi-thread`, `net`, `io-util`, `time`, `sync`) have no `macros`, so no `select!`.
 - **topcoat.** cooee pins 0.11.0. Its runtime guide and `browser/src/render/shard.ts` were read; nothing was run.
-- **The line cap.** `drover cap`: 53,359 of 53,500 at staging `4b1a59b`, headroom 141; the open PRs add 351, which
+- **The line cap.** the removed cap view (#1812): 53,359 of 53,500 at staging `4b1a59b`, headroom 141; the open PRs add 351, which
   projects 210 over. It counts `crates/*/src/**/*.rs`, so a crate in another repo is outside it.
 - **Neighbours.** #1312 (phone timings, merged) brings the fixture (`common::large`) and the tap-to-painted numbers
   (`phone_timings.rs`). #1313 (in review) gates each build at 150 ms p95. #1314 (PR open, in a fix round) adds gzip

@@ -40,7 +40,7 @@ Self-update installs CI's signed release build of the `[self_update] branch` hea
 | `drive` / `timer` / `tick` | one pass; the job that runs it; check, then drive |
 | `queue` / `next` / `pause` / `resume` | the ordered queue; the first ready issue; hold a fleet |
 | `spawn` / `adopt` / `turn` | start a lane; record a running one; a lane's end of turn |
-| `verdict` / `merge` / `cap` | a verdict pinned to the head sha; merge if every gate passes; the line cap |
+| `verdict` / `merge` | a verdict pinned to the head sha; merge if every gate passes |
 | `status` / `board` / `waiting` / `serve` | per-issue state; compact board; who waits on whom; the server |
 | `ask` / `answer` / `asks` / `thread` / `card` | decisions; orchestrator threads; run cards |
 | `check` / `clean` / `reclaim` / `kill` | alerts; reclaim done lanes and build folders; stop a lane, work saved |
