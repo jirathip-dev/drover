@@ -708,7 +708,7 @@ pub fn skipped(
         _ => why.to_string(),
     };
     let ago = age(now.saturating_sub(e.ts));
-    if let Some((k, at)) = cfg.and_then(|c| crate::starts::place(c, events, now, (fleet, n))) {
+    if let Some((k, at)) = cfg.and_then(|c| crate::starts::place(&crate::starts::line(c, events, now), (fleet, n))) {
         return Some((format!("line {k} {code}"), format!("{code} ({why}) · {ago} ago · {at}")));
     }
     Some((format!("skip {code}"), format!("{code} ({why}) · {ago} ago")))
