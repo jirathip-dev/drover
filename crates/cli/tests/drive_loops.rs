@@ -180,6 +180,45 @@ fn a_hung_pass_ends_itself_at_pass_max_secs_and_names_its_step() {
 }
 
 #[test]
+fn a_hung_kick_ends_itself_at_pass_max_secs_and_logs_pass_slow() {
+    let d = tmpdir("loops-kick-deadline");
+    let c = ctx(&d, &CONFIG.replace("[limits]\n", "[limits]\npass_max_secs = 1\n"));
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    let _sh = FakeShed::attached(&c);
+    let d12 = serde_json::json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "branch": "issue-12"});
+    drover::events::append(&c.state, &Event::new(c.now - 60, "sendmeter", Some(12), "spawn", d12)).unwrap();
+    let bin = d.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let gh = bin.join("gh");
+    std::fs::write(&gh, "#!/bin/sh\nexec sleep 5\n").unwrap();
+    std::fs::set_permissions(&gh, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let home = c.state.parent().unwrap().parent().unwrap();
+    let t = Instant::now();
+    let st = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
+        .args(["kick", "sendmeter", "12", "--why", "test", "--now"])
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("HOME", home)
+        .env("DROVER_HOME", home)
+        .env("FLEET_CONFIG", &c.config)
+        .env("FLEET_STATE", &c.state)
+        .env("FLEET_WORKTREES", &c.worktrees)
+        .output()
+        .unwrap();
+    let secs = t.elapsed().as_secs_f64();
+    let said = String::from_utf8_lossy(&st.stdout).into_owned() + &String::from_utf8_lossy(&st.stderr);
+    assert_eq!(
+        st.status.code(),
+        Some(124),
+        "ended by its deadline after {secs:.1} s: {said}"
+    );
+    assert!(secs < 4.0, "the kick ran {secs:.1} s past a 1 s limit");
+    let ev = read(&c.state).unwrap();
+    let slow = ev.iter().find(|e| e.kind == "pass-slow").expect("pass-slow logged");
+    assert_eq!((slow.fleet.as_str(), slow.issue), ("sendmeter", Some(12)));
+    assert_eq!(slow.str("step"), Some("kick #12"), "{:?}", slow.data);
+}
+
+#[test]
 fn a_wake_starts_its_fleets_pass_within_a_second() {
     let c = ctx(&tmpdir("loops-wake"), &format!("{CONFIG}{SLOW}"));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();

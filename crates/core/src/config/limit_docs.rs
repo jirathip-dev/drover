@@ -161,6 +161,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "a fleet's pass ends itself here, `pass-slow` naming its step; a lock held past 2 × it logs `pass-stuck` and is taken over",
     ),
     (
+        "fetch_fresh_secs",
+        "a fleet clone's fetch of refspecs fetched this recently, their refs there, is skipped; a fetch waiting on the clone's lock gets the one before it",
+    ),
+    (
         "ssh_connect_secs",
         "every host ssh's `-oConnectTimeout`; the whole `ssh <host> true` probe's retry and `hosts refresh`'s probe",
     ),

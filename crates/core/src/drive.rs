@@ -710,27 +710,29 @@ pub fn chores(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
 /// `drover drive`: with a fleet, its pass under its own `pass_max_secs` deadline; without, every fleet's pass started.
 pub fn job(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: Option<&str>) -> Result<()> {
     let Some(f) = fleet else { return start(ctx, cfg, r, out) };
-    let _end = deadline(ctx, cfg, f);
+    let _end = deadline(ctx, cfg, f, None);
     drive(ctx, cfg, r, out, f, false)
 }
 
-fn deadline(ctx: &Ctx, cfg: &Config, fleet: &str) -> std::sync::mpsc::Sender<()> {
+fn deadline(ctx: &Ctx, cfg: &Config, fleet: &str, kick: Option<u64>) -> std::sync::mpsc::Sender<()> {
     let (end, rx) = std::sync::mpsc::channel::<()>();
     let (state, fleet, secs) = (ctx.state.clone(), fleet.to_string(), cfg.limits.pass_max_secs);
+    crate::clock::end_in(std::time::Duration::from_secs(secs));
     std::thread::spawn(move || {
         let late = rx.recv_timeout(std::time::Duration::from_secs(secs));
         if late != Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
             return;
         }
         let mark = state.with_file_name(format!("drive-{fleet}.lock.step"));
-        let step = std::fs::read_to_string(&mark).unwrap_or_default();
-        std::fs::write(
-            mark.with_file_name(format!("drive-{fleet}.last")),
-            crate::now().to_string(),
-        )
-        .ok();
-        let d = json!({"secs": secs, "step": step.trim(), "ended": true});
-        append(&state, &Event::new(crate::now(), &fleet, None, "pass-slow", d)).ok();
+        let step = if let Some(n) = kick {
+            format!("kick #{n}")
+        } else {
+            let last = mark.with_file_name(format!("drive-{fleet}.last"));
+            std::fs::write(last, crate::now().to_string()).ok();
+            std::fs::read_to_string(&mark).unwrap_or_default().trim().to_string()
+        };
+        let d = json!({"secs": secs, "step": step, "ended": true});
+        append(&state, &Event::new(crate::now(), &fleet, kick, "pass-slow", d)).ok();
         crate::runner::kill_running();
         crate::runner::exit(124);
     });

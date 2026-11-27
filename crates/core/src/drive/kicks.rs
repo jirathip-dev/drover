@@ -197,6 +197,7 @@ pub(super) fn one(
         }
         slot => slot.flatten(),
     };
+    let _end = super::deadline(ctx, cfg, fleet, Some(n));
     let mut buf = vec![];
     super::KICK.set(Some(n));
     super::SLOT.set(pending.is_some());
