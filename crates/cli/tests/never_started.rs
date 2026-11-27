@@ -91,7 +91,7 @@ fn used(name: &str) -> drover::Ctx {
         &c,
         14,
         "needs-human",
-        json!({"code": "ROUND_LIMIT", "reason": "out of rounds"}),
+        json!({"code": "STUCK", "reason": "out of rounds"}),
     );
     c
 }

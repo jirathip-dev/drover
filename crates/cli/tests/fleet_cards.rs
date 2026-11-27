@@ -53,7 +53,7 @@ fn fixture(name: &str) -> drover::Ctx {
         "zeta",
         5,
         "needs-human",
-        json!({"code": "ROUND_LIMIT", "reason": "rounds ran out"}),
+        json!({"code": "STUCK", "reason": "rounds ran out"}),
     );
     ev(
         "beta",

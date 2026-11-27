@@ -166,7 +166,7 @@ fn the_cap_defaults_to_8_and_0_turns_it_off() {
 fn a_held_issue_with_an_open_pr_counts_and_force_overrides_the_refusal_logged() {
     let c = setup("inflight-force", "max_in_flight = 2", &["5"]);
     building(&c, 1..=1);
-    ev(&c, 2, "needs-human", json!({"code": "ROUND_LIMIT"}));
+    ev(&c, 2, "needs-human", json!({"code": "STUCK"}));
     let (_, out) = run(&c, &fake(NONE), &["spawn", "sendmeter", "5", "impl"]);
     assert!(
         !out.contains("IN_FLIGHT_CAP"),
@@ -174,7 +174,7 @@ fn a_held_issue_with_an_open_pr_counts_and_force_overrides_the_refusal_logged() 
     );
     let c = setup("inflight-force2", "max_in_flight = 2", &["6"]);
     building(&c, 1..=1);
-    ev(&c, 2, "needs-human", json!({"code": "ROUND_LIMIT"}));
+    ev(&c, 2, "needs-human", json!({"code": "STUCK"}));
     let cache = c.state.with_file_name("cache");
     std::fs::create_dir_all(&cache).unwrap();
     let pr = json!({"ts": c.now, "pr": {"number": 22, "state": "OPEN"}});

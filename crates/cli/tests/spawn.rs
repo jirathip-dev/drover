@@ -716,7 +716,7 @@ fn each_roles_effort_is_its_own_or_the_fleet_default() {
             "harness  =  \"claude\"    # toggled in tests",
             "harness = \"claude\"\neffort = \"high\"",
         )
-        .replace("review_rounds = 3", "review_rounds = 3\neffort = \"xhigh\"");
+        .replace("stall_minutes = 30", "stall_minutes = 30\neffort = \"xhigh\"");
     let c = ctx(&d, &cfg);
     let _sh = on_shed(&c);
     assert_eq!(plan(&c, &shed_fake(), "impl")["effort"], "high");
@@ -746,7 +746,7 @@ fn invalid_effort_is_refused_at_config_load() {
             "fleet.sendmeter.role.rev: effort \"max\" must be one of",
         ),
         (
-            CONFIG.replace("review_rounds = 3", "review_rounds = 3\neffort = \"ultra\""),
+            CONFIG.replace("stall_minutes = 30", "stall_minutes = 30\neffort = \"ultra\""),
             "limits.effort: \"ultra\" must be one of",
         ),
     ] {

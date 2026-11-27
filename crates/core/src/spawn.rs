@@ -1218,7 +1218,7 @@ fn start(
     lane_admit(ctx, (cfg, r), &events, (fleet, issue, role), o.force)?;
     crate::respawn::guard(ctx, cfg, &events, (fleet, issue, role))?;
     if o.update {
-        update_guard(ctx, cfg, &events, (fleet, issue), f.flow().update_limit())?;
+        update_guard(ctx, cfg, &events, (fleet, issue))?;
     }
 
     let refusal = match &placed {
@@ -1612,28 +1612,41 @@ pub(crate) fn lane_admit(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "override", d))
 }
 
-fn update_guard(ctx: &Ctx, cfg: &Config, events: &[Event], (fleet, issue): (&str, u64), limit: u32) -> Result<()> {
-    let (updates, extra) = fold(events)
-        .remove(&(fleet.into(), issue))
-        .map_or((0, 0), |s| (s.updates, s.update_extra));
-    let limit = limit.saturating_add(extra);
-    if updates < limit {
+/// Stuck (#1809): the PR conflicts again after 2 update rounds in a row, each with its PASS, and no update extend since the last.
+fn update_guard(ctx: &Ctx, cfg: &Config, events: &[Event], (fleet, issue): (&str, u64)) -> Result<()> {
+    let (mut run, mut updating, mut extended) = (0, false, false);
+    for e in crate::events::of_issue(events, fleet, issue) {
+        match e.kind.as_str() {
+            "spawn" if !crate::events::checks(e) => updating = e.data.get("update") == Some(&json!(true)),
+            "verdict" => {
+                run = if updating && e.str("verdict") == Some("PASS") {
+                    run + 1
+                } else {
+                    0
+                };
+                (updating, extended) = (false, false);
+            }
+            "round-extended" => extended |= e.data.get("update") == Some(&json!(true)),
+            _ => {}
+        }
+    }
+    if run < 2 || extended {
         return Ok(());
     }
-    let why = format!("PR still conflicts after {updates}/{limit} update rounds");
+    let why = "PR still conflicts after 2 update rounds in a row".to_string();
     let turn = ["spawn", "needs-human", "round-extended"];
     let held = (events.iter().rev())
         .filter(|e| e.fleet == fleet && e.issue == Some(issue))
         .find(|e| turn.contains(&e.kind.as_str()));
     if held.is_none_or(|e| e.kind == "spawn") {
-        let d = json!({"code": "UPDATE_LIMIT", "reason": why});
+        let d = json!({"code": "STUCK", "update": true, "reason": format!("stuck: {why}")});
         emit(
             &ctx.state,
             cfg,
             Event::new(ctx.now, fleet, Some(issue), "needs-human", d),
         )?;
     }
-    refused("UPDATE_LIMIT", why)
+    refused("STUCK", why)
 }
 
 fn handover(
