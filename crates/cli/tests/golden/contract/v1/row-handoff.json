@@ -1,0 +1,47 @@
+[
+  {
+    "block": {
+      "blocks": [
+        {
+          "id": "m-8-t",
+          "markdown": "sendmeter thread-handoff",
+          "type": "text"
+        }
+      ],
+      "id": "m-8",
+      "kind": "sys",
+      "type": "card"
+    },
+    "fleet": "sendmeter",
+    "handoff": {
+      "choices": [],
+      "error": null,
+      "folded": false,
+      "from": {
+        "agent": "conductor",
+        "repo": "sendmeter",
+        "thread": "t1"
+      },
+      "id": 8,
+      "kind": "handoff",
+      "state": "delivered",
+      "summary": "add facets",
+      "text": "add facets",
+      "title": "Facets",
+      "to": "t2"
+    },
+    "issue": null,
+    "key": "handoff-8",
+    "kind": "handoff",
+    "open": false,
+    "prompt": "[t2] t1: add facets",
+    "push": null,
+    "seq": 8,
+    "text": "sendmeter thread-handoff",
+    "to": {
+      "id": "t2",
+      "k": "thread"
+    },
+    "ts": 999007
+  }
+]

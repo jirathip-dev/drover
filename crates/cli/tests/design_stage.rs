@@ -165,7 +165,7 @@ fn post(s: &Server, path: &str, body: &str, cookie: &str, now: u64) -> String {
 
 fn needs_and_ask(s: &Server, cookie: &str, now: u64) -> (Value, Value) {
     let needs: Value = serde_json::from_str(&api(s, ADDR, cookie, now, "needs")).unwrap();
-    let chat: Value = serde_json::from_str(&api(s, ADDR, cookie, now, "chat")).unwrap();
+    let chat: Value = chat_all(s, ADDR, cookie, now);
     let msgs: Vec<Value> = chat["threads"]
         .as_array()
         .unwrap()
@@ -1193,4 +1193,76 @@ fn a_design_stage_left_with_no_lane_and_its_flag_off_shows_on_waiting() {
     let (code, w) = run(&c, &r, &["waiting", "sendmeter"]);
     assert_eq!(code, 0, "{w}");
     assert!(w.contains("#12") && w.contains("drover spawn sendmeter 12 impl"), "{w}");
+}
+
+struct Hung<'a>(&'a dyn Runner, String);
+impl Runner for Hung<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        if prog == "git" && args.contains(&self.1) {
+            let stderr = format!("{} is on a disk that is not answering", self.1);
+            return Ok(Out {
+                code: 124,
+                stdout: String::new(),
+                stderr,
+            });
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+#[test]
+fn a_pushed_round_whose_worktree_git_does_not_answer_waits_for_its_ask_instead_of_a_respawn() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    for (flag, role, what, file) in [
+        ("--design", "design", "Design", "docs/design/meter/index.html"),
+        (
+            "--architect",
+            "architect",
+            "Architecture (ADR)",
+            "docs/architecture/meter/adr.md",
+        ),
+    ] {
+        let (mut c, w, r, sh) = staged(&format!("{role}-hung-round"), flag);
+        let lane = kinds(&c, "spawn")[0].str("agent").unwrap().to_string();
+        sh.set(&lane, |t| t["reported"] = json!({"state": "working"}));
+        let head = push(&w, &[(file, "# round\n")]);
+        sh.set(&lane, |t| t["reported"] = json!({"state": "done", "note": "end_turn"}));
+        c.now += 300;
+        drive(&c, &Hung(&r, w.display().to_string()));
+        let respawned = |c: &drover::Ctx| {
+            kinds(c, "respawn").len()
+                + kinds(c, "driven")
+                    .iter()
+                    .filter(|e| e.str("step") == Some("respawn"))
+                    .count()
+        };
+        assert_eq!(
+            (respawned(&c), spawned(&c, role)),
+            (0, 1),
+            "{role}: respawned over a pushed round"
+        );
+        drive(&c, &r);
+        let asks = kinds(&c, "needs-decision");
+        let (code, flow) = run(&c, &r, &["waiting", "sendmeter", "--flow"]);
+        assert_eq!((code, asks.len()), (0, 1), "{role}: {flow}");
+        let q = asks[0].str("question").unwrap();
+        assert!(q.contains(&format!("{what} for #12 is ready ({head:.7})")), "{q}");
+        assert_eq!((respawned(&c), state(&c, 12).as_str()), (0, "design-review"), "{flow}");
+        assert!(flow.contains("owner") && !flow.contains("respawning"), "{flow}");
+        assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "make it blue"]).0, 0);
+        c.now += 1000;
+        drive(&c, &r);
+        assert_eq!(spawned(&c, role), 2, "{role}: the revise");
+        let lane = kinds(&c, "spawn").last().unwrap().str("agent").unwrap().to_string();
+        sh.set(&lane, |t| t["reported"] = json!({"state": "done", "note": "end_turn"}));
+        c.now += 300;
+        drive(&c, &r);
+        assert_eq!(
+            kinds(&c, "design-review").len(),
+            1,
+            "{role}: the reviewed head asks once"
+        );
+        assert!(respawned(&c) > 0, "{role}: nothing new over the reviewed head respawns");
+    }
 }

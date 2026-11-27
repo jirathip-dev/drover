@@ -36,12 +36,14 @@ pub fn fetch(ctx: &Ctx, r: &dyn Runner, dir: &Path, args: &[&str]) -> Result<Str
     let _held = lock(r, dir)?;
     let (key, spec) = (format!("fetched:{}", dir.display()), specs(args));
     let mut done = crate::db::get::<BTreeMap<String, u64>>(&ctx.state, &key).map_or_else(BTreeMap::new, |d| d.1);
-    if fresh(r, dir, &done, &spec) {
+    let secs =
+        Config::load(&ctx.config).map_or(crate::config::limits().fetch_fresh_secs, |c| c.limits.fetch_fresh_secs);
+    if fresh(r, dir, (&done, secs), &spec) {
         return Ok(String::new());
     }
     let res = fetched(ctx, r, dir, args)?;
     let now = crate::clock::wall();
-    done.retain(|_, t| now.saturating_sub(*t) < crate::config::limits().fetch_fresh_secs);
+    done.retain(|_, t| now.saturating_sub(*t) < secs);
     done.insert(spec, now);
     crate::db::put(&ctx.state, &key, now, &done).ok();
     Ok(res)
@@ -56,12 +58,9 @@ fn specs(args: &[&str]) -> String {
     spec.join(" ")
 }
 
-fn fresh(r: &dyn Runner, dir: &Path, done: &BTreeMap<String, u64>, spec: &str) -> bool {
+fn fresh(r: &dyn Runner, dir: &Path, (done, secs): (&BTreeMap<String, u64>, u64), spec: &str) -> bool {
     let now = crate::clock::wall();
-    let recent = |s: &str| {
-        done.get(s)
-            .is_some_and(|t| now.saturating_sub(*t) < crate::config::limits().fetch_fresh_secs)
-    };
+    let recent = |s: &str| done.get(s).is_some_and(|t| now.saturating_sub(*t) < secs);
     let one = spec
         .split_once(':')
         .filter(|(src, dst)| !spec.contains(' ') && !dst.contains('*') && !src.contains("wip/"));

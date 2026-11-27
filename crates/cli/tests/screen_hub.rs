@@ -207,7 +207,7 @@ fn fresh_data_is_under_150ms_p95_on_every_screen_and_sheet() {
     }
     let mut ms = vec![];
     for (n, p) in paths.iter().enumerate() {
-        event(&b.c, n as u64);
+        event(&b.c, u64::try_from(n).unwrap());
         let t = Instant::now();
         let (status, _, body) = get(&b, p, "");
         ms.push((t.elapsed().as_millis(), p.clone()));

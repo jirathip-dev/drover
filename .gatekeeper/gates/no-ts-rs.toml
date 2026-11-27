@@ -1,0 +1,10 @@
+about = "the release build links no ts-rs: the TS bindings' dependency is behind the `ts` feature (#375)"
+fix = "keep ts-rs behind the server's `ts` feature"
+budget_secs = 60
+setup = ["rust"]
+paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml"]
+run = '''
+set -eu
+tree=$(cargo tree --locked -p drover -e normal --prefix none)
+if printf '%s\n' "$tree" | grep -E '^ts-rs(-macros)? v'; then exit 1; fi
+'''

@@ -7,8 +7,9 @@ issues only, never code: no commits, no pushes, no merges, no PRs.
    recent merged PRs (`gh pr list -R <repo> --state merged --limit 50`), the code on the integration branch
    (your worktree, `git log origin/<integration>`) and the owner's decisions (`drover asks <fleet> --all`,
    `drover why <file:line>`).
-2. Act only through `drover triage close|fold|label`. They refuse (`PROTECTED`) an issue that is queued, has a lane,
-   waits on an open ask or is labeled `keep`: leave it and move on. Raw `gh issue close|edit|reopen` is refused.
+2. Act only through `drover triage close|fold|label`. They refuse (`PROTECTED`) an issue with work in flight: a live
+   lane, an open PR, an open ask or the `keep` label: leave it and move on. Being queued is no protection: closing a
+   queued issue also drops it from the queue. Raw `gh issue close|edit|reopen` is refused.
 3. **Close** an issue that is done, a duplicate or superseded, with the evidence:
    - done (the code on integration does what it asks): `drover triage close <fleet> <n> --why done --evidence <sha>`
      (the commit that did it; refused `NOT_ON_INTEGRATION` unless integration has it) or `--evidence '#<PR>'`;
@@ -29,6 +30,9 @@ issues only, never code: no commits, no pushes, no merges, no PRs.
    `drover triage docs <fleet> --findings <file>`: it files the run's **one** `docs:` issue (no finding, no issue).
    The README's top section (what it is, principles, non-goals) is the owner's intent: flag any doc that contradicts
    it, never propose a change to it; drover puts a missing intent section first. Never edit docs yourself.
+   Check the code against the README's `## Scope` and `## Non-goals` too: code doing another repo's job (shed's,
+   cooee's, …) is one line, `file:line: move to <repo>: the Non-goals line it breaks`.
 8. End with `drover done --no-change "<one line: what you looked at>" <fleet> <your issue>`. drover posts the summary
    (closed, folded and flagged, each with its one-line undo) to the fleet's orchestrator thread and closes your
-   issue. Nothing to do: the same line, `nothing to triage`.
+   issue. Before that it labels `stale?` each open issue whose body names a closed `Root cause: #N`, with a summary
+   line "root closed; close as moot, or re-root". Nothing to do: the same line, `nothing to triage`.

@@ -39,6 +39,7 @@ stall_minutes = 30
 max_parallel_spawns = 0   # spawns in the pass; tests/drive_kicks.rs runs them as kicks (#318)
 build_root = ""           # #630: retired (builds go under the worktree root); a stale key is ignored
 stray_roots = []          # #536: never clean the real /tmp or $TMPDIR
+max_in_flight_total = 0   # #1801: tests/in_flight_total.rs turns it on
 "#;
 
 /// `RefCell`'s API over an `RwLock`: runners are `Sync` (serve's watcher has its own thread).
@@ -321,7 +322,7 @@ struct Made(std::cell::RefCell<Vec<PathBuf>>);
 impl Drop for Made {
     fn drop(&mut self) {
         for d in self.0.borrow().iter() {
-            let _ = std::fs::remove_dir_all(d);
+            std::fs::remove_dir_all(d).ok();
         }
     }
 }
@@ -345,7 +346,7 @@ fn reap_at_exit(d: &Path) {
     writeln!(reaper.stdin.as_mut().unwrap(), "{}", d.display()).unwrap();
 }
 
-const LANE_ENV: [&str; 8] = [
+const LANE_ENV: [&str; 9] = [
     "DROVER_LANE",
     "DROVER_HOST",
     "DROVER_OUTBOX",
@@ -354,6 +355,7 @@ const LANE_ENV: [&str; 8] = [
     "DROVER_ORCHESTRATOR",
     "DROVER_SCRATCH_TARGET",
     "DROVER_PORT",
+    "GATEKEEPER_HEAD",
 ];
 
 /// The env a lane exports, cleared once so a test run on a lane never sees it.
@@ -368,6 +370,20 @@ pub fn set_env(k: &str, v: &str) {
     std::env::set_var(k, v);
 }
 
+/// Linux `vmstat 1 2`'s output whose last second had `idle` percent of the CPUs idle.
+pub fn vmstat(idle: u32) -> String {
+    let head = "procs -----------memory---------- ---swap-- -----io---- -system-- ------cpu-----\n r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st\n";
+    format!("{head} 1  0      0 900000  1000 50000    0    0     1     1   10   10  5  5 90  0  0\n 1  0      0 900000  1000 50000    0    0     0     0   10   10 50 {} {idle}  0  0\n", 50 - idle.min(50))
+}
+
+/// `iostat -n 0 -c 2 -w 1`'s output whose last second had `idle` percent of the CPUs idle.
+pub fn iostat(idle: u32) -> String {
+    format!(
+        "      cpu    load average\n us sy id   1m   5m   15m\n 40 20 40  1 1 1\n 50 {} {idle}  1 1 1\n",
+        50 - idle.min(50)
+    )
+}
+
 pub fn tmpdir(name: &str) -> PathBuf {
     static N: AtomicU32 = AtomicU32::new(0);
     without_lane_env();
@@ -376,7 +392,7 @@ pub fn tmpdir(name: &str) -> PathBuf {
         std::process::id(),
         N.fetch_add(1, Ordering::SeqCst)
     ));
-    let _ = std::fs::remove_dir_all(&d);
+    std::fs::remove_dir_all(&d).ok();
     reap_at_exit(&d);
     std::fs::create_dir_all(&d).unwrap();
     MADE.with(|m| m.0.borrow_mut().push(d.clone()));
@@ -484,7 +500,7 @@ pub fn webview() -> std::process::Command {
             for mut st in l.incoming().flatten() {
                 let mut buf = [0u8; 4096];
                 let n = std::io::Read::read(&mut st, &mut buf).unwrap_or(0);
-                let _ = std::io::Write::write_all(&mut st, &s.respond(&String::from_utf8_lossy(&buf[..n]), 1));
+                std::io::Write::write_all(&mut st, &s.respond(&String::from_utf8_lossy(&buf[..n]), 1)).ok();
             }
         });
         base
@@ -644,10 +660,30 @@ pub fn api(s: &drover::serve::Server, host: &str, extra: &str, now: u64, path: &
     r[r.find("\r\n\r\n").unwrap() + 4..].to_string()
 }
 
+/// `GET chat?archived=1` with each listed thread's view, as opening it fetches it (`chat?thread=<id>`), in `threads`.
+pub fn chat_all(s: &drover::serve::Server, host: &str, extra: &str, now: u64) -> serde_json::Value {
+    let get = |q: &str| -> serde_json::Value {
+        serde_json::from_str(&api(s, host, extra, now, &format!("chat?{q}"))).unwrap()
+    };
+    let mut tab = get("archived=1");
+    let repos = tab["repos"].as_array().cloned().unwrap_or_default();
+    let ids = repos.iter().flat_map(|r| {
+        let rows = r["rows"].as_array().into_iter().flatten();
+        rows.chain(r["archived"].as_array().into_iter().flatten())
+            .cloned()
+            .collect::<Vec<_>>()
+    });
+    let views: Vec<_> = ids
+        .map(|r| get(&format!("thread={}", r["id"].as_str().unwrap()))["threads"][0].clone())
+        .collect();
+    tab["threads"] = serde_json::Value::Array(views);
+    tab
+}
+
 /// Replace the whole event log with JSONL `text` (as a test edits a log): the database goes, the next read imports `text`. Leases, devices and snapshots go with it.
 pub fn rewrite_log(state: &Path, text: &str) {
     for f in ["state.db", "state.db-wal", "state.db-shm"] {
-        let _ = std::fs::remove_file(state.with_file_name(f));
+        std::fs::remove_file(state.with_file_name(f)).ok();
     }
     std::fs::create_dir_all(state.parent().unwrap()).unwrap();
     std::fs::write(state, text).unwrap();
@@ -853,6 +889,6 @@ pub fn report(line: &str) {
 /// This process's user plus system CPU time so far, in ms.
 pub fn cpu_ms() -> f64 {
     let u = drover_sys::rusage().unwrap();
-    let tv = |s: i64, us: i64| s as f64 * 1e3 + f64::from(u32::try_from(us).unwrap()) / 1e3;
+    let tv = |s: i64, us: i64| f64::from(u32::try_from(s).unwrap()) * 1e3 + f64::from(u32::try_from(us).unwrap()) / 1e3;
     tv(u[0], u[1]) + tv(u[2], u[3])
 }

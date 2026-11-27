@@ -32,11 +32,11 @@ pub struct Report {
     pub sample: Option<Sample>,
 }
 
-/// The reporting host's own load as it built the frame: load per CPU, memory pressure and when.
+/// The reporting host's own load as it built the frame: percent of its CPUs idle, memory pressure and when.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Sample {
-    pub load_per_cpu: f64,
+    pub cpu_idle: Option<f64>,
     pub pressure: Option<String>,
     pub at: u64,
 }

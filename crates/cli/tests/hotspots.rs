@@ -85,7 +85,7 @@ fn fixture(name: &str) -> drover::Ctx {
         } else {
             &["a.rs", "web/app.ts"]
         };
-        shas.push(pr(&local, NOW - (10 - k as u64) * 86400, k, files));
+        shas.push(pr(&local, NOW - (10 - u64::try_from(k).unwrap()) * 86400, k, files));
     }
     git(&local, NOW, &["update-ref", "refs/remotes/origin/staging", "HEAD"]);
     let cfg = format!("{CONFIG}{SECOND}").replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());

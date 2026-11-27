@@ -1,0 +1,10 @@
+about = "soak (#895: serve's RSS under 8 /live streams, reads and drive passes stays under 300 MB and stops growing; a planted leak fails it); on a push to staging only (#1162)"
+fix = "drop what serve keeps per stream, read or pass; its memory must not grow with time"
+budget_secs = 900
+leg = "release-hub"
+setup = ["rust", "node"]
+paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "assets/**", "demo/**", "web/dist/**"]
+run = '''
+if [ "${GITHUB_EVENT_NAME:-}" != push ] || [ "${GITHUB_REF:-}" != refs/heads/staging ]; then echo "soak: a push to staging runs it"; exit 0; fi
+cargo test --release --locked --test soak -- --ignored --nocapture --test-threads=1
+'''

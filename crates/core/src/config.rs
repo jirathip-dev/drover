@@ -37,14 +37,12 @@ pub struct Config {
     pub telegram: Option<toml::Value>,
     /// `[chat]`, new threads' orchestrator defaults over the fleet's `role.orchestrator` (`orchestrator::defaults`).
     pub chat: Chat,
-    /// `[ci_runners]`, the owner's CI runner VMs (`crate::runners`, docs/hosts.md).
-    pub ci_runners: Option<CiRunners>,
-    /// `[proxy]`, the token proxy remote ACP lanes' model calls go through (`crate::proxy`, docs/hosts.md).
-    pub proxy: ProxyCfg,
     /// `[self_update]`, the release branch the live install follows and the optional staging serve.
     pub self_update: SelfUpdate,
     /// `[hygiene]`, the history and issue convention every fleet follows unless its own `[fleet.<n>.hygiene]` key says otherwise.
     pub hygiene: Hygiene,
+    /// `[job.<name>]`, a scheduled job for every fleet over the built-in entry (`crate::jobs`).
+    pub job: BTreeMap<String, toml::Table>,
 }
 
 /// `branch` (default `main`) `self-update` installs; `staging_serve` adds a read-only staging build on `staging_addr`.
@@ -64,55 +62,6 @@ impl Default for SelfUpdate {
             staging_addr: "127.0.0.1:7787".into(),
         }
     }
-}
-
-/// The proxy's port (on this host, and on each `shed-acp` host through an ssh tunnel), where it forwards, how long a lane key lives; `token-file`, the one 0600 token it signs with (`Proxy::setup`'s).
-#[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
-pub struct ProxyCfg {
-    pub port: u16,
-    pub upstream: String,
-    pub key_hours: u64,
-    #[serde(rename = "token-file")]
-    pub token_file: Option<String>,
-}
-
-impl Default for ProxyCfg {
-    fn default() -> Self {
-        ProxyCfg {
-            port: 41990,
-            upstream: crate::providers::proxied().map_or("", |p| p.upstream).into(),
-            key_hours: 12,
-            token_file: None,
-        }
-    }
-}
-
-/// The repo's runner VMs: their recipe (`provider`), spec, slots per VM, label, and the `max_vms` / `usd_day` cap; `vms` are the ones made by hand (`runners add|remove` change the set in the log); `local_*` the mini's runners.
-#[derive(Clone, Debug, Deserialize)]
-pub struct CiRunners {
-    pub provider: String,
-    pub repo: String,
-    pub label: String,
-    pub size: String,
-    #[serde(default)]
-    pub ttl_hours: u64,
-    #[serde(default)]
-    pub snapshots: bool,
-    pub slots: u64,
-    pub max_vms: u64,
-    pub usd_day: f64,
-    #[serde(default)]
-    pub vms: Vec<String>,
-    pub local_label: Option<String>,
-    pub local_stop: Option<String>,
-    /// The VMs' runner service (the recipe's `{service}`).
-    #[serde(default = "ci_service")]
-    pub service: String,
-}
-
-fn ci_service() -> String {
-    "ci-runner".into()
 }
 
 /// The harness, model and effort a new thread's orchestrator starts on; each unset one is the role's.
@@ -243,19 +192,11 @@ pub struct HostCfg {
     pub roots: Vec<String>,
     #[serde(default = "yes")]
     pub enabled: bool,
-    /// A cloud host's recipe (`boat`, or `<config>/recipes/<name>.toml`), size, limits and idle stop (20 min).
-    pub cloud: Option<String>,
-    pub size: Option<String>,
-    pub budget_usd_month: Option<f64>,
-    pub max_hours_day: Option<f64>,
-    pub idle_stop_minutes: Option<u64>,
-    /// Its lanes' command rules: `deny_commands` replaces the fleet's list, `deny_commands_add` extends it, and `allow_commands` drops entries (unset: a cloud host allows `CLOUD_ALLOW`, a Mac nothing).
+    /// Its lanes' command rules: `deny_commands` replaces the fleet's list, `deny_commands_add` extends it, and `allow_commands` drops entries.
     pub deny_commands: Option<Vec<Deny>>,
     #[serde(default)]
     pub deny_commands_add: Vec<Deny>,
     pub allow_commands: Option<Vec<String>>,
-    /// `shed-acp`: the runtime its lanes start in (unset: the fleet's, as before).
-    pub runtime: Option<RuntimeKind>,
     /// Lanes running a turn at once on this host, all fleets (unset: no cap).
     pub max_working: Option<usize>,
     /// Lanes starting at once on this host (unset: `[limits] start_max`; the main host: `max_parallel_spawns`).
@@ -271,18 +212,10 @@ pub struct HostCfg {
     pub heavy_kind_max: BTreeMap<String, usize>,
     /// Minutes a heavy check waits for a slot before it runs anyway, logged `heavy-timeout` (unset: 30).
     pub heavy_wait_minutes: Option<u64>,
-    /// Who issues gh's token here: `managed` (default) warns before it expires, `external` never does.
-    #[serde(default)]
-    pub github_token: GithubToken,
-}
-
-/// Who issues a host's GitHub token.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum GithubToken {
-    #[default]
-    Managed,
-    External,
+    /// Admission limits on this host over `[limits]`' (unset: those).
+    pub min_cpu_idle: Option<f64>,
+    pub min_free_mem_gb: Option<f64>,
+    pub swapout_rate: Option<f64>,
 }
 
 /// The point a starting lane frees its start slot.
@@ -293,9 +226,6 @@ pub enum StartRelease {
     Confirmed,
 }
 
-/// A cloud host is a disposable machine: its lanes may start containers.
-pub const CLOUD_ALLOW: [&str; 3] = ["docker", "docker compose", "supabase start"];
-
 impl HostCfg {
     /// Its workspace roots in order, as written (none set: empty).
     pub fn roots(&self) -> Vec<String> {
@@ -303,19 +233,8 @@ impl HostCfg {
         v.extend(self.root.clone().filter(|_| v.is_empty()));
         v
     }
-    /// Whether health looks at gh's token here: a cloud host whose token drover manages.
-    pub fn watches_token(&self) -> bool {
-        self.cloud.is_some() && self.github_token == GithubToken::Managed
-    }
     pub fn allow(&self) -> Vec<String> {
-        let def = || {
-            CLOUD_ALLOW
-                .iter()
-                .filter(|_| self.cloud.is_some())
-                .map(ToString::to_string)
-                .collect()
-        };
-        self.allow_commands.clone().unwrap_or_else(def)
+        self.allow_commands.clone().unwrap_or_default()
     }
     /// The lane hook's deny list on this host, from the fleet's (`fleet`).
     pub fn deny(&self, fleet: Vec<Deny>) -> Vec<Deny> {
@@ -415,6 +334,8 @@ pub struct Fleet {
     pub max_in_flight: Option<usize>,
     #[serde(default)]
     pub role: BTreeMap<String, Role>,
+    /// The shed account its roles' ACP runs use unless a role names one: a name or `auto`; unset is `auto`.
+    pub account: Option<String>,
     /// Replace the global `[[notify]]` for this fleet's events; `notify_global` sends to both.
     #[serde(default)]
     pub notify: Vec<Notify>,
@@ -459,6 +380,8 @@ pub struct Fleet {
     pub form_rounds: Option<u32>,
     /// This fleet's `respawn_per_pass`; `Config::parse` fills in `[limits]`'s when absent.
     pub respawn_per_pass: Option<usize>,
+    /// This fleet's `ci_flaky_retries`; `Config::parse` fills in `[limits]`'s when absent.
+    pub ci_flaky_retries: Option<u32>,
     /// This fleet's `stall_restart_hours`; unset = `[limits]`'s.
     pub stall_restart_hours: Option<u64>,
     /// Replaces `[limits] deny_commands` (empty = off); `deny_commands_add` adds to whichever applies.
@@ -476,14 +399,20 @@ pub struct Fleet {
     /// How `merge` lands a PR: `squash` (default) or `merge`.
     #[serde(default)]
     pub merge: MergeMode,
-    /// `weekly` (unset) has `tick` run `drover lesson` every 7 days; `off` opts out.
+    /// Old: `off` is `[fleet.<n>.job.lesson] every = "off"` (`Config::warnings`).
     pub lessons: Option<String>,
     /// `weekly` (unset) has `tick` run `drover hotspots` every 7 days; `off` opts out.
     pub hotspots: Option<String>,
-    /// `weekly` has `tick` run `drover triage` every 7 days; unset or `off`: only on demand.
+    /// Old: `weekly` or `off` is `[fleet.<n>.job.triage] every` (`Config::warnings`).
     pub triage: Option<String>,
-    /// `monthly` has `tick` run `drover deps` every 30 days and the advisory check daily; unset or `off`: only on demand.
+    /// Old: `monthly` or `off` is `[fleet.<n>.job.deps]` and `.advisory` `every` (`Config::warnings`).
     pub deps: Option<String>,
+    /// `[fleet.<n>.job.<name>]`, this fleet's keys over `[job.<name>]` and the built-in entry.
+    #[serde(default)]
+    pub job: BTreeMap<String, toml::Table>,
+    /// The jobs after their layers are merged and checked (`Config::parse`).
+    #[serde(skip)]
+    pub jobs: BTreeMap<String, crate::jobs::Job>,
     /// `[fleet.<n>.soak]`: `tick` runs `drover soak` nightly against these targets; unset: never.
     pub soak: Option<crate::soak::Soak>,
     /// `[fleet.<n>.heavy]`: kind → command patterns (`*` any text) its lanes run in a host's heavy slots.
@@ -515,6 +444,45 @@ pub struct Fleet {
     pub sandbox: Option<Sandbox>,
     /// lanes see history since this commit only (`drover baseline`); unset = all of it.
     pub baseline: Option<Baseline>,
+    /// `flow`: `shadow` (default) runs the flow table beside today's drive and only logs; `legacy` turns it off (#1649).
+    #[serde(default, rename = "flow")]
+    pub engine: Engine,
+}
+
+/// `[fleet.<n>] flow`: until slice 5 only today's drive acts, so `on` logs as `shadow` does.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Engine {
+    #[default]
+    Shadow,
+    On,
+    Legacy,
+}
+
+fn jobs(name: &str, all: &BTreeMap<String, toml::Table>, f: &Fleet) -> Result<BTreeMap<String, crate::jobs::Job>> {
+    let every = |j: &str| {
+        Some((
+            j.into(),
+            toml::Table::from_iter([("every".into(), old_every(f, j)?.into())]),
+        ))
+    };
+    let was = ["lesson", "triage", "deps", "advisory"]
+        .into_iter()
+        .filter_map(every)
+        .collect();
+    crate::jobs::entries(name, &[all, &was, &f.job])
+}
+
+fn old_every(f: &Fleet, job: &str) -> Option<&'static str> {
+    match (job, f.lessons.as_deref(), f.triage.as_deref(), f.deps.as_deref()) {
+        ("lesson", Some("off"), ..) | ("triage", _, Some("off"), _) | ("deps" | "advisory", .., Some("off")) => {
+            Some("off")
+        }
+        ("triage", _, Some("weekly"), _) => Some("7d"),
+        ("deps", .., Some("monthly")) => Some("30d"),
+        ("advisory", .., Some("monthly")) => Some("1d"),
+        _ => None,
+    }
 }
 
 /// One key unset falls back to `[hygiene]`, then to `HYGIENE`; `"off"` (`docs_trust = []`) opts out.
@@ -694,6 +662,8 @@ pub struct Role {
     pub needs: Vec<String>,
     /// The host its lanes always run on (`main`: the one without `machine`); `design` defaults to `main`.
     pub host: Option<String>,
+    /// The shed account its ACP runs use: a name or `auto`; unset is the fleet's.
+    pub account: Option<String>,
     /// The default orchestrator `Config::parse` adds for a fleet without one: its impl role on `lane-orchestrator`.
     #[serde(skip)]
     pub default: bool,
@@ -718,7 +688,11 @@ pub struct Limits {
     pub silent_minutes: u64,
     pub ci_start_minutes: u64,
     pub ci_stuck_minutes: u64,
-    pub load_per_cpu: f64,
+    pub ci_flaky_retries: u32,
+    pub min_cpu_idle: f64,
+    /// Retired (#1780): read only so doctor can name `min_cpu_idle` instead.
+    #[serde(skip_serializing)]
+    pub load_per_cpu: Option<f64>,
     pub overload_minutes: u64,
     pub swapout_rate: f64,
     pub min_free_gb: f64,
@@ -740,14 +714,14 @@ pub struct Limits {
     pub slow_secs: u64,
     pub form_categories: Vec<String>,
     pub form_rounds: u32,
-    pub overflow_after_minutes: u64,
     pub import_max_age_hours: u64,
     pub max_pushes_per_pass: usize,
     pub max_parallel_spawns: usize,
+    pub max_in_flight_total: usize,
+    pub fleet_priority: Vec<String>,
     pub start_max: usize,
     pub start_release: StartRelease,
     pub spawn_pending_max_secs: u64,
-    pub admit_wait_secs: u64,
     pub acp_start_minutes: u64,
     pub webhook_poll_minutes: u64,
     pub keychain_readers: usize,
@@ -774,12 +748,9 @@ pub struct Limits {
     pub link_down_minutes: u64,
     pub db_busy_secs: u64,
     pub db_retry_millis: u64,
-    pub cloud_idle_stop_minutes: u64,
     pub notify_secs: u64,
     pub gate_check_minutes: u64,
     pub shed_read_millis: u64,
-    pub proxy_connect_secs: u64,
-    pub proxy_retry_secs: u64,
     pub service_call_secs: u64,
     pub disk_probe_secs: u64,
     pub disk_hung_secs: u64,
@@ -793,7 +764,6 @@ pub struct Limits {
     pub orchestrator_idle_minutes: u64,
     pub orchestrator_reply_minutes: u64,
     pub orchestrator_change_minutes: u64,
-    pub token_refresh_minutes: u64,
     pub ask_waiting_minutes: u64,
     pub outbox_stale_minutes: u64,
     pub host_offline_minutes: u64,
@@ -858,7 +828,9 @@ impl Default for Limits {
             silent_minutes: 10,
             ci_start_minutes: 10,
             ci_stuck_minutes: 30,
-            load_per_cpu: 2.5,
+            ci_flaky_retries: 1,
+            min_cpu_idle: 15.0,
+            load_per_cpu: None,
             overload_minutes: 10,
             swapout_rate: 2000.0,
             min_free_gb: 10.0,
@@ -881,7 +853,6 @@ impl Default for Limits {
                 .unwrap_or_default(),
             fast_secs: 60,
             slow_secs: 300,
-            overflow_after_minutes: 10,
             form_categories: ["trailer", "stale-baseline", "docs-fresh", "migration-redate", "infra"]
                 .map(String::from)
                 .into(),
@@ -889,10 +860,11 @@ impl Default for Limits {
             import_max_age_hours: 24,
             max_pushes_per_pass: 3,
             max_parallel_spawns: 6,
+            max_in_flight_total: 6,
+            fleet_priority: vec![],
             start_max: 2,
             start_release: StartRelease::Started,
             spawn_pending_max_secs: 300,
-            admit_wait_secs: 5,
             acp_start_minutes: 3,
             webhook_poll_minutes: 10,
             keychain_readers: 3,
@@ -919,12 +891,9 @@ impl Default for Limits {
             link_down_minutes: 5,
             db_busy_secs: 60,
             db_retry_millis: 10,
-            cloud_idle_stop_minutes: 20,
             notify_secs: 15,
             gate_check_minutes: 30,
             shed_read_millis: 300,
-            proxy_connect_secs: 1,
-            proxy_retry_secs: 300,
             service_call_secs: 2,
             disk_probe_secs: 2,
             disk_hung_secs: 6,
@@ -938,7 +907,6 @@ impl Default for Limits {
             orchestrator_idle_minutes: 30,
             orchestrator_reply_minutes: 10,
             orchestrator_change_minutes: ORCHESTRATOR_CHANGE_MINUTES,
-            token_refresh_minutes: 30,
             ask_waiting_minutes: 30,
             outbox_stale_minutes: 5,
             host_offline_minutes: 15,
@@ -1068,14 +1036,42 @@ impl Config {
 
     /// Each retired key still set, as `(key, what to do)`: doctor's `!` rows, the board's line, `check`'s `config-warning`; never a load error.
     pub fn warnings(&self) -> Vec<(&'static str, String)> {
-        let gone = "removed (#923): lanes run on the host's own CLI login; delete";
+        let gone = "removed (#1576): accounts are shed's, a role or fleet names one with `account`; delete";
         let acct = (!self.retired.is_empty()).then(|| ("[accounts]", format!("{gone} {}", self.retired.join(", "))));
         let tg = "removed (#557): drover has no Telegram bridge now; drop the table".to_string();
         let tg = self.telegram.as_ref().map(|_| ("[telegram]", tg));
         let old =
             "renamed (#780): call it [orchestrator] and role.orchestrator; the old names are read for one release";
         let old = self.old_names.then(|| ("[conductor]", old.to_string()));
-        acct.into_iter().chain(tg).chain(old).collect()
+        let jobs = self.fleet.iter().flat_map(|(n, f)| {
+            let old = [
+                ("lessons", &f.lessons, &["lesson"][..]),
+                ("triage", &f.triage, &["triage"]),
+                ("deps", &f.deps, &["deps", "advisory"]),
+            ];
+            old.into_iter().filter(|k| k.1.is_some()).map(move |(k, _, jobs)| {
+                let add = |j: &&str| Some(format!(", add [fleet.{n}.job.{j}] every = \"{}\"", old_every(f, j)?));
+                let add: String = jobs.iter().filter_map(add).collect();
+                (k, format!("fleet.{n}.{k} is read for now (#1790): delete it{add}"))
+            })
+        });
+        let load = "replaced (#1780): load average is no gate now; set `min_cpu_idle` (percent of the CPUs idle, default 15) and delete it";
+        let load = self
+            .limits
+            .load_per_cpu
+            .map(|_| ("[limits] load_per_cpu", load.to_string()));
+        acct.into_iter().chain(tg).chain(old).chain(load).chain(jobs).collect()
+    }
+
+    /// `[limits]` with host `machine`'s (`None`: the main host) `min_cpu_idle`, `min_free_mem_gb` and `swapout_rate` over them.
+    pub fn limits_on(&self, machine: Option<&str>) -> Limits {
+        let mut l = self.limits.clone();
+        if let Some(h) = self.hosts.values().find(|h| h.machine.as_deref() == machine) {
+            l.min_cpu_idle = h.min_cpu_idle.unwrap_or(l.min_cpu_idle);
+            l.min_free_mem_gb = h.min_free_mem_gb.unwrap_or(l.min_free_mem_gb);
+            l.swapout_rate = h.swapout_rate.unwrap_or(l.swapout_rate);
+        }
+        l
     }
 
     pub fn load(path: &Path) -> Result<Config> {
@@ -1183,6 +1179,9 @@ impl Config {
         {
             bail!("notify: a type = \"webpush\" notifier needs sub = \"mailto:you@example.com\"");
         }
+        if let Some(n) = c.fleet.keys().find(|n| matches!(n.as_str(), "all" | "none")) {
+            bail!("fleet.{n}: `all` and `none` are reserved: a chat attaches to a repo, `all` or `none`");
+        }
         orchestrator_ids(&c)?;
         if let Some(g) = c
             .orchestrator
@@ -1211,6 +1210,7 @@ impl Config {
                 bail!("chat.effort: harness {h} does not support effort \"{e}\"");
             }
         }
+        accounts_ok(&c)?;
         let mut c = c;
         c.retired = retired(&raw);
         c.old_names = raw.contains_key("conductor");
@@ -1238,13 +1238,14 @@ impl Config {
                 .get_or_insert_with(|| c.limits.form_categories.clone());
             f.form_rounds.get_or_insert(c.limits.form_rounds);
             f.respawn_per_pass.get_or_insert(c.limits.respawn_per_pass);
-            f.bad = p.validate(name, &f.role);
-            f.pipeline = Some(p);
+            f.ci_flaky_retries.get_or_insert(c.limits.ci_flaky_retries);
+            (f.bad, f.pipeline, f.jobs) = (p.validate(name, &f.role), Some(p), jobs(name, &c.job, f)?);
         }
         for (name, f) in &mut c.fleet {
             if let Some(r) = f.role.get("impl").filter(|_| !f.role.contains_key("orchestrator")) {
                 let r = Role {
                     profile: Some("lane-orchestrator".into()),
+                    account: None,
                     default: true,
                     ..r.clone()
                 };
@@ -1318,7 +1319,7 @@ impl Config {
         for (name, f) in &self.fleet {
             let (never, hits) = (f.never_routed(), crate::heavy::hits);
             for kind in f.remote.keys() {
-                let Some(ps) = f.heavy.get(kind) else {
+                let Some(ps) = f.heavy_kinds().remove(kind) else {
                     bail!("fleet.{name}.remote.{kind}: no [fleet.{name}.heavy] kind \"{kind}\" to route");
                 };
                 if let Some((p, n)) = ps
@@ -1386,10 +1387,21 @@ impl Config {
         own.or(self.runtime.as_ref()).map(Runtime::shed)
     }
 
+    /// The account role `role` of fleet `fleet` runs on: the role's, else the fleet's, else `auto`.
+    pub fn account(&self, fleet: &str, role: &str) -> Account {
+        let f = self.fleet.get(fleet);
+        let own = f
+            .and_then(|f| f.role.get(f.role_key(role)))
+            .and_then(|r| r.account.as_deref());
+        match own.or_else(|| f?.account.as_deref()) {
+            None | Some("auto") => Account::Auto,
+            Some(n) => Account::Named(n.into()),
+        }
+    }
+
     pub fn shed(&self) -> Option<crate::shed::Shed> {
         let first = || self.fleet.values().find_map(|f| f.runtime.as_ref());
-        let host = || self.hosts.keys().find_map(|h| self.host_acp(h));
-        self.runtime.as_ref().or_else(first).map(Runtime::shed).or_else(host)
+        self.runtime.as_ref().or_else(first).map(Runtime::shed)
     }
 
     /// Lanes that may start at once on host `name` (a name no `[hosts]` entry has, or a machine-less one, is the main host).
@@ -1405,25 +1417,6 @@ impl Config {
     pub fn start_release(&self, name: &str) -> StartRelease {
         let h = self.hosts.get(name).and_then(|h| h.start_release);
         h.unwrap_or(self.limits.start_release)
-    }
-
-    /// Host `name`'s own `runtime = "shed-acp"`: the shed-acp runtime (shed's defaults), else None.
-    pub fn host_acp(&self, name: &str) -> Option<crate::shed::Shed> {
-        self.hosts
-            .get(name)
-            .filter(|h| h.runtime == Some(RuntimeKind::ShedAcp))?;
-        Some(
-            Runtime {
-                kind: RuntimeKind::ShedAcp,
-                ..Runtime::default()
-            }
-            .shed(),
-        )
-    }
-
-    /// The runtime fleet `fleet`'s new lanes start in on host `host`: the host's own, else the fleet's.
-    pub fn shed_on(&self, fleet: &str, host: Option<&str>) -> Option<crate::shed::Shed> {
-        host.and_then(|h| self.host_acp(h)).or_else(|| self.shed_for(fleet))
     }
 
     /// The fleet, refused `BAD_PIPELINE` while its pipeline breaks a rule (that fleet stops, the others run).
@@ -1484,6 +1477,15 @@ impl Fleet {
         d.extend(self.deny_commands_add.iter().cloned());
         d
     }
+    /// Its heavy kinds: `[fleet.<n>.heavy]` plus, with any kind or route, `heavy::CARGO` as `cargo` unless it sets its own.
+    pub fn heavy_kinds(&self) -> BTreeMap<String, Vec<String>> {
+        let mut k = self.heavy.clone();
+        if !k.is_empty() || !self.remote.is_empty() {
+            let cargo = || crate::heavy::CARGO.split(',').map(String::from).collect();
+            k.entry("cargo".into()).or_insert_with(cargo);
+        }
+        k
+    }
     /// Commands its lanes never send to a build machine: `heavy::NEVER_ROUTED` plus `remote_deny`.
     pub fn never_routed(&self) -> Vec<String> {
         let mut n: Vec<String> = crate::heavy::NEVER_ROUTED.split(',').map(String::from).collect();
@@ -1509,9 +1511,9 @@ impl Fleet {
             .get(self.role_key(role))
             .ok_or_else(|| anyhow!("role '{role}' not configured"))
     }
-    /// The configured role a lane runs as: a lesson, triage or deps lane is impl's unless its own role is set.
+    /// The configured role a lane runs as: a role only a job names is impl's unless its own role is set.
     pub fn role_key<'a>(&self, role: &'a str) -> &'a str {
-        if matches!(role, "lesson" | "triage" | "deps") && !self.role.contains_key(role) {
+        if !self.role.contains_key(role) && self.jobs.values().any(|j| j.role == role) {
             "impl"
         } else {
             role
@@ -1522,6 +1524,45 @@ impl Fleet {
     }
     pub fn repo_name(&self) -> &str {
         self.repo.rsplit('/').next().unwrap_or(&self.repo)
+    }
+}
+
+fn accounts_ok(c: &Config) -> Result<()> {
+    let ok = |a: &str| {
+        !a.is_empty()
+            && a.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "-_".contains(c))
+    };
+    let named = c.fleet.iter().flat_map(|(n, f)| {
+        let roles = f
+            .role
+            .iter()
+            .map(move |(r, x)| (format!("fleet.{n}.role.{r}"), &x.account));
+        std::iter::once((format!("fleet.{n}"), &f.account)).chain(roles)
+    });
+    if let Some((at, a)) = named
+        .filter_map(|(at, a)| Some((at, a.as_deref()?)))
+        .find(|(_, a)| !ok(a))
+    {
+        bail!("{at}.account: \"{a}\" is no shed account name (a-z, 0-9, -, _)");
+    }
+    Ok(())
+}
+
+/// The shed account an ACP run asks for: `auto` (shed picks a signed-in named one, moving at a limit) or one by name.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Account {
+    Auto,
+    Named(String),
+}
+
+impl Account {
+    /// The word `run`'s `account` carries.
+    pub fn word(&self) -> &str {
+        match self {
+            Account::Auto => "auto",
+            Account::Named(n) => n,
+        }
     }
 }
 
@@ -1537,6 +1578,7 @@ fn retired(raw: &toml::Table) -> Vec<String> {
         out.extend(
             keys.iter()
                 .filter(|k| t.is_some_and(|t| t.contains_key(**k)))
+                .filter(|k| at == "chat" || **k != "account")
                 .map(|k| format!("{at}.{k}")),
         );
     };

@@ -168,6 +168,9 @@ fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Resul
     if let Some(id) = crate::orchestrator::acting() {
         ev.data.entry("orchestrator").or_insert(id.into());
     }
+    if let Some(t) = crate::thread::stamp() {
+        ev.data.entry("thread").or_insert(t.into());
+    }
     if seq.is_none() && matches!(ev.kind.as_str(), "verdict" | "lane-killed") {
         ev.data.entry("by").or_insert(crate::orchestrator::actor().into());
     }
@@ -588,6 +591,23 @@ pub fn rename_fleet(
 
 pub(crate) fn events(state: &Path, filter: &str, arg: impl rusqlite::ToSql) -> Result<Vec<Event>> {
     with(state, false, vec![], |c| rows(c, filter, arg))
+}
+
+/// `fleet`'s issues when it is quiet: a pass logged, no event of it since, every issue settled and no ask open; `None` otherwise.
+pub fn quiet(state: &Path, fleet: &str) -> Option<Vec<u64>> {
+    let q = "SELECT EXISTS (SELECT 1 FROM states WHERE fleet = ?1 AND done < 2) \
+        OR EXISTS (SELECT 1 FROM asks WHERE fleet = ?1 AND rank IS NULL) \
+        OR NOT EXISTS (SELECT 1 FROM events WHERE fleet = ?1 AND type = 'drive-pass') \
+        OR EXISTS (SELECT 1 FROM events WHERE fleet = ?1 AND seq > (SELECT MAX(seq) FROM events WHERE fleet = ?1 AND type = 'drive-pass'))";
+    let issues = with(state, false, None, |c| {
+        if c.query_row(q, [fleet], |r| r.get::<_, bool>(0))? {
+            return Ok(None);
+        }
+        let mut q = c.prepare_cached("SELECT issue FROM states WHERE fleet = ?1")?;
+        let rows = q.query_map([fleet], |r| r.get::<_, u64>(0))?;
+        Ok(Some(rows.collect::<rusqlite::Result<Vec<u64>>>()?))
+    });
+    issues.ok().flatten()
 }
 
 /// Event rows read from the database (a full read's cost is the log's length).

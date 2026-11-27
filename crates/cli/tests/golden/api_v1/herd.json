@@ -75,7 +75,7 @@
     ],
     "host": {
       "gate": null,
-      "limit": 2.5,
+      "limit": 85.0,
       "load": null,
       "pressure": null,
       "swap_limit": 2000.0,

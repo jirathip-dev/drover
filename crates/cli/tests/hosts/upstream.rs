@@ -29,7 +29,6 @@ fn a_remote_worktree_tracks_its_own_issue_branch_so_a_plain_push_works() {
     let verify = format!("{SSH}{GIT} '-C' '/tmp/does-not-matter/sendmeter' 'rev-parse' '--verify'");
     r.replies.insert(0, (verify, none));
     let args = ["spawn", "sendmeter", "12", "impl", "--host", "bazzite"];
-    remote::proxied(&c);
     let (code, out) = run(&c, &acp(&r, &bazzite), &args);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let sent = format!("{SSH}{GIT} '-C' '/tmp/does-not-matter/sendmeter' ");
@@ -62,7 +61,7 @@ fn a_respawn_leaves_its_remote_host_under_min_free_gb() {
     let c = setup("hosts-disk-respawn", "", true, 0);
     remote_spawn(&c, NOW - 3600);
     let df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 4194304 90% /\n";
-    let low = fake(1.0, 0.1).reply(&format!("{SSH}'df' '-k' '/'"), df);
+    let low = fake(70, 97).reply(&format!("{SSH}'df' '-k' '/'"), df);
     assert_eq!(placed(&c, &low, 12, "impl", None).as_deref(), Ok("mini"));
     let cache = c.state.parent().unwrap().join("hosts.json");
     let text = std::fs::read_to_string(&cache)

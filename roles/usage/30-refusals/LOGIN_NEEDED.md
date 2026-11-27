@@ -1,1 +1,1 @@
-- LOGIN_NEEDED: spawn: a lane on the host showed a usage limit or sign-in prompt; new lanes wait until the owner signs in there and turns the host back on
+- LOGIN_NEEDED: spawn: the lane's shed account is signed out, limited or missing (`account.ls`; it starts again once shed lists it ready), or a lane on another host showed a usage limit or sign-in prompt; new lanes there wait until the owner signs in and turns the host back on

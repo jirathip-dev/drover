@@ -1,0 +1,13 @@
+about = "core never depends on server or cli, server never on cli (#264); only core's runner.rs spawns processes (#713)"
+fix = "move the call behind the layer it belongs to; spawn through the Runner in crates/core/src/runner.rs"
+budget_secs = 120
+setup = ["rust"]
+paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml"]
+run = '''
+set -eu
+core=$(cargo tree --locked -p drover-core -e normal,build --prefix none)
+server=$(cargo tree --locked -p drover-server -e normal,build --prefix none)
+if printf '%s\n' "$core" | grep -E '^drover(-server)? v' || printf '%s\n' "$server" | grep -E '^drover v'; then exit 1; fi
+bad=$(grep -rlwE 'Command|Stdio|Child' crates/core/src | grep -vxE 'crates/core/src/runner\.rs' || true)
+if [ -n "$bad" ]; then echo "std::process outside the Runner implementations: $bad"; exit 1; fi
+'''

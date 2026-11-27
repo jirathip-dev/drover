@@ -309,7 +309,6 @@ fn a_remote_hosts_clone_gets_the_same_heal() {
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let _sh = FakeShed::attached(&c);
-    remote::proxied(&c);
     let git = format!("{SSH}'git' '--no-replace-objects' '-C' ");
     let gone = "4f50d959cad0891493b08636928fbfd2db083ea0";
     let bad = "fatal: bad object refs/remotes/origin/issue-9\nerror: did not send all necessary objects";
@@ -407,7 +406,6 @@ fn a_remote_fetch_racing_another_on_staging_is_retried_and_the_spawn_starts() {
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let _sh = FakeShed::attached(&c);
-    remote::proxied(&c);
     let fetch =
         format!("{SSH}'git' '--no-replace-objects' '-C' '/tmp/does-not-matter/sendmeter' 'fetch' 'origin' '+refs/heads/staging:refs/remotes/origin/staging'");
     let race = "error: fetching ref refs/remotes/origin/staging failed: incorrect old value provided";

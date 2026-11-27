@@ -634,7 +634,7 @@ fn the_budget_counts_a_hard_link_and_a_clone_once() {
         .status()
         .is_ok_and(|s| s.success());
     if !cloned {
-        let _ = std::fs::remove_file(wt.join("c"));
+        std::fs::remove_file(wt.join("c")).ok();
     }
     let size = std::fs::metadata(&a).unwrap().blocks() * 512;
     let sh = FakeShed::attached(&c);

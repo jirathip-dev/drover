@@ -158,6 +158,8 @@ fn an_extra_round_for_a_lane_that_never_pushed_is_no_review_fail() {
 #[test]
 fn a_lessons_issue_done_with_no_change_and_no_pr_closes() {
     let (c, r, sh) = lane("lesson-close", "lessons: sendmeter week of 2026-11-05");
+    let filed = json!({"job": "lesson", "role": "lesson", "title": "lessons: sendmeter week of 2026-11-05"});
+    ev(&c, 9, 12, "job-filed", filed);
     ok(&c, &r, &["brief", "sendmeter", "12"]);
     let out = ok(&c, &r, &["done", "--no-change", "no repeated class", "sendmeter", "12"]);
     assert!(out.contains("closed sendmeter#12: no repeated class"), "{out}");

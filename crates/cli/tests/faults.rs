@@ -108,7 +108,7 @@ fn a_spawn_whose_link_drops_a_connection_fails_cleanly_and_the_next_one_starts()
     let d = tmpdir("fault-loss");
     let c = ctx(&d, &config(&sh));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    sh.fault(Fault::Loss(2));
+    sh.fault(Fault::Loss(3));
     let (code, out) = spawn(&c);
     assert_ne!(code, 0, "{out}");
     assert!(kinds(&c, "spawn").is_empty(), "{out}");

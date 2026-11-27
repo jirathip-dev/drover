@@ -1,5 +1,6 @@
 use super::*;
 use drover::runner::{Out, Runner};
+use std::path::Path;
 
 struct RealGit<'a>(remote::Acp<'a, OverSsh<'a>>, String);
 
@@ -45,8 +46,19 @@ fn superseded(name: &str, src: Option<(&str, &str)>) -> (i32, String, String, Fa
 
 fn on_bazzite(
     name: &str,
-    (role, agent): (&str, &str),
+    lane: (&str, &str),
     src: Option<(&str, &str)>,
+    args: &[&str],
+) -> (i32, String, String, FakeShed) {
+    on_integration(name, lane, (None, src), args)
+}
+
+type File<'a> = Option<(&'a str, &'a str)>;
+
+fn on_integration(
+    name: &str,
+    (role, agent): (&str, &str),
+    (integration, src): (File, File),
     args: &[&str],
 ) -> (i32, String, String, FakeShed) {
     let c = setup(name, VERIFY, true, 0);
@@ -73,9 +85,21 @@ fn on_bazzite(
     git(&["-C", &wt, "add", "-A"]);
     git(&["-C", &wt, "commit", "-qm", "init"]);
     git(&["-C", &wt, "push", "-q", "origin", "HEAD"]);
+    let put = |(p, s): (&str, &str)| {
+        let p = Path::new(&wt).join(p);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, s).unwrap();
+    };
+    if let Some(f) = integration {
+        put(f);
+        git(&["-C", &wt, "add", "-A"]);
+        git(&["-C", &wt, "commit", "-qm", "on integration"]);
+        git(&["-C", &wt, "push", "-q", "origin", "HEAD:staging"]);
+        git(&["-C", &wt, "reset", "-q", "--hard", "HEAD~1"]);
+    }
     std::fs::write(format!("{wt}/.drover/outbox.jsonl"), format!("{OUTBOX}\n")).unwrap();
-    if let Some((p, s)) = src {
-        std::fs::write(format!("{wt}/{p}"), s).unwrap();
+    if let Some(f) = src {
+        put(f);
     }
     let sp = json!({"role": role, "stage": role, "check": role != "impl", "agent": agent, "harness": "claude",
                     "pane": agent, "workspace": "", "worktree": wt, "branch": "issue-12", "host": "bazzite",
@@ -94,7 +118,6 @@ fn on_bazzite(
         .reply("date -r", "20261120-120000\n");
     let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
     bazzite.lane(agent, "idle", &wt);
-    remote::proxied(&c);
     let r = RealGit(acp(&f, &bazzite), wt);
     let (code, out) = run(&c, &r, args);
     let wip = git(&[
@@ -191,4 +214,59 @@ fn killing_an_impl_lane_with_a_home_path_is_still_refused_public_leak() {
     );
     assert_eq!(files, "", "nothing pushed");
     assert!(bazzite.has(IMPL));
+}
+
+const GOLDEN: &str = "tests/golden/acp.txt";
+
+#[test]
+fn an_untracked_copy_of_an_integration_file_with_a_placeholder_home_is_pushed() {
+    let f = (GOLDEN, "x\nRead /home/user/project/src/parse.rs\n");
+    let (code, out, files, bazzite) = on_integration(
+        "hosts-wip-golden",
+        ("impl", IMPL),
+        (Some(f), Some(f)),
+        &["spawn", "sendmeter", "12", "impl", "--supersede"],
+    );
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("PUBLIC_LEAK"), "{out}");
+    assert_eq!(files, format!("{GOLDEN}\n"), "{out}");
+    assert!(bazzite.called("send", IMPL), "{:?}", bazzite.methods());
+}
+
+#[test]
+fn a_placeholder_home_in_new_text_is_pushed() {
+    let (code, out, files, _) = superseded("hosts-wip-placeholder", Some(("notes.txt", "cd /home/user/project\n")));
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("PUBLIC_LEAK"), "{out}");
+    assert_eq!(files, "notes.txt\n", "{out}");
+}
+
+#[test]
+fn an_untracked_copy_of_an_integration_file_with_a_real_home_is_pushed() {
+    let f = ("e2e-dir.txt", "/home/me/e2e\n");
+    let args = ["spawn", "sendmeter", "12", "impl", "--supersede"];
+    let (code, out, files, _) = on_integration("hosts-wip-public", ("impl", IMPL), (Some(f), Some(f)), &args);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("PUBLIC_LEAK"), "{out}");
+    assert_eq!(files, "e2e-dir.txt\n", "{out}");
+}
+
+#[test]
+fn an_integration_file_with_one_changed_real_home_line_is_still_refused_public_leak() {
+    let public = ("e2e-dir.txt", "x\n/home/user/project\n");
+    let changed = ("e2e-dir.txt", "x\n/home/me/e2e\n");
+    let args = ["spawn", "sendmeter", "12", "impl", "--supersede"];
+    let (code, out, files, bazzite) = on_integration(
+        "hosts-wip-public-changed",
+        ("impl", IMPL),
+        (Some(public), Some(changed)),
+        &args,
+    );
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        out.contains("REFUSED PUBLIC_LEAK") && out.contains("e2e-dir.txt:2 has a home-path"),
+        "{out}"
+    );
+    assert_eq!(files, "", "nothing pushed");
+    assert!(!bazzite.called("send", IMPL) && bazzite.has(IMPL));
 }

@@ -6,13 +6,14 @@ use serde_json::{json, Value};
 use shed_proto::{KeysParams, Method, ReadParams, RunParams, SendParams, Target, WaitParams};
 use std::path::PathBuf;
 
-/// An ACP lane's start: its adapter command, the role's MCP servers file (`--mcp`), the provider's session options (`--meta`) and whether shed may never hibernate it (`--no-hibernate`).
+/// An ACP lane's start: its adapter command, the role's MCP servers file (`--mcp`), the provider's session options (`--meta`), whether shed may never hibernate it (`--no-hibernate`) and its shed account (`--account`; none on another host).
 #[derive(Clone, Debug, Default)]
 pub struct Acp {
     pub cmd: Vec<String>,
     pub mcp: Option<PathBuf>,
     pub meta: Option<Value>,
     pub awake: bool,
+    pub account: Option<crate::config::Account>,
 }
 
 /// Shed's lanes: terminals named as their agents, labelled `fleet`, `issue`, `role` and `harness`.
@@ -43,6 +44,7 @@ impl Shed {
             parent: None,
             rows: None,
             cols: None,
+            ..RunParams::default()
         }
     }
     /// Start lane `name` (`run_params`), or with `[runtime] acp` that ACP agent (shed's CLI makes its bridge), its adapter `cmd` after `--`. A terminal of that name an earlier lane left exited is removed first.
@@ -111,6 +113,11 @@ impl Shed {
         );
         a.extend(acp.meta.iter().flat_map(|m| ["--meta".into(), m.to_string()]));
         a.extend(acp.awake.then(|| "--no-hibernate".to_string()));
+        a.extend(
+            acp.account
+                .iter()
+                .flat_map(|x| ["--account".into(), x.word().to_string()]),
+        );
         a.extend(labels.iter().flat_map(|(k, v)| ["--label".into(), format!("{k}={v}")]));
         a.extend(
             (!acp.cmd.is_empty())
@@ -164,6 +171,7 @@ fn request(a: &[String]) -> Option<(Method, Value)> {
                     events: false,
                     before: None,
                     n: None,
+                    since: None,
                 }),
             )
         }

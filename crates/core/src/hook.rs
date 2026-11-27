@@ -70,15 +70,9 @@ impl Rules {
         let mut branches: Vec<String> = ["main", "master", "staging"].map(String::from).to_vec();
         branches.extend(cfg.fleet.values().map(|f| f.integration.clone()));
         let family = f.map(|f| f.family(role));
-        let h = cfg.hosts.get(host);
-        let heavy = f.filter(|f| !f.heavy.is_empty()).map(|f| crate::heavy::Heavy {
-            kinds: f.heavy.clone(),
-            max: h.and_then(|h| h.heavy_max).unwrap_or(3),
-            kind_max: h.map(|h| h.heavy_kind_max.clone()).unwrap_or_default(),
-            wait_minutes: h.and_then(|h| h.heavy_wait_minutes).unwrap_or(30),
-            routes: f.remote.clone(),
-            never: f.never_routed(),
-        });
+        let heavy = f
+            .map(|f| Heavy::of(f, cfg.hosts.get(host)))
+            .filter(|h| !h.kinds.is_empty());
         Rules {
             heavy,
             branches,
@@ -840,18 +834,15 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     if block && r.iter().enumerate().skip(3).any(other) {
         return Some("REFUSED OWN_ISSUE: a lane may `queue block`/`unblock` only its own issue (#425)".into());
     }
-    if !orchestrator && r.first() == Some(&"lesson") && !matches!(r.get(1), Some(&"digest" | &"apply")) {
-        return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover lesson` (#419)".into());
-    }
-    if !orchestrator && r.first() == Some(&"deps") {
-        return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover deps` (#1488)".into());
+    if !orchestrator && r.first() == Some(&"job") && r.len() > 2 {
+        return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs a job by hand (#1756)".into());
     }
     let triage = lane.split(':').nth(2) == Some("triage");
     let acts = matches!(r.get(1), Some(&("close" | "fold" | "label" | "docs")));
     if !orchestrator && r.first() == Some(&"triage") && !(acts && triage) {
         return Some(
-            "REFUSED ORCHESTRATOR_ONLY: an orchestrator or the owner runs `drover triage <fleet>`; only a triage lane \
-             closes, folds, labels or files docs (#1100)"
+            "REFUSED ORCHESTRATOR_ONLY: only a triage lane, an orchestrator or the owner closes, folds, labels or files \
+             docs (#1100)"
                 .into(),
         );
     }
@@ -877,11 +868,6 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     }
     if r.first() == Some(&"setup") {
         return Some("REFUSED OWNER_ONLY: only the owner runs `drover setup`, never a lane (#303)".into());
-    }
-    if r.first() == Some(&"proxy") || r.first() == Some(&"hosts") && r.contains(&"revoke") {
-        return Some(
-            "REFUSED OWNER_ONLY: only the owner runs the token proxy or revokes its keys, never a lane (#637)".into(),
-        );
     }
     if !orchestrator && r.first() == Some(&"spawn") && r.contains(&"--force") {
         return Some(
@@ -1131,7 +1117,7 @@ pub fn heavy(input: &Value, h: &Heavy, exe: &str, git: &dyn Fn(&str, &[&str]) ->
     let mut ti = tool_input(input).clone();
     let cmd = ti.at("command").as_str()?;
     let kind = h.kind(cmd)?;
-    let cwd = input.at("cwd").as_str().filter(|_| h.route(kind, cmd).is_some());
+    let cwd = input.at("cwd").as_str().filter(|_| h.routes.contains_key(kind));
     let dir = cwd
         .and_then(|d| git(d, &["rev-parse", "--show-toplevel"]))
         .filter(|t| !t.is_empty());
