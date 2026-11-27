@@ -15,6 +15,7 @@ pub mod baseline;
 pub mod breaker;
 pub mod card;
 pub mod check;
+pub mod chore;
 mod cli;
 pub mod clock;
 pub mod clone;

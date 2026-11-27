@@ -241,6 +241,7 @@ fn row<'a>(events: &'a [Event], reg: &Registry, e: &'a Event) -> Option<(&'a Eve
         }
         ("secret-set" | "secret-dismissed", _) => RowKind::SecretCard,
         ("rollout-done" | "rollout-dismissed", _) => RowKind::Rollout,
+        ("nudge", _) => RowKind::Alert,
         ("merged", _) => RowKind::Merged,
         ("thread-msg", Some("system")) => {
             prompt = Some(s("text"));

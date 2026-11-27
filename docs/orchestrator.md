@@ -180,15 +180,26 @@ always carries it: past the last 30 messages it stays right under the older-mess
 
 A feature that adds a fleet.toml key does nothing until the config turns it on. Its PR body carries a `## Rollout`
 section: the exact fleet.toml lines in a fenced block and which fleets they go in (`none`, or no section, rolls out
-nothing). `drover merge` of such a PR logs `rollout-open` once and posts one row to the thread whose orchestrator
-filed the issue (the lane hook logs `issue-filed` on its `gh issue create`), else the repo's newest thread:
-`#<n> merged with a rollout, not applied yet:` with the snippet. That wakes the thread's orchestrator, which drafts the
-card at once with `drover config propose <thread> <file> --rollout <n>` (refused `NO_SUCH_ROLLOUT` unless #n's
-rollout is open), so the owner only taps [apply]. The apply logs `rollout-done` for #n and its line ends
-`, rollout #<n> done`. The owner may instead run `drover rollout dismiss <fleet> <n> [--by <who>]` (owner only; the
-lane hook refuses it, `OWNER_ONLY`), logged `rollout-dismissed` with `by`. Until either, `drover waiting` (and
-`--json`) lists it as the owner's: `<fleet> #<n> owner: rollout not applied (thread <t>) (<age>)`, its lane the
-thread's orchestrator. Nothing is ever applied by itself.
+nothing). `drover merge` of such a PR logs `rollout-open` once and (#1781) posts the config card itself, in the
+thread that filed the issue (the lane hook logs `issue-filed` on its `gh issue create`), else the repo's newest thread,
+else the repo's owner cards: the fenced lines set into the live fleet.toml, its diff exactly those lines. When they do
+not apply cleanly (a key already set to another value, a fleet fleet.toml has not, an array of tables, a line that
+leaves fleet.toml invalid), the card names the reason and has no diff and no [apply]. A hand-made card may still name
+the rollout: `drover config propose <thread> <file> --rollout <n>` (refused `NO_SUCH_ROLLOUT` unless #n's rollout is
+open). The apply logs `rollout-done` for #n and its line ends `, rollout #<n> done`. The owner may instead run
+`drover rollout dismiss <fleet> <n> [--by <who>]` (owner only; the lane hook refuses it, `OWNER_ONLY`), logged
+`rollout-dismissed` with `by`. Until either, `drover waiting` (and `--json`) lists it as the owner's:
+`<fleet> #<n> owner: rollout not applied (card <id>)` with `drover config apply <id>`, or `rollout not applied:
+<reason>` with `drover rollout dismiss <fleet> <n>`. Nothing is ever applied by itself.
+
+## Nudges (#1781)
+
+Two chores drover raises itself, as a `system` row whose prompt names the command, to the repo's attached chat (the
+newest still attached), else as an owner card (an alert on the repo's cards, pushed) naming it:
+
+- **Lessons:** the fleet's second review FAIL since its last lessons nudge or lesson issue: `drover job <fleet> lesson`.
+- **Promotion:** every `[limits] promote_after_merges` (default 10, `0` off) merges into the integration branch since
+  the last promotion nudge: the `gh pr create` that opens the integration→main PR.
 
 ## Capability groups and run cards (#538)
 
