@@ -861,6 +861,7 @@ fn a_routed_fleets_just_check_reaching_gatekeeper_runs_in_the_lanes_git_tree() {
         let ran = std::fs::read_to_string(repo.wt.join(".gatekeeper/ran.log")).unwrap();
         assert_eq!(ran, format!("run check {}\n", wt.display()));
     }
+}
 
 #[test]
 fn a_heavy_done_check_waits_for_a_free_slot_and_runs_in_it() {

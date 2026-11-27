@@ -254,6 +254,7 @@ fn a_tick_skips_a_fleet_the_live_service_drove_within_the_tick_interval() {
         1,
         "older than the tick interval: the tick drives it: {out}"
     );
+}
 
 #[test]
 fn a_pass_ended_by_its_deadline_leaves_no_process_it_started_alive() {
