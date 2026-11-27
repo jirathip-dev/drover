@@ -162,6 +162,25 @@ fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) 
     rows.extend(crate::hygiene::doctor(ctx, cfg, r));
 }
 
+fn housekeep(ctx: &Ctx, cfg: &Config, rows: &mut Vec<String>) {
+    let last = crate::housekeep::last(ctx);
+    let fresh = last
+        .as_ref()
+        .is_some_and(|(at, secs, _)| ctx.now <= at + secs + crate::timer::stuck_secs(cfg));
+    let line = last.map_or("housekeep — never ran".into(), |(at, secs, late)| {
+        let late = if late.is_empty() {
+            String::new()
+        } else {
+            format!(" · past budget: {}", late.join(", "))
+        };
+        format!(
+            "housekeep — ran {} ago, took {secs} s{late}",
+            crate::events::age(ctx.now.saturating_sub(at))
+        )
+    });
+    row(rows, fresh, '✗', &format!("{line} → drover timer install"));
+}
+
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     config_rows(ctx, cfg, r, rows);
     let line = crate::drive::spawns_line(ctx, cfg, r, &crate::events::working(&ctx.state).unwrap_or_default());
@@ -355,7 +374,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     let line = format!("push — {subs} subscriptions, notifier {notifier} → turn alerts on; add a webpush [[notify]]");
     row(rows, subs > 0 && notifier, '!', &line);
     let running = crate::timer::running(ctx, cfg);
-    for (what, file) in [("check", "check.at"), ("drive", "drive-fast.at")] {
+    for (what, file) in [("tick", "tick.at"), ("drive", "drive-fast.at")] {
         let stamp = std::fs::read_to_string(ctx.state.with_file_name(file));
         let at: Option<u64> = stamp.ok().and_then(|t| t.split_whitespace().next()?.parse().ok());
         let age = at.map_or("never".into(), |at| crate::events::age(ctx.now.saturating_sub(at)));
@@ -367,6 +386,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line = format!("watchdog {what} — {ran} → drover timer install");
         row(rows, fresh || running.is_some(), '✗', &line);
     }
+    housekeep(ctx, cfg, rows);
     let stuck = crate::timer::stuck_step(ctx, cfg);
     let line = stuck.as_ref().map_or("tick step — advancing".into(), |(step, secs)| {
         let age = crate::events::age(*secs);

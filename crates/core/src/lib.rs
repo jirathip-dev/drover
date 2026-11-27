@@ -37,6 +37,7 @@ pub mod hook;
 pub mod host;
 pub mod hosts;
 pub mod hotspots;
+pub mod housekeep;
 pub mod hygiene;
 pub mod jobs;
 pub mod land;

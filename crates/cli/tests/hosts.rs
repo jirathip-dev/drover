@@ -1299,7 +1299,7 @@ fn an_unreachable_host_costs_one_short_attempt_per_pass() {
 }
 
 #[test]
-fn the_tick_drives_before_it_trims_remote_hosts() {
+fn the_tick_drives_and_leaves_trimming_remote_hosts_to_housekeeping() {
     let c = trim_setup("hosts-tick-trim", "");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let _sh = FakeShed::attached(&c);
@@ -1315,10 +1315,12 @@ fn the_tick_drives_before_it_trims_remote_hosts() {
     let bazzite = FakeShed::new();
     let (code, out) = run_only(&c, &two(&r, &bazzite), &["tick"]);
     assert_eq!(code, 0, "{out}");
-    let calls = r.calls.borrow();
-    let driven = calls.iter().position(|l| l.contains(" drive sendmeter >>"));
-    let trimmed = calls.iter().position(|l| l.starts_with(QUICK));
-    assert!(driven.is_some() && driven < trimmed, "{out} {calls:?}");
+    let trimmed = |r: &Fake| r.calls.borrow().iter().any(|l| l.starts_with(QUICK));
+    let driven = r.calls.borrow().iter().any(|l| l.contains(" drive sendmeter >>"));
+    assert!(driven && !trimmed(&r), "{out} {:?}", r.calls.borrow());
+    let (code, out) = run_only(&c, &two(&r, &bazzite), &["housekeep", "--only", "trim"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(trimmed(&r), "{out} {:?}", r.calls.borrow());
 }
 
 #[test]
