@@ -1386,47 +1386,28 @@ fn a_lanes_git_notes_write_or_notes_push_is_refused() {
 }
 
 #[test]
-fn impl_lane_never_edits_the_cap_file() {
+fn an_impl_lane_may_edit_the_old_cap_files() {
     let d = tmpdir("hook-cap");
     std::fs::write(d.join("fleet.toml"), config()).unwrap();
-    let lane = |n: &str| [("DROVER_LANE", Some(format!("sendmeter:{n}:impl")))];
-    let call = |n: &str, tool: &str, ti: Value| {
+    let vars = [("DROVER_LANE", Some("sendmeter:24:impl"))];
+    let call = |tool: &str, ti: Value| {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": "/w", "tool_input": ti});
-        let vars = lane(n);
-        let vars: Vec<(&str, Option<&str>)> = vars.iter().map(|(k, v)| (*k, v.as_deref())).collect();
         hook_at(&d, &d, &vars, "impl", &input.to_string())
     };
-    let bash = |n: &str, c: &str| call(n, "Bash", json!({"command": c}));
-    let refused = |out: String| out.contains("REFUSED CAP_FILE");
-    assert!(refused(call("24", "Edit", json!({"file_path": "/w/ci/cap.toml"}))));
-    assert!(refused(call("24", "Write", json!({"file_path": "ci/cap.toml"}))));
-    assert!(refused(bash("24", "sed -i '' 's/35500/36000/' ci/cap.toml")));
-    assert!(refused(bash("24", "printf x > ci/cap.toml")));
-    assert!(refused(call(
-        "24",
-        "Write",
-        json!({"file_path": "/w/ci/cap.d/2026-11-14-50000.toml"})
-    )));
-    assert!(refused(bash("24", "printf 'line_cap = 50000' > ci/cap.d/x.toml")));
-    assert!(refused(bash("24", "cp up.toml ci/cap.d/x.toml")));
-    for ok in [
-        "cat ci/cap.toml",
-        "ls ci/cap.d/",
-        "drover cap-check --config ci/cap.toml > cap.log 2>&1",
-    ] {
-        assert_eq!(bash("24", ok), "", "{ok}");
-    }
-    assert_eq!(call("24", "Edit", json!({"file_path": "/w/src/a.rs"})), "");
-    let cache = d.join("state/cache");
-    std::fs::create_dir_all(&cache).unwrap();
-    let spec = json!({"title": "cap: raise the src/ line cap to 36,000", "body": ""});
-    std::fs::write(cache.join("issue-sendmeter-25.json"), spec.to_string()).unwrap();
-    assert_eq!(call("25", "Edit", json!({"file_path": "/w/ci/cap.toml"})), "");
-    assert_eq!(bash("25", "sed -i '' 's/35500/36000/' ci/cap.toml"), "");
+    let bash = |c: &str| call("Bash", json!({"command": c}));
+    assert_eq!(call("Edit", json!({"file_path": "/w/ci/cap.toml"})), "");
     assert_eq!(
-        call("25", "Write", json!({"file_path": "/w/ci/cap.d/2026-11-14-36000.toml"})),
+        call("Write", json!({"file_path": "/w/ci/cap.d/2026-11-14-50000.toml"})),
         ""
     );
+    for cmd in [
+        "sed -i '' 's/35500/36000/' ci/cap.toml",
+        "printf x > ci/cap.toml",
+        "git rm -r ci/cap.toml ci/cap.d",
+        "rm -r ci/cap.d",
+    ] {
+        assert_eq!(bash(cmd), "", "{cmd}");
+    }
 }
 
 #[test]

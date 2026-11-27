@@ -162,21 +162,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     }
     for (name, f) in &cfg.fleet {
         crate::overlap::preview(ctx, cfg, r, name, &events).ok();
-        if let Some((sha, n, cap, warn)) = crate::overlap::cap_at(ctx, cfg, r, name).filter(|c| c.2 - c.1 < c.3) {
-            let why = format!(
-                "{} lines of headroom (< {warn}) at {sha:.7}, {n} / cap {cap}: propose the next cap step",
-                cap - n
-            );
-            fire(
-                ctx,
-                cfg,
-                out,
-                &events,
-                (name, None),
-                "cap-near",
-                json!({"key": sha, "reason": why}),
-            )?;
-        }
         for i in crate::queue::replay(&events, name) {
             gh::spec(ctx, r, f, name, i.issue, false).ok();
         }

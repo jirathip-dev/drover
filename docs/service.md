@@ -64,10 +64,6 @@ the tick, then unloads and removes the old `dev.drover.fast` job (#1802). `drove
 running` while the job is missing or its socket is dead, and `✗ fast job — replaced by the service` while both are
 installed.
 
-## Line cap
-
-The service's budget is the planned +3,000, inside the 31,500 cap the owner set in q391 (#514).
-
 ## Deferred (q409)
 
 The owner decided in #345's q409 (2026-11-06): "Defer (a)-(e) to a follow-up issue; list them in docs/service.md as
