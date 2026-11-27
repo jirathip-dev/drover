@@ -419,7 +419,7 @@ export type Backlog = { issues: { [key in string]: BacklogIssue }, ago: string, 
 /**
  * A fleet's [config] sheet: the config file (`path`, `file`), GENERAL, the Pipeline group's data (`pipe`), LIMITS, ROLES (with `rw`, pickers from `models`, `harnesses` and their efforts), the Conductor, ALERTS.
  */
-export type ConfigSheet = { path: string, file: string, repo: string, local: string, integration: string, effort?: string | null, color_set: boolean, env: Array<string>, node_modules: boolean, builtin: boolean, review_rounds: number, update_rounds: number, stall_minutes: number, ask_minutes: number, max_impl?: number | null, max_rev?: number | null, line_cap?: number | null, serial: Array<string>, deny: Array<string>, required: Array<string>, merge_label?: string | null, notify: Array<string>, global: Array<string>, pipe: JsonValue, models: Array<string>, harnesses: Array<Harness>, roles: Array<RoleRow>, conductor?: Conductor | null, };
+export type ConfigSheet = { path: string, file: string, repo: string, local: string, integration: string, effort?: string | null, color_set: boolean, env: Array<string>, node_modules: boolean, builtin: boolean, review_rounds: number, update_rounds: number, stall_minutes: number, ask_minutes: number, max_impl?: number | null, max_rev?: number | null, serial: Array<string>, deny: Array<string>, required: Array<string>, merge_label?: string | null, notify: Array<string>, global: Array<string>, pipe: JsonValue, models: Array<string>, harnesses: Array<Harness>, roles: Array<RoleRow>, conductor?: Conductor | null, };
 
 export type Harness = { name: string, efforts: Array<string>, };
 

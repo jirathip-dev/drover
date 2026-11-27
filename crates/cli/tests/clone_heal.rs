@@ -123,7 +123,7 @@ fn merger(local: &Path, head: &str) -> Mixed {
     let f = Fake::default()
         .reply("gh pr view issue-3 ", &pr.to_string())
         .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", head)
-        .reply("sh -c", "src lines (formatted): 10 / cap 14700\n")
+        .reply("sh -c", "ok\n")
         .reply("gh pr merge", "")
         .reply("gh pr view 13", &json!({"mergeCommit": {"oid": "m3rg3"}}).to_string())
         .reply("gh issue", "");
@@ -139,16 +139,20 @@ fn events(c: &drover::Ctx, kind: &str) -> Vec<Event> {
         .collect()
 }
 
-fn premerge(local: &Path) {
-    std::fs::create_dir_all(local.join("ci")).unwrap();
-    std::fs::write(local.join("ci/cap.toml"), "[fleet.sendmeter]\nline_cap = 14700\n").unwrap();
+fn premerge(c: &drover::Ctx) {
+    let cfg = std::fs::read_to_string(&c.config).unwrap();
+    let cfg = cfg.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\npremerge = [\"make lint\"]",
+    );
+    std::fs::write(&c.config, cfg).unwrap();
 }
 
 #[test]
 fn a_pass_heals_a_clone_missing_objects_and_merges() {
     let r = repos("heal-merge");
     let _sh = FakeShed::attached(&r.c);
-    premerge(&r.local);
+    premerge(&r.c);
     ready(&r.c, &r.head);
     let (tree, _) = break_clone(&r);
     let m = merger(&r.local, &r.head);
@@ -223,7 +227,7 @@ fn an_unhealable_clone_alerts_once_and_the_other_steps_still_run() {
 fn every_fetch_of_a_clone_runs_under_its_lock() {
     let r = repos("heal-lock");
     let _sh = FakeShed::attached(&r.c);
-    premerge(&r.local);
+    premerge(&r.c);
     ready(&r.c, &r.head);
     let m = merger(&r.local, &r.head);
     let (code, out) = run(&r.c, &m, &["drive", "sendmeter"]);

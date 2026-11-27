@@ -27,8 +27,3 @@ pub fn check(on: &On, wt: &Path, pr: &Pr, names: &[String], limit: Duration) -> 
     let sh = argv(&["-c", &line, &wt.to_string_lossy(), pr.head]);
     on.run_for("sh", &sh, &names.join("\n"), limit)
 }
-
-/// The merge check's cap command for the repo at `dir`: the wrapper's `core/cap` gate, when the repo holds it.
-pub fn cap(dir: &Path) -> Option<String> {
-    wrapper(dir).exists().then(|| format!("{CHECK} --gate core/cap"))
-}

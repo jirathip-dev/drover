@@ -41,7 +41,6 @@
             }
           ],
           "integration": "staging",
-          "line_cap": null,
           "local": "/tmp/does-not-matter/sendmeter",
           "max_impl": null,
           "max_rev": null,

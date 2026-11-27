@@ -129,7 +129,7 @@ lane terminal call, on shed) and `gh` (cached GitHub reads).
 | `host`, `hosts` | host-load admission and live agents; multi-host placement ([hosts.md](hosts.md)) |
 | `access`, `usage` | a lane's MCP servers; the DeepSeek balance and the lanes' status line |
 | `hook` | the lanes' pre-tool hook |
-| `overlap` | conflict preview between open branches, `cap-check` |
+| `overlap` | conflict preview between open branches |
 | `serve`, `lanes`, `devices`, `webpush` | the phone page, its Lanes tab, paired devices, web push |
 | `doctor`, `protection` | read-only host and branch-protection checks |
 | `status` | the commit statuses drover posts on PR heads: `drover/review`, `drover/verify`, `drover/override` |
@@ -172,14 +172,10 @@ TS: it imports them from `assets/types/api.d.ts`.
   print (gatekeeper's rust/clippy, with its pack's `clippy.toml`, allows them in test targets). `.drover/arch.toml` keeps
   processes in `runner.rs`, the environment in `config.rs` and the clock and sleeps in `clock.rs`. gatekeeper's rust/bans
   and ts/oxlint hold each ban's fixture (#1587).
-- **Size cap:** at most `line_cap` (in `ci/cap.toml`) formatted lines of non-test Rust under `src/` and `crates/*/src/` (tests
-  live in `crates/cli/tests/`), counted after `cargo fmt`. CI runs `drover cap-check --config ci/cap.toml`; a fleet can set its own
-  `line_cap` under `[fleet.<name>]`. Raising the cap needs the owner's OK in the cap issue (its q-number). The
-  commit that edits `ci/cap.toml` (or adds a `ci/cap.d/*.toml` raise; the highest `line_cap` wins) carries
-  `Cap: <old> → <new> (#issue, q<N>)`; on a PR, `cap-check --base` refuses a cap commit without it. `drover cap log`
-  prints the history from git.
+- **Size (#1812):** no repo-wide line cap: `.drover/arch.toml`'s per-file `[[size]]` rules and the weekly hotspots
+  issue watch size; each PR body states its `src/ net`.
 - **Rules file and PR body (#1484):** `drover lesson-check` fails a `.drover/rules.md` line that names no enforcer
-  and a file over 30 lines (`cap-check` no longer takes `rules`). `drover pr-body --file <body> --head <sha> [--base staging]`
+  and a file over 30 lines. `drover pr-body --file <body> --head <sha> [--base staging]`
   applies `turn done`'s `PR_BODY` rule to a file and exits 1 with the reason; neither needs a fleet config.
 - **Drive over time (#856):** a fix for a bug that shows only as drive runs pass after pass (a stuck tick, a lane
   never replaced, a hold that never lifts) adds its scenario to `crates/cli/tests/drive_sim.rs`: a fake clock,

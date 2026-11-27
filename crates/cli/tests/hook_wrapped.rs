@@ -40,8 +40,6 @@ fn guard_rules_see_inside_compound_and_wrapped_forms() {
         "pkill node",
         "killall node",
         "echo x > ~/.config/fleet-operations/f",
-        "rm ci/cap.toml",
-        "echo x > ci/cap.toml",
     ];
     let forms = [
         "X",

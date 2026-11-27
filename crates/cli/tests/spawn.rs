@@ -180,21 +180,22 @@ fn rev_role_flags_new_commit_trailers_only() {
 }
 
 #[test]
-fn cap_asks_only_when_your_own_pr_crosses() {
+fn briefs_ask_for_src_net_and_name_no_line_cap() {
     let d = tmpdir("help-429");
+    let (code, out) = run(&ctx(&d, CONFIG), &Fake::default(), &["cap", "sendmeter"]);
+    assert_ne!(code, 0, "{out}");
     let (_, help) = run(&ctx(&d, CONFIG), &Fake::default(), &["help", "--agent"]);
     let impl_ = drover::spawn::role_prompt("impl").replace("\n  ", " ");
+    let orch = drover::spawn::role_prompt("orchestrator");
     for t in [impl_.as_str(), help.as_str()] {
-        for w in [
-            "The cap in `ci/cap.toml` is a total for the repo",
-            "ask only when your own PR, merged onto current integration, would put the total over `line_cap`; trim first, then ask `--kind owner`.",
-            "Being near the cap, or another PR's growth, is never a reason to ask.",
-            "A `STAGING_WOULD_BREAK` from the cap after another merge is a fix round: trim, or ask under the same rule.",
-            "Never edit `ci/cap.toml` or add a raise in `ci/cap.d/` (the hook refuses both",
-            "`drover cap <fleet>`'s queue-wide view",
-            "in one orchestrator-filed issue (recommended), or trim.",
-        ] {
-            assert!(t.contains(w), "{w}");
+        assert!(
+            t.contains("The PR body states `src/ net +N (budget +M)` with one line on why; the budget is a guide, never a gate."),
+            "{t}"
+        );
+    }
+    for t in [impl_.as_str(), help.as_str(), orch] {
+        for w in ["line_cap", "CAP.toml", "drover cap", "cap ask"] {
+            assert!(!t.contains(w), "{w}");
         }
     }
 }

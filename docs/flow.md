@@ -36,26 +36,6 @@ Generated from `crates/core/flow/` (#1649) by `just gen`; CI fails when this fil
 | `asker-gone` | exited, gone | wait | owner | `ask_expire_hours` | expire | owner |  | the asking lane is gone |
 | `waiting` | none, running, limited, asleep, done | wait | owner | `ask_waiting_minutes` | remind | owner | answered | with the owner |
 
-## Flow `cap`
-
-### `asked` (file `asked`) · reads nothing
-
-| id | do | owner | timeout | then | esc | to | say |
-|---|---|---|---|---|---|---|---|
-| `settle` | tell-orchestrator | orchestrator | `escalate_minutes` | to-owner |  |  | a cap ask: raise or trim |
-
-### `near` (file `near`) · reads nothing
-
-| id | do | owner | timeout | then | esc | to | say |
-|---|---|---|---|---|---|---|---|
-| `propose` | tell-orchestrator | orchestrator | `escalate_minutes` | to-owner |  |  | near the line cap: propose a raise |
-
-### `raising` (file `raising`) · reads nothing
-
-| id | do | owner | timeout | then | esc | to | say |
-|---|---|---|---|---|---|---|---|
-| `release` | release | drive | `act_minutes` |  |  |  | the raise merged: release the asking issue |
-
 ## Flow `card`
 
 ### `approved` (file `approved`) · reads nothing

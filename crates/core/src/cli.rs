@@ -305,10 +305,6 @@ enum Cmd {
         json: bool,
     },
     #[command(
-        about = "#668: the queue-wide line-cap view: total, cap and headroom at integration, each open PR's `src/ net`, the queued issues with no PR, the projected total and the one raise to ask for; `cap log`: every past cap change from git"
-    )]
-    Cap { fleet: String },
-    #[command(
         about = "#889: files 5+ merged PRs touched in 14 days; opens or updates the week's issue, queued `--architect`"
     )]
     Hotspots { fleet: Option<String> },
@@ -422,16 +418,6 @@ enum Cmd {
         #[arg(help = "The triggering event's id: the same id is driven once")]
         #[arg(long)]
         id: Option<String>,
-    },
-    #[command(
-        about = "CI: lines of the `count` globs (less `exclude`) in --config, default src/**/*.rs, against its `line_cap` or a higher one in cap.d/; exit 1 over it"
-    )]
-    #[command(hide = true)]
-    CapCheck {
-        #[arg(long)]
-        config: std::path::PathBuf,
-        #[arg(long)]
-        base: Option<String>,
     },
     #[command(about = "CI (#734): the layers, bans and size limits in --config; exit 1 on a violation")]
     #[command(hide = true)]
@@ -1090,7 +1076,7 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             | Cmd::Help { .. }
     ) || matches!(
         cli.cmd,
-        Cmd::CapCheck { .. } | Cmd::ArchCheck { .. } | Cmd::LessonCheck { .. } | Cmd::PrBody { .. }
+        Cmd::ArchCheck { .. } | Cmd::LessonCheck { .. } | Cmd::PrBody { .. }
     );
     if !quiet && args.first().is_some_and(|a| a.ends_with("herdsman")) {
         crate::stderr!("herdsman is now drover: the old name works for one more release");
@@ -1209,8 +1195,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         } => crate::config::show_md(out)?,
         Cmd::Diagram { live, fleet } => crate::diagram::run(ctx, live, fleet.as_deref(), out)?,
         Cmd::Flow(a) => crate::flow::shadow::cli(ctx, a, out)?,
-        Cmd::CapCheck { config, base } => return crate::overlap::cap_check(r, &config, base.as_deref(), out),
-        Cmd::Cap { fleet } if fleet == "log" => return crate::overlap::cap_log(r, std::path::Path::new("."), out),
         Cmd::ArchCheck {
             config,
             write_baseline,
@@ -2042,7 +2026,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         return Ok(1);
                     }
                 }
-                Cmd::Cap { fleet } => return crate::overlap::cap_view(ctx, &cfg, r, &fleet, out),
                 Cmd::Hotspots { fleet } => {
                     for name in fleet.map_or_else(|| cfg.fleet.keys().cloned().collect(), |f| vec![f]) {
                         crate::hotspots::run(ctx, &cfg, r, out, &name)?;
@@ -2236,11 +2219,6 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     };
     let mut it = lane.split(':');
     let (fleet, n) = (it.next().unwrap_or_default(), it.next().and_then(|n| n.parse().ok()));
-    let cap = rules.builds
-        && !rules.cap_raise
-        && !n
-            .and_then(|n| crate::gh::cached_title(ctx, fleet, n))
-            .is_some_and(|t| t.starts_with("cap:"));
     let dir = |p: &PathBuf| p.parent().unwrap_or(p).to_string_lossy().into_owned();
     let h = home();
     let mut paths = vec![
@@ -2270,7 +2248,6 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         own,
         groups: rules.groups,
         scratch: crate::config::env("DROVER_SCRATCH_TARGET").filter(|s| !s.is_empty()),
-        cap,
         design: (lane.split(':').nth(2) == Some("design")).then(|| crate::design::scope(ctx, r, &input, fleet, n)),
         hygiene: rules.hygiene,
     };

@@ -874,7 +874,6 @@ pub struct ConfigSheet {
     pub ask_minutes: u64,
     pub max_impl: Option<usize>,
     pub max_rev: Option<usize>,
-    pub line_cap: Option<i64>,
     pub serial: Vec<String>,
     pub deny: Vec<String>,
     pub required: Vec<String>,
