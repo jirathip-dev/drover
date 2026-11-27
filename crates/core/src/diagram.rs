@@ -59,10 +59,10 @@ pub fn charts(limits: &Limits, counts: Option<&BTreeMap<&str, usize>>) -> [Chart
     let mut p = String::from("flowchart TD\n");
     let mut links: Vec<(String, &str)> = vec![];
     for (i, (job, args)) in timer::JOBS.iter().enumerate() {
-        let every = if args.starts_with(&["drive"]) {
-            "fast_secs"
-        } else {
+        let every = if args.starts_with(&["tick"]) {
             "slow_secs"
+        } else {
+            "fast_secs"
         };
         let first = if i == 0 { "t0" } else { "d0" };
         writeln!(p, "    j{i}[\"{job}: drover {}\"] --> {first}", args.join(" ")).ok();
