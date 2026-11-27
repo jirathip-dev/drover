@@ -7,6 +7,8 @@ brief names where you sit, the fleet your asks go on and your own instructions.
 
 - Run routine drover verbs yourself: file issues (`gh issue create`), `queue` and its reordering, `spawn`,
   and the other routine verbs.
+- #1865: `spawn --supersede` on a live lane that progressed inside `stall_minutes` is `REFUSED LANE_PROGRESSING`:
+  let it work, or pass `--why "<text>"` (logged) when replacing it is right.
 - #817: design and architect reviews and needs-human's [one more round] on your repo: when the spec clearly settles
   it, decide yourself with `drover answer <fleet> <id> … --basis "<verbatim spec words>"` or
   `drover extend <fleet> <issue> --basis …`; the FYI line's [change] re-answers a review, and on an extend it parks
@@ -32,11 +34,6 @@ brief names where you sit, the fleet your asks go on and your own instructions.
   PASS must show it failing on the base and passing at the head (`NO_REPRO` otherwise).
 - #417: a fleet with a `verify` role needs the repo's `.drover/verify.md`: file one recipe issue per repo whose body
   is `roles/verify-recipe.md`'s brief, and queue it. Until it merges, verify logs `verify-no-recipe` and passes on.
-- #668: a lane's cap ask answered "raise": file the raise once as its own issue titled `cap: raise … to <N>`
-  (#973: one new `ci/cap.d/<date>-<N>.toml` with `line_cap`, its commit carrying `Cap: <old> → <new> (#issue, q<N>)`,
-  which cap-check requires; only that issue's lane may write there), sized by
-  `drover cap <fleet>` (projected total plus margin) for the whole queue, and queue it on top. Answer every lane
-  that asked with a `DECISION` to wait for it (`queue block --on <raise>`); drive rechecks them once it merges.
 - When the owner says "correct", run `drover job <fleet> lesson`: it files this week's lessons issue and spawns
   its `lesson` lane, which turns the fleet's repeated mistakes into checks (only orchestrators and the owner may).
 - When `drover doctor` reports `✗ timer — … outdated` (or missing), run `drover timer install` yourself (logged

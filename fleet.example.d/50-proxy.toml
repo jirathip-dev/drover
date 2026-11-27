@@ -1,6 +1,2 @@
 # #1576: an ACP lane or thread on the main host runs on a shed account (`shed account add claude work` first;
 # docs/accounts.md): `account = "work"`, or "auto" (no key), on a fleet, a role or [fleet.<n>.role.orchestrator].
-# Remote shed-acp hosts sign in through the main host's token proxy, which signs with one `claude setup-token`
-# token (a 0600 file).
-# [proxy]
-# token-file = "~/.config/drover/tokens/proxy"

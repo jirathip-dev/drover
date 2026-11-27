@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use std::io::Write;
 
-const LIMITS: [&str; 2] = ["ROUND_LIMIT", "UPDATE_LIMIT"];
+const LIMITS: [&str; 1] = ["STUCK"];
 
 fn log(pass: &Pass, s: &IssueState, kind: &str, d: serde_json::Value) -> Result<()> {
     let e = Event::new(pass.ctx().now, &s.fleet, Some(s.issue), kind, d).passive();
@@ -289,7 +289,7 @@ mod tests {
     #[test]
     fn with_no_orchestrator_thread_the_owner_gets_the_card_and_a_second_row_adds_to_it() {
         let fx = Fx::new("no-thread", false);
-        let at = fx.up(ROW, orch(), Some("ROUND_LIMIT"));
+        let at = fx.up(ROW, orch(), Some("STUCK"));
         let ask = fx.last("needs-decision");
         let id = ask.str("id").unwrap().to_string();
         assert_eq!(at, Level::Owner { card: id.clone() });

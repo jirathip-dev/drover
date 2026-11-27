@@ -10,11 +10,12 @@ Every fleet is driven by drover itself. `drover drive [fleet]` does one pass, fr
 | `verdict.md` written since the rev spawn, first line `PASS` or `FAIL`, rev spawned at the PR head | `verdict --sha <head>` |
 | the same, but the PR head moved since the rev spawn (its logged `sha`) | `spawn rev --supersede` at the new head (review) |
 | `ready`, CI green | `merge`; CI pending: wait |
-| `ready`, CI red | `verdict FAIL` at the same head (no new round), the failed check's log tail (secrets masked) as the finding (ci-red) |
+| `ready`, CI red | `verdict FAIL` at the same head (no new round), a `- blocking [ci] <check>` finding with the failed check's log tail (secrets masked) as its proof (ci-red) |
 | `fix(n)` after a FAIL | `spawn impl --supersede` (fix); the brief carries the findings verbatim |
-| `ready` or a pushed fix, PR `CONFLICTING` or `BEHIND` the integration branch | `spawn impl --supersede --update` (conflict): the brief says merge `origin/<integration>` (no rebase, no force-push), resolve keeping both sides, run the gates, push, report the resolved files; a fresh review follows; a PASS counts toward `update_rounds`, a FAIL as a normal round; past `update_rounds` it logs `needs-human UPDATE_LIMIT` |
-| `FAIL (form-only)`: every `blocking [<category>]` finding in `form_categories` | a fix round that doesn't count toward `review_rounds` (`fix(n·f)`); a blocker untagged or of another category: a plain FAIL (`form-only-rejected`); past `form_rounds` per issue they count (`form-rounds-exhausted`) |
-| FAIL in round `review_rounds` | `verdict` logs `needs-human` with the findings; drive stops |
+| `ready` or a pushed fix, PR `CONFLICTING` or `BEHIND` the integration branch | `spawn impl --supersede --update` (conflict): the brief says merge `origin/<integration>` (no rebase, no force-push), resolve keeping both sides, run the targeted tests, push, report the resolved files; a fresh review follows; a FAIL counts as a normal round; due again while the PR still conflicts after 2 update rounds in a row (each with its PASS), it logs `needs-human STUCK` (#1809) |
+| `FAIL (form-only)`: every `blocking [<category>]` finding in `form_categories` | a fix round that doesn't count in the round number (`fix(n·f)`); a blocker untagged or of another category: a plain FAIL (`form-only-rejected`); past `form_rounds` per issue they count (`form-rounds-exhausted`) |
+| a check's last 3 FAILs (3 heads, 2 fix rounds) block on the same `[category] file`, or CI is red at the same check for 2 fix rounds (#1809) | `verdict` logs one `needs-human STUCK` naming it, with the findings; drive stops. There is no round limit |
+| `merge` of a PR whose PASS verdicts at the head carry `- follow-up` lines (#1809) | each filed as its own issue (title, file:line, the PR and head), queued last, `follow-up-filed`; never twice for one finding at one head |
 | a lane killed | `spawn impl` (respawn) |
 | a live lane shed has said quiet for `stall_minutes` with no turn-end (#666, #1053) | `spawn <role> --supersede` once (respawn `lane stalled`); stalled again: `needs-human LANE_STALLED` with shed's note |
 | a live lane whose pane or session shows no output 10 min after its spawn | an ACP session gets its brief again once; then `spawn <role> --supersede` once (respawn `failed start`); then `needs-human START_FAILED` |
@@ -28,18 +29,16 @@ Every fleet is driven by drover itself. `drover drive [fleet]` does one pass, fr
 | a lane the hook refused twice (`hook-failed-closed`) since its spawn | its pane closed, `needs-human HOOK_REFUSED` with the refusal |
 | merged lanes left | `clean --yes` |
 
-**`needs-human` is the owner's** (#130). It pushes to phones (`#96 needs you: review rounds ran out (4/3)`,
+**`needs-human` is the owner's** (#130). It pushes to phones (`#96 needs you: stuck: the same blocking finding …`,
 then the last verdict's first finding), and the page shows a needs-you card for it on the Queue tab and in the
 Herd strip (the issue's horse, or a gate horse when it has no lane, wears a red `!`). A paired phone's buttons:
 
-- **merge anyway** (PASS at the PR head, CI green, mergeable; confirmed) runs
-  `drover merge <fleet> <issue> --owner-override`. The flag lifts **only** `ROUND_LIMIT`: an exact-head
-  PASS, green CI and the serial gate still apply. The `merged` event records `by: owner, override: "ROUND_LIMIT"`
-  and the closing comment says `Owner override: ROUND_LIMIT`.
-- **one more round** logs `round-extended` (this issue's limit is `review_rounds` + 1 per extension) and
+- **merge anyway** (PASS at the PR head, CI green, mergeable; confirmed) runs `drover merge <fleet> <issue>`:
+  every gate still applies (#1809: there is no round limit left to lift, so no `--owner-override`).
+- **one more round** logs `round-extended` (a stuck issue gets one more fix round; stuck again, a new card) and
   puts the issue back in its queue place as `queued` (#1058): the tap spawns nothing, drive starts it in turn
   with `impl --supersede`, and its Queue row reads `extended · waiting: <gate>` (`PAUSED`, `HOST_BUSY`, …) until
-  then. The card never comes back for a wait; a hard refusal of the start (`MERGED`, `UPDATE_LIMIT`, an error)
+  then. The card never comes back for a wait; a hard refusal of the start (`MERGED`, `STUCK`, an error)
   is a new `needs-human` naming the code. #817: an orchestrator grants it in its repo's thread with
   `drover extend <fleet> <issue> --typed "<owner line>"` (`by: owner (typed)`) or `--basis "<spec quote>"`
   (`by: orchestrator-<thread>`, an FYI line whose [change] parks the issue for 30 min).
@@ -49,8 +48,6 @@ Herd strip (the issue's horse, or a gate horse when it has no lane, wears a red 
   logs `unparked` with the state it goes back to: the state before the `needs-human` the park closed (normally
   `queued` or its round). Its queue place is kept; out of the queue it goes last; drive's next pass picks it up.
   Anything but a parked issue is `REFUSED NOT_PARKED`.
-
-This replaces raising `review_rounds` in fleet.toml, merging and restoring it by hand.
 
 Paused fleets are skipped (no pass, no `last pass`), but their live lanes still get delivery: the fast step runs their outbox lines from each host's report and retypes undelivered answers (#714); one fleet's error doesn't skip the others. drive never answers asks (a lane's question stays a needs-you card),
 never passes `--force`, and never bypasses a refusal: `REFUSED` (e.g. `HOST_BUSY`, `CAP`,
@@ -68,7 +65,7 @@ and the tick poll every host with no fresh word, then start each fleet's pass an
 loop per fleet instead, started at once by a wake. The tick's slow chores (disk budget, roots, offline hosts, orphans,
 repair, the runtime canary, stale panes, each fleet's closed issues, hotspots and backlog) run beside them. A spawn's admission places it first (host probes, no lock), then recounts that host's slots and takes its marker
 under the host's short `admit-<host>.lock` (#1583): two fleets' passes never both take a host's last slot, admissions
-on different hosts run at once, and a busy lock is waited for up to `[limits] admit_wait_secs` before `SPAWN_PENDING`. #1625: no in-process wait sits in front of it, so an admission whose pass hung or died holds a host's starts for at most the lock's 60 s; the next admission takes it over and logs `admission-dropped`. A fleet whose last pass is older than 2 × `pass_max_secs` + `fast_secs` gets its pass started as a process even when a service answers the wake, and `drover check` alerts `spawn-stuck` once when drive tried starts for an hour with no spawn while issues are startable. The board shows each fleet's
+on different hosts run at once, and a busy lock refuses `SPAWN_PENDING` at once. #1811: a start the host refuses (`HOST_BUSY`, `MEM_LOW`, `DISK_LOW`, `HOST_FULL`, `SPAWN_PENDING`) is skipped, never waited on, and the pass goes on; it waits its turn in one line per host: rounds of issues in flight (fix, update, review, verify) before first starts, then queue order, then the oldest refusal. A later start is refused `SPAWN_PENDING` (`waits its turn behind <fleet> #N`) while an earlier one waits for that host. No card or alert comes of the wait: the board and `waiting` show the refusal and `line K`. #1625: no in-process wait sits in front of it, so an admission whose pass hung or died holds a host's starts for at most the lock's 60 s; the next admission takes it over and logs `admission-dropped`. A fleet whose last pass is older than 2 × `pass_max_secs` + `fast_secs` gets its pass started as a process even when a service answers the wake, and `drover check` alerts `spawn-stuck` once when drive tried starts for an hour with no spawn while issues are startable. The board shows each fleet's
 `⟳ driving…` and its last pass's length.
 
 A fix lane may push back on a finding in its report with file:line proof; that is not a fix,

@@ -555,27 +555,6 @@ fn a_hold_never_routes_a_never_routed_command_or_an_unrouted_fleets() {
 }
 
 #[test]
-fn a_routed_fleets_gate_checks_go_to_the_build_machine_under_the_cargo_kind() {
-    let d = gated();
-    Command::new("git")
-        .args(["init", "-q"])
-        .current_dir(&d)
-        .status()
-        .unwrap();
-    let w = wrapped(&d, "just check");
-    assert!(
-        w.contains("'heavy' 'cargo'") && w.contains("'--remote' 'linux'") && w.ends_with("'--' 'just check'"),
-        "{w}"
-    );
-    let d = lane("");
-    assert_eq!(
-        hook(&d, "just check"),
-        "",
-        "an unrouted fleet's gate check is unchanged"
-    );
-}
-
-#[test]
 fn a_gatekeeper_check_never_goes_to_a_build_machine() {
     let d = gated();
     let gate = "./.gatekeeper/run check --gate core/fmt";
@@ -593,6 +572,24 @@ fn a_gatekeeper_check_never_goes_to_a_build_machine() {
         .unwrap();
     assert_eq!(st.code(), Some(6), "it ran here");
     assert!(!d.join("runners.log").exists(), "never sent to runners run");
+}
+
+#[test]
+fn a_just_check_never_goes_to_a_build_machine() {
+    let d = gated();
+    assert_eq!(hook(&d, "just check"), "", "the hook leaves it on the lane's host");
+    let path = fake_runners(&d, Some(0));
+    let just = d.join("bin/just");
+    std::fs::write(&just, "#!/bin/sh\npwd -P > just.log\nexit 6\n").unwrap();
+    Command::new("chmod").args(["755"]).arg(&just).status().unwrap();
+    let st = routed_hold(&d, &path, &["just", "check"]).status().unwrap();
+    assert_eq!(st.code(), Some(6), "it ran here");
+    assert!(!d.join("runners.log").exists(), "never sent to runners run");
+    let here = d.canonicalize().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(d.join("just.log")).unwrap().trim(),
+        here.to_str().unwrap()
+    );
 }
 
 fn cargo_routed() -> (PathBuf, String, String) {
@@ -732,4 +729,50 @@ fn a_routed_build_that_falls_back_says_why_and_logs_it() {
     assert_eq!(here[0].str("why"), Some("exit 75"));
     assert_eq!(here[0].str("cmd"), Some("cargo test -p x"));
     assert_eq!(here[0].str("kind"), Some("cargo"));
+}
+
+#[test]
+fn a_routed_kind_in_another_checkout_builds_that_checkout_here() {
+    let (d, top) = routed();
+    let other = tmpdir("heavy-other");
+    std::fs::write(other.join("test.sh"), "echo other > ran\n").unwrap();
+    let path = fake_runners(&d, Some(0));
+    let o = other.display();
+    for cmd in [
+        format!("cd {o} && sh test.sh a"),
+        format!("cd '{o}' && CARGO_TARGET_DIR=x sh test.sh a"),
+        format!(
+            "pushd {top}/../{} && sh test.sh a",
+            other.file_name().unwrap().to_str().unwrap()
+        ),
+        format!("sh {o}/test.sh -C {o}"),
+        format!("sh {o}/test.sh --manifest-path={o}/Cargo.toml"),
+    ] {
+        std::fs::remove_file(other.join("ran")).ok();
+        let w = wrapped(&d, &cmd);
+        assert!(
+            w.starts_with("echo 'heavy: another checkout in the line, running here' >&2; ") && !w.contains("--remote"),
+            "{cmd}: {w}"
+        );
+        let st = in_lane("bash", &d)
+            .env("PATH", &path)
+            .args(["-c", &w])
+            .status()
+            .unwrap();
+        assert!(st.success(), "{cmd}");
+        assert!(
+            other.join("ran").exists() || cmd.starts_with("sh "),
+            "{cmd}: built the other tree"
+        );
+    }
+    assert!(!d.join("runners.log").exists(), "never sent to the build machine");
+    std::fs::create_dir_all(d.join("sub")).unwrap();
+    for inside in [
+        "cd sub && sh test.sh a".to_string(),
+        format!("cd {top}/sub && sh test.sh a"),
+        "sh test.sh --manifest-path sub/Cargo.toml".to_string(),
+    ] {
+        let w = wrapped(&d, &inside);
+        assert!(w.contains("'--remote' 'linux'"), "{inside}: {w}");
+    }
 }

@@ -7,8 +7,6 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 
 | key | default | what it sets |
 | --- | --- | --- |
-| `review_rounds` | `3` | review rounds before an issue goes needs-human (ROUND_LIMIT) |
-| `update_rounds` | `3` | PASSed update rounds before `spawn --update` refuses UPDATE_LIMIT |
 | `stall_minutes` | `30` | a working lane with no event this long is stalled |
 | `silent_minutes` | `10` | an ACP lane's open turn with no session event this long is cancelled and nudged |
 | `ci_start_minutes` | `10` | a PR head with no checks this long after its push alerts `ci-missing` |
@@ -39,10 +37,11 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `import_max_age_hours` | `24` | a remote host's asks older than this are never imported |
 | `max_pushes_per_pass` | `3` | push alerts `check` sends a pass before a summary |
 | `max_parallel_spawns` | `6` | concurrent detached spawn kicks on the main host (0: in the pass) |
+| `max_in_flight_total` | `6` | PRs in flight across every fleet before a first start is refused `IN_FLIGHT_CAP` (0: off) |
+| `fleet_priority` | `[]` | fleets in the order a freed `max_in_flight_total` slot goes to, oldest queue entry first; unlisted fleets after |
 | `start_max` | `2` | lanes starting at once on a remote host that sets no `start_max` |
 | `start_release` | `"started"` | a start frees its slot once its harness is up (`started`) or its prompt is confirmed (`confirmed`) |
 | `spawn_pending_max_secs` | `300` | a spawn marker older than this is stale |
-| `admit_wait_secs` | `5` | a spawn's admission waits this long for another admission on its host before `SPAWN_PENDING` |
 | `acp_start_minutes` | `3` | an ACP lane with no event back this long after its first turn is a failed start |
 | `webhook_poll_minutes` | `10` | with GitHub webhooks on, the fast step re-reads PRs only this often |
 | `keychain_readers` | `3` | more Keychain readers up over 60 s alert `keychain-jammed` |
@@ -54,6 +53,7 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `runtime_down_failures` | `5` | lanes on one host failing to start or ending without a push in the window before drive trips `runtime-down` there |
 | `runtime_down_minutes` | `30` | the window `runtime_down_failures` counts in |
 | `pass_max_secs` | `60` | a fleet's pass ends itself here, `pass-slow` naming its step; a lock held past 2 × it logs `pass-stuck` and is taken over |
+| `fetch_fresh_secs` | `30` | a fleet clone's fetch of refspecs fetched this recently, their refs there, is skipped; a fetch waiting on the clone's lock gets the one before it |
 | `ssh_connect_secs` | `10` | every host ssh's `-oConnectTimeout`; the whole `ssh <host> true` probe's retry and `hosts refresh`'s probe |
 | `ssh_quick_secs` | `5` | a maintenance ssh's connect timeout and the `ssh <host> true` probe's; the whole first probe |
 | `ssh_call_secs` | `20` | a remote call in a pass is killed after this long |
@@ -71,8 +71,6 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `notify_secs` | `15` | a notifier command or web push send is killed after this long |
 | `gate_check_minutes` | `30` | a premerge or gate check (a build or test run) is killed after this long |
 | `shed_read_millis` | `300` | how long drive's intake waits for shed's state changes |
-| `proxy_connect_secs` | `1` | the token proxy's liveness connect timeout |
-| `proxy_retry_secs` | `300` | a proxy lane's sign-out holds its host only if no call gets through the token proxy this long after it |
 | `service_call_secs` | `2` | a call to the running service's socket times out after this long |
 | `disk_probe_secs` | `2` | a folder listing slower than this on a host over `min_cpu_idle` marks its disk as not answering |
 | `disk_hung_secs` | `6` | under `min_cpu_idle` a call waits this long for a slow folder listing, then the disk is not answering |

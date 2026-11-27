@@ -22,8 +22,6 @@ pub struct Policy {
     pub groups: Vec<String>,
     /// The lane's `DROVER_SCRATCH_TARGET` (`<build_root>/.scratch/<agent>`): Cargo and Swift build only under its `build_root`.
     pub scratch: Option<String>,
-    /// An impl lane: `ci/cap.toml` is not its to write (but for the orchestrator-filed raise).
-    pub cap: bool,
     /// A design lane: its edits land only under its issue's design paths.
     pub design: Option<Design>,
     /// A public fleet's text check (`PUBLIC_LEAK`); none for a private repo.
@@ -50,9 +48,6 @@ pub struct Rules {
     /// Its fleet's heavy kinds under its host's slot limits (none: no heavy patterns).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub heavy: Option<crate::heavy::Heavy>,
-    /// A `cap:` issue's lane, frozen at spawn from the main host's title cache.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub cap_raise: bool,
     /// A public fleet's text check, resolved where a runner can read the repo's visibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hygiene: Option<crate::hygiene::Check>,
@@ -80,7 +75,6 @@ impl Rules {
             groups: cfg.orchestrator.groups().into_iter().map(String::from).collect(),
             reviewer: family == Some("rev") || role == "triage",
             builds: !matches!(role, "lesson" | "triage") && family == Some("impl"),
-            cap_raise: false,
             hygiene: None,
         }
     }
@@ -113,17 +107,11 @@ pub fn lane_rules(ctx: &crate::Ctx, lane: &str) -> Result<Rules, String> {
 /// Lane spawn `sp` froze rules (a remote lane's) that fleet.toml now resolves otherwise: a respawn takes them.
 pub fn rules_stale(cfg: &Config, fleet: &str, sp: &crate::events::Event) -> bool {
     let (role, host) = (sp.str("role").unwrap_or_default(), sp.str("host").unwrap_or_default());
-    let cap_raise = sp
-        .data
-        .get("rules")
-        .and_then(|r| r.get("cap_raise"))
-        .and_then(serde_json::Value::as_bool);
     let hygiene = sp
         .data
         .get("rules")
         .and_then(|r| serde_json::from_value(r.get("hygiene")?.clone()).ok());
     let now = Rules {
-        cap_raise: cap_raise.unwrap_or_default(),
         hygiene,
         ..Rules::resolve(cfg, fleet, role, host)
     };
@@ -144,16 +132,6 @@ const GIT_WRITES: &[&str] = &[
 const WRITERS: &[&str] = &[
     "rm", "mv", "cp", "tee", "truncate", "chmod", "ln", "install", "dd", "sips",
 ];
-
-/// The repo's line cap file and its folder of raises; one orchestrator-filed issue raises it for the queue.
-pub const CAP_PATHS: &[&str; 2] = &["ci/cap.toml", "ci/cap.d/"];
-pub const NO_CAP_EDIT: &str =
-    "REFUSED CAP_FILE: a lane never edits ci/cap.toml or ci/cap.d/; when your PR would cross \
-                               the cap, run `drover cap <fleet>` and ask with its view (#668)";
-
-fn cap_path(w: &str) -> bool {
-    w.ends_with(CAP_PATHS[0]) || w.contains(CAP_PATHS[1])
-}
 
 /// Lanes share one user, so a pattern kill reaches every lane (BSD `pkill x -n` matched them all).
 pub const NO_BROAD_KILL: &str = "REFUSED NO_BROAD_KILL: lanes stop only their own processes: start with \
@@ -226,9 +204,6 @@ pub fn decide(input: &Value, p: &Policy, git: &dyn Fn(&str, &[&str]) -> Option<S
         .iter()
         .find_map(|k| ti[k].as_str())
         .unwrap_or_default();
-    if p.cap && CAP_PATHS.iter().any(|c| file.contains(c)) {
-        return Some(NO_CAP_EDIT.into());
-    }
     if let Some(pp) = protected_path(file, p).filter(|_| !own_file(file, p)) {
         return Some(format!(
             "{file} is protected ({pp}); change it only through `drover` (e.g. `drover set`)"
@@ -376,10 +351,6 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         let writer = !drover
             && (w.iter().any(|w| WRITERS.contains(w))
                 || (w.iter().any(|w| *w == "sed" || *w == "perl") && w.iter().any(|w| w.starts_with("-i"))));
-        let cap = |w: &String| cap_path(w);
-        if p.cap && (targets.iter().any(cap) || writer && toks.iter().any(cap)) {
-            return Some(NO_CAP_EDIT.into());
-        }
         let paths = |w: &str| -> Vec<String> {
             (w.split(['=', '>']))
                 .flat_map(|w| match w.strip_prefix('-') {
@@ -868,11 +839,6 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     }
     if r.first() == Some(&"setup") {
         return Some("REFUSED OWNER_ONLY: only the owner runs `drover setup`, never a lane (#303)".into());
-    }
-    if r.first() == Some(&"proxy") || r.first() == Some(&"hosts") && r.contains(&"revoke") {
-        return Some(
-            "REFUSED OWNER_ONLY: only the owner runs the token proxy or revokes its keys, never a lane (#637)".into(),
-        );
     }
     if !orchestrator && r.first() == Some(&"spawn") && r.contains(&"--force") {
         return Some(

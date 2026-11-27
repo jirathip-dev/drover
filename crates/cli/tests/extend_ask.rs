@@ -111,7 +111,7 @@ fn one_more_round_on_a_blocked_lanes_ask_closes_it_and_gives_the_lane_its_round(
     assert_eq!(card(&s, &c, &cookie), None, "the card is gone");
     assert_eq!(kinds(&c, "round-extended"), 1, "the lane gets its round");
     let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
-    assert_eq!((st.extra, st.state.as_str()), (1, "fix(2)"));
+    assert_eq!(st.state, "fix(2)");
 }
 
 #[test]

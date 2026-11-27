@@ -425,9 +425,40 @@ fn gatekept(name: &str, code: i32) -> (Repo, drover::Ctx, FakeShed, PathBuf) {
     (repo, c, sh, bin)
 }
 
+fn set_checks(c: &drover::Ctx, checks: &str) {
+    let cfg = std::fs::read_to_string(&c.config).unwrap().replace(
+        "integration = \"staging\"",
+        &format!("integration = \"staging\"\n{checks}"),
+    );
+    std::fs::write(&c.config, cfg).unwrap();
+}
+
+const FULL: &str = "done_checks = [\"./.gatekeeper/run check\"]";
+
 #[test]
-fn a_gatekeeper_wrapper_replaces_the_default_checks() {
+fn a_gatekeeper_repo_with_no_done_checks_runs_only_the_light_checks() {
+    let (repo, c, _sh, bin) = gatekept("done-gk-light", 1);
+    let f = fake(&repo.head);
+    let (code, out) = run(&c, &ui(Git::new(&f), &bin, false), &["turn", "done"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        !repo.wt.join(".gatekeeper/ran.log").exists(),
+        "the full gatekeeper check never runs at done"
+    );
+    let wt = repo.wt.canonicalize().unwrap();
+    let ran = std::fs::read_to_string(bin.join("ran.log")).unwrap();
+    let want = format!(
+        "drover arch-check {}\ncargo fmt --check {}\n",
+        wt.display(),
+        wt.display()
+    );
+    assert_eq!(ran, want);
+}
+
+#[test]
+fn a_fleets_explicit_gatekeeper_check_still_runs_the_full_set() {
     let (repo, c, _sh, bin) = gatekept("done-gk-clean", 0);
+    set_checks(&c, FULL);
     let f = fake(&repo.head);
     let (code, out) = run(&c, &ui(Git::new(&f), &bin, false), &["turn", "done"]);
     assert_eq!(code, 0, "{out}");
@@ -495,7 +526,7 @@ fn a_remote_lane_with_no_fleet_config_passes_done_with_the_names_on_stdin_only()
     let (c, _sh) = lane(&repo);
     let cfg = std::fs::read_to_string(&c.config).unwrap().replace(
         "integration = \"staging\"",
-        "integration = \"staging\"\nprivate_names = [\"quillmoor\", \"north-pier\"]",
+        "integration = \"staging\"\nprivate_names = [\"quillmoor\", \"north-pier\"]\ndone_checks = [\"./.gatekeeper/run check\"]",
     );
     std::fs::write(&c.config, cfg).unwrap();
     let sp = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12",
@@ -553,6 +584,7 @@ fn a_remote_lane_with_no_fleet_config_passes_done_with_the_names_on_stdin_only()
 #[test]
 fn a_failing_gatekeeper_run_is_refused_with_its_failing_gates() {
     let (repo, c, _sh, bin) = gatekept("done-gk-fail", 1);
+    set_checks(&c, FULL);
     let f = fake(&repo.head);
     let (out, _) = refused(&c, &ui(Git::new(&f), &bin, false), "DONE_CHECK");
     assert!(out.contains("`./.gatekeeper/run check` failed (exit 1):"), "{out}");
@@ -813,7 +845,7 @@ fn a_routed_fleets_done_checks_route_the_same_way_but_never_routed_ones() {
 #[test]
 fn a_routed_fleets_gatekeeper_done_check_runs_in_the_lanes_git_tree() {
     for (code, name) in [(0, "done-gk-here"), (2, "done-gk-here-fail")] {
-        let (repo, c, f, bin) = routed_done(name, 0, "");
+        let (repo, c, f, bin) = routed_done(name, 0, FULL);
         tool(&repo.wt.join(".gatekeeper"), "run", code, "FAIL gate-3: needs git");
         let r = ui(Git::new(&f), &bin, false);
         if code == 0 {
@@ -832,4 +864,121 @@ fn a_routed_fleets_gatekeeper_done_check_runs_in_the_lanes_git_tree() {
         let want = format!("run check --pr-body target/gatekeeper/pr-body.md {}\n", wt.display());
         assert_eq!(ran, want);
     }
+}
+
+#[test]
+fn a_routed_fleets_just_check_reaching_gatekeeper_runs_in_the_lanes_git_tree() {
+    for (code, name) in [(0, "done-just-here"), (2, "done-just-here-fail")] {
+        let (repo, c, f, bin) = routed_done(name, 0, "done_checks = [\"just check\"]");
+        std::fs::write(repo.wt.join("justfile"), "check:\n    ./.gatekeeper/run check\n").unwrap();
+        tool(&repo.wt.join(".gatekeeper"), "run", code, "FAIL gate-3: needs git");
+        std::fs::write(bin.join("just"), "#!/bin/sh\nexec ./.gatekeeper/run \"$@\"\n").unwrap();
+        let mut p = std::fs::metadata(bin.join("just")).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut p, 0o755);
+        std::fs::set_permissions(bin.join("just"), p).unwrap();
+        let r = ui(Git::new(&f), &bin, false);
+        if code == 0 {
+            let (code, out) = run(&c, &r, &["turn", "done"]);
+            assert_eq!(code, 0, "{out}");
+        } else {
+            let (out, _) = refused(&c, &r, "DONE_CHECK");
+            assert!(
+                out.contains("`just check` failed (exit 2):\nFAIL gate-3: needs git"),
+                "{out}"
+            );
+        }
+        assert!(!bin.join("ran.log").exists(), "never sent to runners run");
+        let wt = repo.wt.canonicalize().unwrap();
+        assert!(wt.join(".git").exists());
+        let ran = std::fs::read_to_string(repo.wt.join(".gatekeeper/ran.log")).unwrap();
+        assert_eq!(ran, format!("run check {}\n", wt.display()));
+    }
+}
+
+#[test]
+fn a_heavy_done_check_waits_for_a_free_slot_and_runs_in_it() {
+    let (repo, mut c, _sh, bin) = ui_lane("done-heavy", None);
+    let cfg = std::fs::read_to_string(&c.config).unwrap().replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\ndone_checks = [\"sh build.sh\"]",
+    );
+    let cfg = cfg + "\n[fleet.sendmeter.heavy]\nbuild = [\"sh build.sh*\"]\n\n[hosts.mini]\nheavy_max = 1\n";
+    std::fs::write(&c.config, cfg).unwrap();
+    let (log, go) = (repo.dir.join("order.log"), repo.dir.join("go"));
+    std::fs::write(repo.wt.join("build.sh"), format!("echo check >> '{}'\n", log.display())).unwrap();
+    let exe = bin.join("drover-env");
+    let env = format!(
+        "#!/bin/sh\nexport FLEET_CONFIG='{}' FLEET_STATE='{}' DROVER_HOME='{}'\nexec '{}' \"$@\"\n",
+        c.config.display(),
+        c.state.display(),
+        repo.dir.join("home").display(),
+        env!("CARGO_BIN_EXE_drover")
+    );
+    std::fs::write(&exe, env).unwrap();
+    std::fs::set_permissions(&exe, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    c.exe = exe.to_string_lossy().into();
+    let slots = c.state.with_file_name("heavy");
+    let tickets = {
+        let slots = slots.clone();
+        move || {
+            drover::heavy::line(&slots)
+                .into_iter()
+                .map(|(_, t)| t)
+                .collect::<Vec<_>>()
+        }
+    };
+    let until = |what: &str, ok: &dyn Fn() -> bool| {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !ok() {
+            assert!(std::time::Instant::now() < end, "timed out waiting for {what}");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    };
+    let held = format!(
+        "for i in $(seq 400); do [ -f '{}' ] && break; sleep 0.05; done; echo held >> '{}'",
+        go.display(),
+        log.display()
+    );
+    let hold_slots = slots.clone();
+    let holder = std::thread::spawn(move || {
+        let me = drover::heavy::Ticket::new("holder".into(), "build".into(), held, None);
+        drover::heavy::run(&drover::runner::Real, &hold_slots, me, 1, 30, &|| None, |_, _| None).unwrap()
+    });
+    until("the holder's slot", &|| tickets().iter().any(|t| t.running));
+    let waiting = tickets.clone();
+    let (wlog, wgo) = (log.clone(), go.clone());
+    let watcher = std::thread::spawn(move || {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let queued = loop {
+            let t = waiting();
+            if let Some(q) = t.iter().find(|t| t.lane != "holder") {
+                break Some(q.clone());
+            }
+            if std::time::Instant::now() > end {
+                break None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let before = std::fs::read_to_string(&wlog).unwrap_or_default();
+        std::fs::write(&wgo, "").unwrap();
+        (queued, before)
+    });
+    let f = fake(&repo.head);
+    let (code, out) = run(&c, &ui(Git::new(&f), &bin, false), &["turn", "done"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(holder.join().unwrap(), 0);
+    let (queued, before) = watcher.join().unwrap();
+    let q = queued.expect("the done check queued for a heavy slot");
+    assert_eq!(
+        (q.kind.as_str(), q.cmd.as_str(), q.running),
+        ("build", "sh build.sh", false)
+    );
+    assert_eq!(before, "", "the check ran while the only slot was held");
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), "held\ncheck\n");
+    assert!(tickets().is_empty(), "{:?}", tickets());
+    assert_eq!(
+        kinds(&c, "turn-end").pop().unwrap().str("sha"),
+        Some(repo.head.as_str())
+    );
 }

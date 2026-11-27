@@ -47,7 +47,7 @@ The diet builds one check, the keep job. The rest is gatekeeper's, read from its
 | A diet slice | delete, merge and move tests; commit the ceiling file gatekeeper's `baseline` command writes; move a slow test's full size to a soak target | count test lines itself; edit or remove a ceiling file; add a test to gatekeeper's slow list; raise anything |
 | The keep job | run the suite with coverage at the base and the head; read the PR body | block a PR that removes no test; judge the ratio or the total coverage (gatekeeper's) |
 | gatekeeper's adoption issue for drover | write the first ceiling, the slow list, the `soak` key, the nightly gate | wait for the diet, or be waited for by any slice but the close |
-| `drover cap`, the queue-wide view | stay as it is: the src cap only | |
+| the removed cap view (#1812), the queue-wide view | stay as it is: the src cap only | |
 
 The diet adds no state to drover: no event, no config key, no cache.
 

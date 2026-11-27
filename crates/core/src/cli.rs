@@ -82,15 +82,9 @@ enum Cmd {
     #[command(
         about = "Merge the issue's PR into the integration branch if every gate passes; writes the one closing comment, closes the issue"
     )]
-    Merge {
-        fleet: String,
-        issue: u64,
-        #[arg(help = "Owner only: merge past ROUND_LIMIT (never past PASS, CI or serial); logged `by: owner`")]
-        #[arg(long)]
-        owner_override: bool,
-    },
+    Merge { fleet: String, issue: u64 },
     #[command(
-        about = "Owner only: one more round for a needs-human issue (its card's [one more round]): an update round on an UPDATE_LIMIT card, else a review round; logs `round-extended`"
+        about = "Owner only: one more round for a needs-human issue (its card's [one more round]): an update round on a stuck update's card, else a review round; logs `round-extended`"
     )]
     Extend {
         fleet: String,
@@ -305,10 +299,6 @@ enum Cmd {
         json: bool,
     },
     #[command(
-        about = "#668: the queue-wide line-cap view: total, cap and headroom at integration, each open PR's `src/ net`, the queued issues with no PR, the projected total and the one raise to ask for; `cap log`: every past cap change from git"
-    )]
-    Cap { fleet: String },
-    #[command(
         about = "#889: files 5+ merged PRs touched in 14 days; opens or updates the week's issue, queued `--architect`"
     )]
     Hotspots { fleet: Option<String> },
@@ -381,11 +371,6 @@ enum Cmd {
         cmd: Option<HostsCmd>,
     },
     #[command(
-        about = "Owner only: the token proxy remote ACP lanes' model calls go through, on `[proxy] port` (#637, docs/hosts.md)"
-    )]
-    #[command(hide = true)]
-    Proxy,
-    #[command(
         about = "Phone page (PWA): queue, lanes, host, events; buttons for queue order, pause/resume, role model/effort"
     )]
     Serve {
@@ -427,16 +412,6 @@ enum Cmd {
         #[arg(help = "The triggering event's id: the same id is driven once")]
         #[arg(long)]
         id: Option<String>,
-    },
-    #[command(
-        about = "CI: lines of the `count` globs (less `exclude`) in --config, default src/**/*.rs, against its `line_cap` or a higher one in cap.d/; exit 1 over it"
-    )]
-    #[command(hide = true)]
-    CapCheck {
-        #[arg(long)]
-        config: std::path::PathBuf,
-        #[arg(long)]
-        base: Option<String>,
     },
     #[command(about = "CI (#734): the layers, bans and size limits in --config; exit 1 on a violation")]
     #[command(hide = true)]
@@ -499,14 +474,11 @@ enum Cmd {
     )]
     Service {
         #[arg(help = "API v1 listen address (remote lanes reach it over the tailnet)")]
-        #[arg(long, default_value = "127.0.0.1:7778")]
+        #[arg(long, default_value = crate::timer::API)]
         api: String,
         #[arg(help = "Also serve the board here (the `serve` job's address)")]
         #[arg(long)]
         board: Option<String>,
-        #[arg(help = "Write its launchd/systemd unit and print the commands that load it; loads nothing")]
-        #[arg(long)]
-        install: bool,
     },
     #[command(
         about = "Alert once per state on stall, lane-dead, ready-unmerged, ci-missing, ask-waiting, orphan-lane, outbox-stale; idempotent, safe from cron"
@@ -542,8 +514,11 @@ enum Cmd {
         #[arg(help = "With --yes, remove the orphans too: folders under the worktree root no fleet owns")]
         #[arg(long)]
         orphans: bool,
+        #[arg(help = "List each lane and wip branch, not one summary line per host")]
+        #[arg(long)]
+        verbose: bool,
         #[arg(help = "The daily job (#557): merged/closed lanes idle 3+ days, at most 10")]
-        #[arg(long, hide = true, conflicts_with_all = ["fleet", "lane", "yes", "orphans"])]
+        #[arg(long, hide = true, conflicts_with_all = ["fleet", "lane", "yes", "orphans", "verbose"])]
         scheduled: bool,
     },
     #[command(
@@ -973,19 +948,6 @@ enum HostsCmd {
         about = "Empty a root (default the host's first): new lanes skip it, its lanes are saved and restarted on the next root"
     )]
     Eject { name: String, root: Option<String> },
-    #[command(
-        about = "The token proxy's per-lane keys (#637): id, state, lane, host; `revoke <id>` (owner only) ends one at once"
-    )]
-    Keys {
-        #[command(subcommand)]
-        cmd: Option<KeysCmd>,
-    },
-}
-
-#[derive(Subcommand)]
-enum KeysCmd {
-    #[command(about = "Owner only: this key stops signing at once; logs `proxy-key-revoked`")]
-    Revoke { id: String },
 }
 
 #[derive(Subcommand)]
@@ -1108,7 +1070,7 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             | Cmd::Help { .. }
     ) || matches!(
         cli.cmd,
-        Cmd::CapCheck { .. } | Cmd::ArchCheck { .. } | Cmd::LessonCheck { .. } | Cmd::PrBody { .. }
+        Cmd::ArchCheck { .. } | Cmd::LessonCheck { .. } | Cmd::PrBody { .. }
     );
     if !quiet && args.first().is_some_and(|a| a.ends_with("herdsman")) {
         crate::stderr!("herdsman is now drover: the old name works for one more release");
@@ -1227,8 +1189,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         } => crate::config::show_md(out)?,
         Cmd::Diagram { live, fleet } => crate::diagram::run(ctx, live, fleet.as_deref(), out)?,
         Cmd::Flow(a) => crate::flow::shadow::cli(ctx, a, out)?,
-        Cmd::CapCheck { config, base } => return crate::overlap::cap_check(r, &config, base.as_deref(), out),
-        Cmd::Cap { fleet } if fleet == "log" => return crate::overlap::cap_log(r, std::path::Path::new("."), out),
         Cmd::ArchCheck {
             config,
             write_baseline,
@@ -1284,8 +1244,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 let look = crate::snapshot::Snap::read(ctx, &spared);
                 let (at, slots) = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
                 let skip = |s: &crate::events::IssueState| {
-                    let f = cfg.as_ref().and_then(|c| c.fleet.get(&s.fleet));
-                    let skip = queue::skipped(&events, &all, f, &s.fleet, (s.issue, ctx), &slots);
+                    let skip = queue::skipped(&events, &all, cfg.as_ref(), &s.fleet, (s.issue, ctx), &slots);
                     skip.map(|s| format!("skipped this pass: {}", s.1))
                 };
                 let skips: Vec<_> = rows.iter().map(|s| skip(s)).collect();
@@ -1550,12 +1509,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 crate::providers::get(h).sync(ctx, &role, &role, &p, &usage_doc(), out)?;
             }
         }
-        Cmd::Service {
-            api,
-            board,
-            install: true,
-        } => crate::timer::service_unit(ctx, r, out, &api, board.as_deref())?,
-        Cmd::Service { api, board, .. } => (crate::SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
+        Cmd::Service { api, board } => (crate::SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
         Cmd::Chat { thread } => anyhow::ensure!(crate::app(ctx, r, &crate::Open::Threads(thread))?, "needs a terminal"),
         cmd => {
             let cfg = match cmd {
@@ -1754,7 +1708,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 } => crate::rename::run(ctx, r, out, (&old, &new), yes)?,
                 Cmd::Wip {
                     cmd: WipCmd::Prune { fleet, dry_run },
-                } => check::prune(ctx, &cfg, r, out, &fleet, dry_run)?,
+                } => check::prune(ctx, &cfg, r, out, &fleet, (dry_run, true))?,
                 Cmd::Secret { cmd } => match cmd {
                     SecretCmd::Request { thread, name, why } => {
                         crate::secret::request(ctx, &cfg, &thread, &name, &why)?;
@@ -1795,12 +1749,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     Some(HostsCmd::Eject { name, root }) => {
                         return crate::roots::eject(ctx, &cfg, r, out, &name, root.as_deref());
                     }
-                    Some(HostsCmd::Keys { cmd: None }) => crate::proxy::list(ctx, out)?,
-                    Some(HostsCmd::Keys {
-                        cmd: Some(KeysCmd::Revoke { id }),
-                    }) => crate::proxy::revoke(ctx, &cfg, &id, out)?,
                 },
-                Cmd::Proxy => crate::proxy::serve(ctx, &cfg, r)?,
                 Cmd::SelfUpdate { dry_run, pause, resume } => {
                     return crate::update::self_update(ctx, &cfg, r, out, (dry_run, pause, resume));
                 }
@@ -1847,7 +1796,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             }
                             None => match crate::drive::retrying(ctx, &events, &s.fleet, s.issue)
                                 .map(|w| (String::new(), w))
-                                .or_else(|| queue::skipped(&events, &st, Some(f), &s.fleet, (s.issue, ctx), &slots))
+                                .or_else(|| queue::skipped(&events, &st, Some(&cfg), &s.fleet, (s.issue, ctx), &slots))
                             {
                                 Some((_, why)) => ("drive", format!("next in the queue, held back: {why}{note}")),
                                 None => ("drive", format!("next in the queue: drive starts it{note}")),
@@ -1932,19 +1881,20 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     lane,
                     yes,
                     orphans,
+                    verbose,
                     scheduled,
                 } => {
                     if scheduled {
                         return check::scheduled(ctx, &cfg, r, out).map(|()| 0);
                     }
-                    let what = (None, lane.as_deref(), false, !crate::drive::in_act());
+                    let what = (None, lane.as_deref(), false, !crate::drive::in_act(), orphans, verbose);
                     check::clean_all(ctx, &cfg, r, out, fleet.as_deref(), what, yes)?;
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
                         check::strays(ctx, &cfg, out, yes).and_then(|()| check::secrets_files(ctx, out, yes))?;
                         check::remote_orphans(&cfg, r, out, (orphans && yes, yes))?;
                         for f in cfg.fleet.keys().filter(|f| fleet.as_ref().is_none_or(|x| x == *f)) {
-                            if let Err(e) = check::prune(ctx, &cfg, r, out, f, !yes) {
+                            if let Err(e) = check::prune(ctx, &cfg, r, out, f, (!yes, verbose)) {
                                 writeln!(out, "{f}: wip prune failed: {e:#}")?;
                             }
                         }
@@ -1965,11 +1915,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     let id = format!("{sha}-{verdict}");
                     let _ = crate::drive::kick_once(ctx, r, (&fleet, issue), "verdict", Some(&id));
                 }
-                Cmd::Merge {
-                    fleet,
-                    issue,
-                    owner_override: o,
-                } => gate::merge(ctx, &cfg, r, out, &fleet, issue, o)?,
+                Cmd::Merge { fleet, issue } => gate::merge(ctx, &cfg, r, out, &fleet, issue)?,
                 Cmd::Extend {
                     fleet,
                     issue,
@@ -2065,7 +2011,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         return Ok(1);
                     }
                 }
-                Cmd::Cap { fleet } => return crate::overlap::cap_view(ctx, &cfg, r, &fleet, out),
                 Cmd::Hotspots { fleet } => {
                     for name in fleet.map_or_else(|| cfg.fleet.keys().cloned().collect(), |f| vec![f]) {
                         crate::hotspots::run(ctx, &cfg, r, out, &name)?;
@@ -2259,11 +2204,6 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     };
     let mut it = lane.split(':');
     let (fleet, n) = (it.next().unwrap_or_default(), it.next().and_then(|n| n.parse().ok()));
-    let cap = rules.builds
-        && !rules.cap_raise
-        && !n
-            .and_then(|n| crate::gh::cached_title(ctx, fleet, n))
-            .is_some_and(|t| t.starts_with("cap:"));
     let dir = |p: &PathBuf| p.parent().unwrap_or(p).to_string_lossy().into_owned();
     let h = home();
     let mut paths = vec![
@@ -2293,7 +2233,6 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         own,
         groups: rules.groups,
         scratch: crate::config::env("DROVER_SCRATCH_TARGET").filter(|s| !s.is_empty()),
-        cap,
         design: (lane.split(':').nth(2) == Some("design")).then(|| crate::design::scope(ctx, r, &input, fleet, n)),
         hygiene: rules.hygiene,
     };

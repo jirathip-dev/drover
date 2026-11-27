@@ -1,13 +1,5 @@
 /// Every `[limits]` key and what it sets, in docs/config/limits.md's order; `drover config show` prints them.
 pub const LIMIT_DOCS: &[(&str, &str)] = &[
-    (
-        "review_rounds",
-        "review rounds before an issue goes needs-human (ROUND_LIMIT)",
-    ),
-    (
-        "update_rounds",
-        "PASSed update rounds before `spawn --update` refuses UPDATE_LIMIT",
-    ),
     ("stall_minutes", "a working lane with no event this long is stalled"),
     (
         "silent_minutes",
@@ -108,6 +100,14 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "concurrent detached spawn kicks on the main host (0: in the pass)",
     ),
     (
+        "max_in_flight_total",
+        "PRs in flight across every fleet before a first start is refused `IN_FLIGHT_CAP` (0: off)",
+    ),
+    (
+        "fleet_priority",
+        "fleets in the order a freed `max_in_flight_total` slot goes to, oldest queue entry first; unlisted fleets after",
+    ),
+    (
         "start_max",
         "lanes starting at once on a remote host that sets no `start_max`",
     ),
@@ -118,10 +118,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "spawn_pending_max_secs",
         "a spawn marker older than this is stale",
-    ),
-    (
-        "admit_wait_secs",
-        "a spawn's admission waits this long for another admission on its host before `SPAWN_PENDING`",
     ),
     (
         "acp_start_minutes",
@@ -163,6 +159,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "pass_max_secs",
         "a fleet's pass ends itself here, `pass-slow` naming its step; a lock held past 2 × it logs `pass-stuck` and is taken over",
+    ),
+    (
+        "fetch_fresh_secs",
+        "a fleet clone's fetch of refspecs fetched this recently, their refs there, is skipped; a fetch waiting on the clone's lock gets the one before it",
     ),
     (
         "ssh_connect_secs",
@@ -207,11 +207,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "shed_read_millis",
         "how long drive's intake waits for shed's state changes",
-    ),
-    ("proxy_connect_secs", "the token proxy's liveness connect timeout"),
-    (
-        "proxy_retry_secs",
-        "a proxy lane's sign-out holds its host only if no call gets through the token proxy this long after it",
     ),
     (
         "service_call_secs",

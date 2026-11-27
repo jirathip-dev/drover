@@ -180,6 +180,45 @@ fn a_hung_pass_ends_itself_at_pass_max_secs_and_names_its_step() {
 }
 
 #[test]
+fn a_hung_kick_ends_itself_at_pass_max_secs_and_logs_pass_slow() {
+    let d = tmpdir("loops-kick-deadline");
+    let c = ctx(&d, &CONFIG.replace("[limits]\n", "[limits]\npass_max_secs = 1\n"));
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    let _sh = FakeShed::attached(&c);
+    let d12 = serde_json::json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "branch": "issue-12"});
+    drover::events::append(&c.state, &Event::new(c.now - 60, "sendmeter", Some(12), "spawn", d12)).unwrap();
+    let bin = d.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let gh = bin.join("gh");
+    std::fs::write(&gh, "#!/bin/sh\nexec sleep 5\n").unwrap();
+    std::fs::set_permissions(&gh, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let home = c.state.parent().unwrap().parent().unwrap();
+    let t = Instant::now();
+    let st = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
+        .args(["kick", "sendmeter", "12", "--why", "test", "--now"])
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("HOME", home)
+        .env("DROVER_HOME", home)
+        .env("FLEET_CONFIG", &c.config)
+        .env("FLEET_STATE", &c.state)
+        .env("FLEET_WORKTREES", &c.worktrees)
+        .output()
+        .unwrap();
+    let secs = t.elapsed().as_secs_f64();
+    let said = String::from_utf8_lossy(&st.stdout).into_owned() + &String::from_utf8_lossy(&st.stderr);
+    assert_eq!(
+        st.status.code(),
+        Some(124),
+        "ended by its deadline after {secs:.1} s: {said}"
+    );
+    assert!(secs < 4.0, "the kick ran {secs:.1} s past a 1 s limit");
+    let ev = read(&c.state).unwrap();
+    let slow = ev.iter().find(|e| e.kind == "pass-slow").expect("pass-slow logged");
+    assert_eq!((slow.fleet.as_str(), slow.issue), ("sendmeter", Some(12)));
+    assert_eq!(slow.str("step"), Some("kick #12"), "{:?}", slow.data);
+}
+
+#[test]
 fn a_wake_starts_its_fleets_pass_within_a_second() {
     let c = ctx(&tmpdir("loops-wake"), &format!("{CONFIG}{SLOW}"));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
@@ -213,16 +252,7 @@ fn a_wake_starts_its_fleets_pass_within_a_second() {
 #[test]
 fn a_service_that_answers_a_wake_but_runs_no_pass_never_leaves_a_fleets_last_pass_stale() {
     let c = ctx(&tmpdir("loops-1625-deaf"), CONFIG);
-    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
-    let _sh = FakeShed::attached(&c);
-    let deaf = std::os::unix::net::UnixListener::bind(drover::service::sock(&c)).unwrap();
-    std::thread::spawn(move || {
-        for s in deaf.incoming().flatten() {
-            let mut line = String::new();
-            std::io::BufRead::read_line(&mut std::io::BufReader::new(&s), &mut line).ok();
-            std::io::Write::write_all(&mut &s, b"{\"pid\": 1}\n").ok();
-        }
-    });
+    let _sh = deaf(&c);
     assert!(drover::service::wake(&c, "sendmeter"), "the service answers a wake");
     let last = c.state.with_file_name("drive-sendmeter.last");
     let detached = "sh -c nohup '/opt/drover/bin/drover' drive sendmeter";
@@ -235,4 +265,78 @@ fn a_service_that_answers_a_wake_but_runs_no_pass_never_leaves_a_fleets_last_pas
     let (code, out) = run_only(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(r.count(detached), 1, "a 15 min old pass: drive starts it itself: {out}");
+}
+
+fn deaf(c: &drover::Ctx) -> FakeShed {
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    let sh = FakeShed::attached(c);
+    fake_service(c, 1);
+    sh
+}
+
+#[test]
+fn a_tick_skips_a_fleet_the_live_service_drove_within_the_tick_interval() {
+    let c = ctx(&tmpdir("loops-1802-tick"), CONFIG);
+    let _sh = deaf(&c);
+    let last = c.state.with_file_name("drive-sendmeter.last");
+    let detached = "sh -c nohup '/opt/drover/bin/drover' drive sendmeter";
+    let r = Fake::default().reply("sh -c nohup", "4321\n").reply("git -C", "");
+    std::fs::write(&last, (c.now - 240).to_string()).unwrap();
+    let (code, out) = run_only(&c, &r, &["tick"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(r.count(detached), 0, "driven by the service 4 min ago: {out}");
+    std::fs::write(&last, (c.now - 400).to_string()).unwrap();
+    let (code, out) = run_only(&c, &r, &["tick"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(
+        r.count(detached),
+        1,
+        "older than the tick interval: the tick drives it: {out}"
+    );
+}
+
+#[test]
+fn a_pass_ended_by_its_deadline_leaves_no_process_it_started_alive() {
+    let d = tmpdir("loops-deadline-kill");
+    let c = ctx(&d, &CONFIG.replace("[limits]\n", "[limits]\npass_max_secs = 1\n"));
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    let _sh = FakeShed::attached(&c);
+    let d12 = serde_json::json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "branch": "issue-12"});
+    drover::events::append(&c.state, &Event::new(c.now - 60, "sendmeter", Some(12), "spawn", d12)).unwrap();
+    let bin = d.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let pid = d.join("child.pid");
+    let gh = bin.join("gh");
+    std::fs::write(
+        &gh,
+        format!("#!/bin/sh\nsleep 30 &\necho $! > '{}'\nwait\n", pid.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&gh, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let home = c.state.parent().unwrap().parent().unwrap();
+    let st = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
+        .args(["drive", "sendmeter"])
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("HOME", home)
+        .env("DROVER_HOME", home)
+        .env("FLEET_CONFIG", &c.config)
+        .env("FLEET_STATE", &c.state)
+        .env("FLEET_WORKTREES", &c.worktrees)
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&st.stdout).into_owned() + &String::from_utf8_lossy(&st.stderr);
+    assert_eq!(st.status.code(), Some(124), "{said}");
+    let child = std::fs::read_to_string(&pid).expect("the pass started its call");
+    let alive = || {
+        let o = std::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", child.trim()])
+            .output()
+            .unwrap();
+        o.status.success() && !String::from_utf8_lossy(&o.stdout).trim_start().starts_with('Z')
+    };
+    let end = Instant::now() + Duration::from_secs(5);
+    while alive() && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!alive(), "pid {} outlived its pass", child.trim());
 }

@@ -14,14 +14,13 @@ kind = "shed-acp"           # each lane an ACP session (below); the only kind
 
 **Terminal lanes retired (#1726).** `kind = "shed"` (a shed terminal per lane, with the harness typed into a login
 shell) and its old name `kind = "berth"` no longer load: fleet.toml fails with a message naming `shed-acp`. Set
-`kind = "shed-acp"` there (or `runtime = "shed-acp"` on a `[hosts.<name>]`).
+`kind = "shed-acp"` there.
 
-The kind decides where **new** lanes start. With no `[runtime]` (and no fleet or host runtime) there is none: spawn
+The kind decides where **new** lanes start. With no `[runtime]` (and no fleet runtime) there is none: spawn
 and the orchestrator refuse with "no shed runtime".
 
-**Migrating from herdr (#721).** `kind = "herdr"` (in `[runtime]`, a `[fleet.<n>.runtime]` or a host's `runtime`)
-no longer loads: fleet.toml fails with a message naming `shed-acp`. Set `kind = "shed-acp"` there, or
-`runtime = "shed-acp"` on a `[hosts.<name>]`; let live herdr lanes finish (or merge) first, since drover no longer
+**Migrating from herdr (#721).** `kind = "herdr"` (in `[runtime]` or a `[fleet.<n>.runtime]`)
+no longer loads: fleet.toml fails with a message naming `shed-acp`. Set `kind = "shed-acp"` there; let live herdr lanes finish (or merge) first, since drover no longer
 reaches them.
 
 ## How drover talks to shed
@@ -124,7 +123,7 @@ Workflow list reads: `source=drover`, `group=<repo name>`, `item=#<issue>`, `rol
 
 **The guard.** The adapter after `--` is the installed agent's command (`shed agents --json`), run by `sh` after the
 lane's exports (`DROVER_LANE`, `DROVER_PORT`, the fleet's `env`; #923: the adapter signs in with the host's own
-login and gets no token, and a lane on another host signs in through the main host's token proxy). It
+login and gets no token). It
 sets the role's model as `ANTHROPIC_MODEL`, copies the lane's synced profile (`~/.config/drover/claude/<profile>`)
 into the worktree as `.claude/settings.local.json` and `CLAUDE.local.md`, and unsets `$SHED`. The claude-acp adapter
 runs Claude Code with its user, project and local settings, so the profile's `settings.json` applies:
@@ -143,8 +142,7 @@ ACP event history (prompts, tool calls with their status, replies), not a screen
 **Fail closed (#508).** A lane that drover's hook would not guard does not start: spawn, and its dry run, refuse
 `ACP_UNGUARDED` before anything is made. That happens when the harness and adapter pair is not one known to run the
 hook (today only `claude` with `claude-acp`), when the profile's `settings.json` has no drover `PreToolUse` hook
-(run `drover profiles sync`). #637: on another host an ACP lane runs only on a `runtime = "shed-acp"` host, where its guard is
-proven, and it signs in through the token proxy, never with a token there (docs/hosts.md). shed's
+(run `drover profiles sync`). shed's
 `--policy` has no per-command rules, so a hook-less adapter has no fallback guard. Not carried over from a pane
 yet: the role's `effort` and its `mcp` servers (the bridge's `session/new` passes none).
 

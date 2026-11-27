@@ -208,7 +208,6 @@ fn admission_runs_per_host() {
     assert_eq!(e, format!("DISK_LOW: bazzite: 1.0 GB free < 10; {nothing}"));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let (_sh, bazzite, f) = (FakeShed::attached(&c), FakeShed::new(), low());
-    remote::proxied(&c);
     let (code, out) = run(
         &c,
         &acp(&f, &bazzite),
@@ -276,7 +275,6 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         &["queue", "sendmeter", "add", "12", "--needs", "docker"],
     );
     let (sh, bazzite, r) = (FakeShed::attached(&c), FakeShed::new(), remote_fake());
-    remote::proxied(&c);
     let o = acp(&r, &bazzite);
     let (code, out) = run(&c, &o, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
@@ -826,7 +824,6 @@ fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
     );
     std::fs::write(&c.config, text).unwrap();
     let (_sh, bazzite, f) = (FakeShed::attached(&c), FakeShed::new(), remote_fake());
-    remote::proxied(&c);
     let r = acp(&f, &bazzite);
     let cfg = Config::load(&c.config).unwrap();
     drover::gh::spec(&c, &f, cfg.fleet("sendmeter").unwrap(), "sendmeter", 12, true).unwrap();
@@ -930,7 +927,7 @@ fn a_remote_review_is_read_over_ssh_and_recorded() {
     let dir = tmpdir("hosts-rev");
     std::fs::write(
         dir.join("verdict.md"),
-        "FAIL\n- blocking [code] a.rs:1\n  Proof: spec\n  > AC 1\n",
+        "FAIL\n- blocking [ac] a.rs:1\n  Proof: spec\n  > AC 1\n",
     )
     .unwrap();
     let rev = dir.to_str().unwrap();
@@ -977,7 +974,6 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
     let c = setup("hosts-answer", "", true, 0);
     with_account(&c);
     let (sh, bazzite, r) = (FakeShed::attached(&c), FakeShed::new(), remote_fake());
-    remote::proxied(&c);
     let (code, out) = run(
         &c,
         &acp(&r, &bazzite),
@@ -1122,7 +1118,6 @@ fn a_remote_supersede_stays_on_its_host() {
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
         .reply(&format!("{SSH}'sh' '-c' 'umask 077"), "")
         .reply(&format!("{SSH}'rm' '-f'"), "");
-    remote::proxied(&c);
     let (code, out) = run(
         &c,
         &acp(&f, &bazzite),
@@ -1437,7 +1432,6 @@ fn a_supersede_saves_a_remote_lanes_dirty_work_first() {
             .reply(&format!("{SSH}'rm' '-f'"), "");
         let (r, g) = dirty_remote(live, fail.then_some(1));
         let (sh, bazzite) = (FakeShed::attached(&c), live_on());
-        remote::proxied(&c);
         let (code, out) = run(
             &c,
             &acp(&r, &bazzite),

@@ -1,0 +1,1 @@
+- OUT_OF_SCOPE: verdict FAIL (#1809): a blocking finding tagged other than `[ac]`, `[amendment]`, `[rules]`, `[parity]`, `[for-humans]`, `[trailer]`, `[ci]` or a form category, named; rev blocks only on the AC and the hard rules, so make it a `- follow-up [<category>] file:line: what` line (filed as a queued issue when the PR lands)

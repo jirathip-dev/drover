@@ -37,8 +37,6 @@ pub struct Config {
     pub telegram: Option<toml::Value>,
     /// `[chat]`, new threads' orchestrator defaults over the fleet's `role.orchestrator` (`orchestrator::defaults`).
     pub chat: Chat,
-    /// `[proxy]`, the token proxy remote ACP lanes' model calls go through (`crate::proxy`, docs/hosts.md).
-    pub proxy: ProxyCfg,
     /// `[self_update]`, the release branch the live install follows and the optional staging serve.
     pub self_update: SelfUpdate,
     /// `[hygiene]`, the history and issue convention every fleet follows unless its own `[fleet.<n>.hygiene]` key says otherwise.
@@ -62,28 +60,6 @@ impl Default for SelfUpdate {
             branch: "main".into(),
             staging_serve: false,
             staging_addr: "127.0.0.1:7787".into(),
-        }
-    }
-}
-
-/// The proxy's port (on this host, and on each `shed-acp` host through an ssh tunnel), where it forwards, how long a lane key lives; `token-file`, the one 0600 token it signs with (`Proxy::setup`'s).
-#[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
-pub struct ProxyCfg {
-    pub port: u16,
-    pub upstream: String,
-    pub key_hours: u64,
-    #[serde(rename = "token-file")]
-    pub token_file: Option<String>,
-}
-
-impl Default for ProxyCfg {
-    fn default() -> Self {
-        ProxyCfg {
-            port: 41990,
-            upstream: crate::providers::proxied().map_or("", |p| p.upstream).into(),
-            key_hours: 12,
-            token_file: None,
         }
     }
 }
@@ -221,8 +197,6 @@ pub struct HostCfg {
     #[serde(default)]
     pub deny_commands_add: Vec<Deny>,
     pub allow_commands: Option<Vec<String>>,
-    /// `shed-acp`: the runtime its lanes start in (unset: the fleet's, as before).
-    pub runtime: Option<RuntimeKind>,
     /// Lanes running a turn at once on this host, all fleets (unset: no cap).
     pub max_working: Option<usize>,
     /// Lanes starting at once on this host (unset: `[limits] start_max`; the main host: `max_parallel_spawns`).
@@ -414,12 +388,10 @@ pub struct Fleet {
     pub deny_commands: Option<Vec<Deny>>,
     #[serde(default)]
     pub deny_commands_add: Vec<Deny>,
-    /// Fast checks `merge` runs on the PR merged into current integration; unset = the cap check if `ci/cap.toml`.
+    /// Fast checks `merge` runs on the PR merged into current integration; unset = none.
     pub premerge: Option<Vec<Premerge>>,
-    /// Commands `turn done` runs in the lane's worktree before any review; unset = `./.gatekeeper/run check` with `.gatekeeper/run`, else `drover arch-check` with `.drover/arch.toml`, `cargo fmt --check` with `Cargo.toml`.
+    /// Commands `turn done` runs in the lane's worktree before any review; unset = the light checks only, `drover arch-check` with `.drover/arch.toml` and `cargo fmt --check` with `Cargo.toml` (never `./.gatekeeper/run check`): CI is the one full run.
     pub done_checks: Option<Vec<String>>,
-    /// The repo's own line-cap script `drover cap` reads `N / cap M` lines from; unset = the first `premerge` check naming a cap, else the built-in Rust count.
-    pub cap_script: Option<String>,
     /// `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
     pub land: Option<Land>,
     /// How `merge` lands a PR: `squash` (default) or `merge`.
@@ -708,8 +680,12 @@ impl Role {
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct Limits {
-    pub review_rounds: u32,
-    pub update_rounds: u32,
+    /// Retired (#1809): read only so doctor can say no round limit is left.
+    #[serde(skip_serializing)]
+    pub review_rounds: Option<u32>,
+    /// Retired (#1809), as `review_rounds`.
+    #[serde(skip_serializing)]
+    pub update_rounds: Option<u32>,
     pub stall_minutes: u64,
     pub silent_minutes: u64,
     pub ci_start_minutes: u64,
@@ -743,10 +719,11 @@ pub struct Limits {
     pub import_max_age_hours: u64,
     pub max_pushes_per_pass: usize,
     pub max_parallel_spawns: usize,
+    pub max_in_flight_total: usize,
+    pub fleet_priority: Vec<String>,
     pub start_max: usize,
     pub start_release: StartRelease,
     pub spawn_pending_max_secs: u64,
-    pub admit_wait_secs: u64,
     pub acp_start_minutes: u64,
     pub webhook_poll_minutes: u64,
     pub keychain_readers: usize,
@@ -758,6 +735,7 @@ pub struct Limits {
     pub runtime_down_failures: u64,
     pub runtime_down_minutes: u64,
     pub pass_max_secs: u64,
+    pub fetch_fresh_secs: u64,
     pub ssh_connect_secs: u64,
     pub ssh_quick_secs: u64,
     pub ssh_call_secs: u64,
@@ -775,8 +753,6 @@ pub struct Limits {
     pub notify_secs: u64,
     pub gate_check_minutes: u64,
     pub shed_read_millis: u64,
-    pub proxy_connect_secs: u64,
-    pub proxy_retry_secs: u64,
     pub service_call_secs: u64,
     pub disk_probe_secs: u64,
     pub disk_hung_secs: u64,
@@ -848,8 +824,8 @@ pub const ORCHESTRATOR_CHANGE_MINUTES: u64 = 30;
 impl Default for Limits {
     fn default() -> Self {
         Limits {
-            review_rounds: 3,
-            update_rounds: 3,
+            review_rounds: None,
+            update_rounds: None,
             stall_minutes: 30,
             silent_minutes: 10,
             ci_start_minutes: 10,
@@ -886,10 +862,11 @@ impl Default for Limits {
             import_max_age_hours: 24,
             max_pushes_per_pass: 3,
             max_parallel_spawns: 6,
+            max_in_flight_total: 6,
+            fleet_priority: vec![],
             start_max: 2,
             start_release: StartRelease::Started,
             spawn_pending_max_secs: 300,
-            admit_wait_secs: 5,
             acp_start_minutes: 3,
             webhook_poll_minutes: 10,
             keychain_readers: 3,
@@ -901,6 +878,7 @@ impl Default for Limits {
             runtime_down_failures: 5,
             runtime_down_minutes: 30,
             pass_max_secs: 60,
+            fetch_fresh_secs: 30,
             ssh_connect_secs: 10,
             ssh_quick_secs: 5,
             ssh_call_secs: 20,
@@ -918,8 +896,6 @@ impl Default for Limits {
             notify_secs: 15,
             gate_check_minutes: 30,
             shed_read_millis: 300,
-            proxy_connect_secs: 1,
-            proxy_retry_secs: 300,
             service_call_secs: 2,
             disk_probe_secs: 2,
             disk_hung_secs: 6,
@@ -1086,7 +1062,21 @@ impl Config {
             .limits
             .load_per_cpu
             .map(|_| ("[limits] load_per_cpu", load.to_string()));
-        acct.into_iter().chain(tg).chain(old).chain(load).chain(jobs).collect()
+        let rounds = "retired (#1809): no round limit; an issue goes needs-human only when stuck; delete it";
+        let rounds = [
+            ("[limits] review_rounds", self.limits.review_rounds),
+            ("[limits] update_rounds", self.limits.update_rounds),
+        ]
+        .into_iter()
+        .filter(|k| k.1.is_some())
+        .map(move |k| (k.0, rounds.to_string()));
+        acct.into_iter()
+            .chain(tg)
+            .chain(old)
+            .chain(load)
+            .chain(rounds)
+            .chain(jobs)
+            .collect()
     }
 
     /// `[limits]` with host `machine`'s (`None`: the main host) `min_cpu_idle`, `min_free_mem_gb` and `swapout_rate` over them.
@@ -1248,7 +1238,7 @@ impl Config {
             let mut p = f
                 .pipeline
                 .take()
-                .unwrap_or_else(|| crate::pipeline::Pipeline::builtin(&c.limits, f.role.contains_key("verify")));
+                .unwrap_or_else(|| crate::pipeline::Pipeline::builtin(f.role.contains_key("verify")));
             let head = format!("[[fleet.{name}.pipeline.stage]]");
             let lines = text
                 .lines()
@@ -1256,9 +1246,6 @@ impl Config {
                 .filter(|l| l.1.split_whitespace().collect::<String>() == head);
             for (s, (i, _)) in p.stage.iter_mut().zip(lines) {
                 s.line = i + 1;
-            }
-            for g in p.stage.iter_mut().filter(|s| s.kind == "gate" && s.rounds.is_none()) {
-                g.rounds = Some(c.limits.update_rounds);
             }
             f.form_categories
                 .get_or_insert_with(|| c.limits.form_categories.clone());
@@ -1427,8 +1414,7 @@ impl Config {
 
     pub fn shed(&self) -> Option<crate::shed::Shed> {
         let first = || self.fleet.values().find_map(|f| f.runtime.as_ref());
-        let host = || self.hosts.keys().find_map(|h| self.host_acp(h));
-        self.runtime.as_ref().or_else(first).map(Runtime::shed).or_else(host)
+        self.runtime.as_ref().or_else(first).map(Runtime::shed)
     }
 
     /// Lanes that may start at once on host `name` (a name no `[hosts]` entry has, or a machine-less one, is the main host).
@@ -1444,25 +1430,6 @@ impl Config {
     pub fn start_release(&self, name: &str) -> StartRelease {
         let h = self.hosts.get(name).and_then(|h| h.start_release);
         h.unwrap_or(self.limits.start_release)
-    }
-
-    /// Host `name`'s own `runtime = "shed-acp"`: the shed-acp runtime (shed's defaults), else None.
-    pub fn host_acp(&self, name: &str) -> Option<crate::shed::Shed> {
-        self.hosts
-            .get(name)
-            .filter(|h| h.runtime == Some(RuntimeKind::ShedAcp))?;
-        Some(
-            Runtime {
-                kind: RuntimeKind::ShedAcp,
-                ..Runtime::default()
-            }
-            .shed(),
-        )
-    }
-
-    /// The runtime fleet `fleet`'s new lanes start in on host `host`: the host's own, else the fleet's.
-    pub fn shed_on(&self, fleet: &str, host: Option<&str>) -> Option<crate::shed::Shed> {
-        host.and_then(|h| self.host_acp(h)).or_else(|| self.shed_for(fleet))
     }
 
     /// The fleet, refused `BAD_PIPELINE` while its pipeline breaks a rule (that fleet stops, the others run).

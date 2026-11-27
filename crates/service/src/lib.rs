@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use drover_core::config::Config;
 use drover_core::events::{append, emit, Event, Json};
 use drover_core::runner::{argv, Real, Runner};
@@ -48,7 +48,7 @@ pub fn main(ctx: &Ctx, api: &str, board: Option<&str>) -> Result<()> {
             }
         });
     }
-    let api = std::net::TcpListener::bind(api)?;
+    let api = std::net::TcpListener::bind(api).with_context(|| format!("api {api}"))?;
     run(ctx.clone(), &Real, drover_core::now, api)
 }
 

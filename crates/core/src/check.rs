@@ -21,6 +21,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 mod fire;
+mod settle;
 mod stranded;
 mod sweep;
 mod unset;
@@ -161,21 +162,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     }
     for (name, f) in &cfg.fleet {
         crate::overlap::preview(ctx, cfg, r, name, &events).ok();
-        if let Some((sha, n, cap, warn)) = crate::overlap::cap_at(ctx, cfg, r, name).filter(|c| c.2 - c.1 < c.3) {
-            let why = format!(
-                "{} lines of headroom (< {warn}) at {sha:.7}, {n} / cap {cap}: propose the next cap step",
-                cap - n
-            );
-            fire(
-                ctx,
-                cfg,
-                out,
-                &events,
-                (name, None),
-                "cap-near",
-                json!({"key": sha, "reason": why}),
-            )?;
-        }
         for i in crate::queue::replay(&events, name) {
             gh::spec(ctx, r, f, name, i.issue, false).ok();
         }
@@ -183,39 +169,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let events = closed_on_github((ctx, cfg, r, &mut *out), events, None)?;
     crate::drive::markers(ctx, cfg, r, true);
     let passes = crate::events::since(&ctx.state, &["drive-pass"], ctx.now.saturating_sub(2 * 86_400))?;
-    let mut held = BTreeMap::<(&str, u64), (u64, u64)>::new();
-    for e in &passes {
-        let acts = e.data.get("actions").and_then(serde_json::Value::as_array);
-        for a in acts.into_iter().flatten() {
-            let Some(n) = a["issue"].as_u64() else { continue };
-            if a["code"] == "SPAWN_PENDING" {
-                held.entry((&e.fleet, n)).or_insert((e.ts, e.ts)).1 = e.ts;
-            } else {
-                held.remove(&(e.fleet.as_str(), n));
-            }
-        }
-    }
-    held.retain(|_, (since, last)| ctx.now >= *since + 900 && ctx.now < *last + 900);
-    for name in cfg.fleet.keys() {
-        let mine: Vec<_> = held.iter().filter(|h| h.0 .0 == name).collect();
-        let Some(since) = mine.iter().map(|h| h.1 .0).min() else {
-            continue;
-        };
-        let ns: Vec<String> = mine.iter().map(|h| format!("#{}", h.0 .1)).collect();
-        let by = crate::drive::held_by(ctx, cfg, r);
-        let by = if by.is_empty() {
-            "no spawn starting now".into()
-        } else {
-            format!("slots held by {by}")
-        };
-        let why = format!(
-            "{} held back by SPAWN_PENDING for {}: {by}",
-            ns.join(", "),
-            age(ctx.now - since)
-        );
-        let d = json!({"key": since, "reason": why});
-        fire(ctx, cfg, out, &events, (name, None), "spawn-held", d)?;
-    }
     let ids: std::collections::BTreeSet<_> = events
         .iter()
         .filter(|e| e.kind == "spawn-error")
@@ -372,7 +325,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 let oid = pr.at("headRefOid").as_str().unwrap_or_default();
                 hits.push(("ci-missing", oid.into(), why));
             }
-            if let Some(head) = gate(f, &pr, Some(s), false).ok().filter(|_| idle > stall) {
+            if let Some(head) = gate(f, &pr, Some(s)).ok().filter(|_| idle > stall) {
                 let (short, ago) = (&head[..7.min(head.len())], age(idle));
                 let why = format!("PASS @ {short} with green CI, unmerged for {ago}; run `drover merge`");
                 hits.push(("ready-unmerged", format!("{}:{head}", s.last_ts), why));
@@ -844,25 +797,35 @@ pub fn teardown(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fl
     if seen.is_empty() {
         return Ok(());
     }
-    clean_all(ctx, cfg, r, out, Some(fleet), (Some(issue), None, false, false), true).map(drop)
+    clean_all(
+        ctx,
+        cfg,
+        r,
+        out,
+        Some(fleet),
+        (Some(issue), None, false, false, false, false),
+        true,
+    )
+    .map(drop)
 }
 
-/// Remove worktree + pane of lanes whose issue is merged (or closed on GitHub), dry run unless `yes`, and count the dirty ones kept; `--lane` refuses `UNSAFE_CLEAN` with the reason; `all` (an explicit `drover clean`) also sweeps each disabled host that answers its one bounded probe: its worktrees and dead lanes' scratch.
+/// Remove worktree + pane of lanes whose issue is merged (or closed on GitHub), dry run unless `yes`, and count the dirty ones kept; `--lane` refuses `UNSAFE_CLEAN` with the reason; `all` (an explicit `drover clean`) also sweeps each disabled host that answers its one bounded probe: its worktrees and dead lanes' scratch; `orphans` takes back the off-root lanes it settled; `verbose` lists each held lane.
 pub fn clean_all(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
     out: &mut dyn Write,
     fleet: Option<&str>,
-    (issue, lane, sched, all): (Option<u64>, Option<&str>, bool, bool),
+    (issue, lane, sched, all, orphans, verbose): (Option<u64>, Option<&str>, bool, bool, bool, bool),
     yes: bool,
 ) -> Result<usize> {
     let events = working(&ctx.state)?;
+    let (parked, mut settled) = settle::load(ctx, &events, (fleet, issue), orphans)?;
     let states = fold(&events);
     let agents = (crate::link::look(ctx, cfg, r, &mut std::io::sink(), true)?.sessions())
         .checked()
         .context("cannot list the live agents; refusing to clean blind")?;
-    let off = if all { disabled(cfg, r) } else { vec![] };
+    let off = if all { disabled(ctx, cfg, r) } else { vec![] };
     let mut seen = std::collections::BTreeSet::new();
     let (mut freed, mut removed, mut tallies) = (0, 0, (0, 0));
     let mut closed = BTreeMap::new();
@@ -888,8 +851,10 @@ pub fn clean_all(
     let spawns = (lanes(&events).into_iter().rev())
         .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && fleet.is_none_or(|f| f == e.fleet))
         .chain(&revs)
+        .chain(parked.iter().filter(|_| orphans))
         .filter(|e| e.issue.is_some_and(|n| issue.is_none_or(|i| i == n)))
-        .filter(|e| lane.is_none_or(|a| e.str("agent") == Some(a)));
+        .filter(|e| lane.is_none_or(|a| e.str("agent") == Some(a)))
+        .filter(|e| settled.fresh(e));
     let spawns = unset::unconfigured(cfg, out, &events, lane, spawns)?;
     let held = |e: &Event| {
         let away = e.str("host").filter(|_| e.str("machine").is_some());
@@ -897,12 +862,8 @@ pub fn clean_all(
             Some(h) => !off.iter().any(|o| o.0 == h && o.2.is_some()),
             None => crate::hosts::offline(ctx, Some(cfg), Some(e)).is_some(),
         };
-        let root = crate::roots::skip(ctx, cfg, e).map(|w| match w {
-            "off-root" => "off-root (not cleaned)",
-            "root-hung" => "root-hung (not cleaned)",
-            _ => "root unreachable (not cleaned)",
-        });
-        held.then_some("host unreachable (not cleaned)").or(root)
+        let root = crate::roots::skip(ctx, cfg, e).filter(|w| !(orphans && *w == "off-root"));
+        held.then_some("host unreachable").or(root)
     };
     let there = crate::hosts::present(r, spawns.iter().copied().filter(|e| held(e).is_none()));
     for e in spawns {
@@ -911,9 +872,7 @@ pub fn clean_all(
         };
         let (on, held) = (On::of(r, Some(e)), held(e));
         let away = e.str("host").filter(|_| on.machine.is_some());
-        let gone = |c: &Event| c.kind == "clean" && c.str("worktree") == Some(wt) && c.ts >= e.ts;
-        let gone = || held.map_or_else(|| !there.contains(&(on.machine, wt)), |_| events.iter().any(gone));
-        if seen.contains(wt) || gone() {
+        if seen.contains(wt) || held.is_none() && !there.contains(&(on.machine, wt)) {
             continue;
         }
         let unsafe_lane =
@@ -947,11 +906,12 @@ pub fn clean_all(
         let shown = away.map_or(wt.into(), |h| format!("{h}:{wt}"));
         if let Some(why) = held {
             if lane.is_some() {
-                return unsafe_lane(why);
+                return unsafe_lane(&format!("{why} (not cleaned)"));
             }
-            writeln!(out, "keep {shown}: {why}")?;
+            settled.hold((ctx, cfg, out), (e, away, why), (verbose, yes))?;
             continue;
         }
+        settled.checked(away, false);
         let gitdir = on.read(&Path::new(wt).join(".git"));
         let gitdir = gitdir
             .as_deref()
@@ -1033,6 +993,7 @@ pub fn clean_all(
             writeln!(out, "keep {shown}: {reason}")?;
             continue;
         }
+        settled.checked(away, true);
         if !yes {
             writeln!(out, "would remove {shown} (pane {pane}, {}#{n} {why})", e.fleet)?;
             continue;
@@ -1056,6 +1017,9 @@ pub fn clean_all(
         removed += 1;
         writeln!(out, "removed {shown} ({}#{n} {why})", e.fleet)?;
         emit(&ctx.state, cfg, Event::new(ctx.now, &e.fleet, Some(n), "clean", d))?;
+    }
+    if lane.is_none() {
+        settled.summary(out, yes)?;
     }
     let sheds = r.shed().filter(|_| lane.is_none()).map(term::Shed);
     for (b, t) in sheds.iter().flat_map(|b| {
@@ -1132,7 +1096,7 @@ pub fn kept_row(ctx: &Ctx) -> Option<String> {
 }
 
 pub fn scheduled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let res = clean_all(ctx, cfg, r, out, None, (None, None, true, false), true);
+    let res = clean_all(ctx, cfg, r, out, None, (None, None, true, false, false, false), true);
     let res = res.and_then(|n| Ok(std::fs::write(ctx.state.with_file_name("clean.kept"), n.to_string())?));
     let mark = ctx.state.with_file_name("clean.failed");
     let Err(e) = res else {
@@ -1637,7 +1601,7 @@ pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &m
         }
     }
     total += trim_builds(ctx, cfg, cfg.limits.build_budget_gb, &live, o, !yes)?;
-    total += sweep_off(ctx, cfg, r, o, &disabled(cfg, r), !yes)?;
+    total += sweep_off(ctx, cfg, r, o, &disabled(ctx, cfg, r), !yes)?;
     total += sweep::hosts(ctx, cfg, r, o, if yes { Sweep::Apply } else { Sweep::Preview })?;
     let done = if yes { "freed" } else { "reclaimable" };
     writeln!(o, "{:.2} GB {done} {NOTE}", gb(total))?;
@@ -2322,7 +2286,14 @@ fn build(p: &str) -> bool {
 }
 
 /// `wip prune`: origin's `wip/*` branches of `fleet`'s repo, each with the size it adds over the integration branch, its issue's state and whether it carries build output, after the counts per issue. Unless `dry`, deleted on origin (a branch delete: never a history rewrite or force-push): those of a merged or closed issue but its newest per role, and that one too if it carries build output. An open issue's are kept.
-pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, dry: bool) -> Result<()> {
+pub fn prune(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    fleet: &str,
+    (dry, listed): (bool, bool),
+) -> Result<()> {
     let (f, states) = (cfg.fleet(fleet)?, fold(&working(&ctx.state)?));
     let dir = f.local_path().to_string_lossy().into_owned();
     let git = |a: &[&str]| ok(r, "git", &[&["-C", &dir][..], a].concat());
@@ -2377,14 +2348,18 @@ pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
         rows.push((b, size, n, st, has, go));
     }
     let gone = if dry { "would delete" } else { "deleted" };
-    for (n, (all, del)) in &counts {
+    let (wips, dels) = counts.values().fold((0, 0), |a, c| (a.0 + c.0, a.1 + c.1));
+    if !listed {
+        writeln!(out, "{fleet}: {wips} wip branches, {dels} {gone}, {} kept", wips - dels)?;
+    }
+    for (n, (all, del)) in counts.iter().filter(|c| listed || c.1 .1 > 0) {
         let st = n
             .and_then(|n| states.get(&(fleet.to_string(), n)))
             .map_or("?", |s| &s.state);
         let issue = n.map_or("no issue".into(), |n| format!("#{n} {st}"));
         writeln!(out, "{issue}: {all} wip, {del} {gone}, {} kept", all - del)?;
     }
-    for (b, size, n, st, has, go) in rows {
+    for (b, size, n, st, has, go) in rows.into_iter().filter(|r| listed || r.5) {
         let what = if go { gone } else { "kept" };
         let issue = n.map_or("no issue".into(), |n| format!("#{n} {}", st.map_or("?", |s| &s.state)));
         let has = if has { " · build output" } else { "" };
@@ -2435,6 +2410,7 @@ fn snapshot(
             git(&["reset", "-q", "--", &format!(":(literal){p}")])?;
             skip.push(format!("{p} ({} MB)", n >> 20));
         }
+        git(&["fetch", "-q", "origin", crate::clone::ALL, "^refs/heads/wip/*"]).ok();
         Ok((
             git(&["diff", "--cached"])?,
             git(&[&UNPUSHED[..], kept.as_slice()].concat())?,
