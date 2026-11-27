@@ -867,16 +867,18 @@ pub fn configured(cfg: &Config, m: &str) -> bool {
 
 /// `host offline: <host>` for spawn `sp`'s lane when the last look (`survey`) could not reach its host; `host offline (not configured): <machine>` when no `[hosts]` entry runs on its machine.
 pub fn offline(ctx: &Ctx, cfg: Option<&Config>, sp: Option<&Event>) -> Option<String> {
+    offline_by(|h| cached(ctx).get(h).is_some_and(|s| !s.up), cfg, sp)
+}
+
+/// `offline` with `down` saying whether a host failed its last probe, so a scan reads the probe file once.
+pub fn offline_by(down: impl FnOnce(&str) -> bool, cfg: Option<&Config>, sp: Option<&Event>) -> Option<String> {
     let sp = sp?;
     let m = sp.str("machine")?;
     if cfg.is_some_and(|c| !configured(c, m)) {
         return Some(format!("host offline (not configured): {m}"));
     }
     let h = sp.str("host")?;
-    cached(ctx)
-        .get(h)
-        .is_some_and(|s| !s.up)
-        .then(|| format!("host offline: {h}"))
+    down(h).then(|| format!("host offline: {h}"))
 }
 
 /// Spawn `sp`'s lane is on a host that is `off` or failed its last probe: a pass never reaches into it.

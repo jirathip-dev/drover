@@ -167,9 +167,16 @@ fn no_verdict(events: &[Event], s: &IssueState, path: &str, gone: bool, w: &mut 
     w.next_cmd = Some(format!("drover spawn {f} {n} {c} --supersede"));
 }
 
-fn away(ctx: &Ctx, cfg: &Config, events: &[Event], s: &IssueState) -> Option<(&'static str, String)> {
+type Seen = std::cell::OnceCell<std::collections::BTreeMap<String, crate::hosts::Seen>>;
+
+fn away((ctx, seen): (&Ctx, &Seen), cfg: &Config, events: &[Event], s: &IssueState) -> Option<(&'static str, String)> {
+    let down = |h: &str| {
+        seen.get_or_init(|| crate::hosts::cached(ctx))
+            .get(h)
+            .is_some_and(|s| !s.up)
+    };
     let sp = last_spawn(events, s.active_lane()?.1)?;
-    let h = crate::hosts::offline(ctx, Some(cfg), Some(sp))?;
+    let h = crate::hosts::offline_by(down, Some(cfg), Some(sp))?;
     let removed = sp.str("machine").is_some_and(|m| !crate::hosts::configured(cfg, m));
     Some(match sp.str("agent").filter(|_| removed) {
         Some(a) => (
@@ -714,6 +721,7 @@ pub fn scan_where(
     let listed = view.as_ref().map(crate::link::view::View::sessions).unwrap_or_default();
     let busy = |l: &str| agents.iter().any(|a| a.name == l && a.busy());
     let hung = crate::roots::hung_now(events);
+    let probed = std::cell::OnceCell::new();
     let mine = |st: &crate::events::States| {
         st.values()
             .filter(|s| cfg.fleet.contains_key(&s.fleet) && !s.settled() && keep(s))
@@ -929,7 +937,7 @@ pub fn scan_where(
             (w.who, w.next_cmd, w.promise) = ("none", None, None);
             w.what = format!("lane unknown: {m}'s shed listing unreadable");
         }
-        if let Some((who, what)) = away(ctx, cfg, mine, &s) {
+        if let Some((who, what)) = away((ctx, &probed), cfg, mine, &s) {
             (w.who, w.what, w.next_cmd, w.promise) = (who, what, None, None);
         }
         let stuck = ["idle without pushing", "rev idle without", "reviewer exited"]
