@@ -167,7 +167,11 @@ fn review_spawns_rev_at_the_pushed_head() {
     let head = sha("abc");
     done_at(&c, 11, &head);
     let r = fake(&[("sendmeter-impl-12", "idle", &wt.to_string_lossy())])
-        .once("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", 1, "")
+        .once(
+            "git -C /tmp/does-not-matter/sendmeter rev-parse --verify --quiet rev-12-r1",
+            1,
+            "",
+        )
         .reply("gh pr view issue-12", &pr(&head, "pending"))
         .reply(&format!("git -C {} log", wt.display()), &format!("{head} 20"))
         .reply("git -C", "");
