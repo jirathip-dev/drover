@@ -54,6 +54,7 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `runtime_down_failures` | `5` | lanes on one host failing to start or ending without a push in the window before drive trips `runtime-down` there |
 | `runtime_down_minutes` | `30` | the window `runtime_down_failures` counts in |
 | `pass_max_secs` | `60` | a fleet's pass ends itself here, `pass-slow` naming its step; a lock held past 2 × it logs `pass-stuck` and is taken over |
+| `fetch_fresh_secs` | `30` | a fleet clone's fetch of refspecs fetched this recently, their refs there, is skipped; a fetch waiting on the clone's lock gets the one before it |
 | `ssh_connect_secs` | `10` | every host ssh's `-oConnectTimeout`; the whole `ssh <host> true` probe's retry and `hosts refresh`'s probe |
 | `ssh_quick_secs` | `5` | a maintenance ssh's connect timeout and the `ssh <host> true` probe's; the whole first probe |
 | `ssh_call_secs` | `20` | a remote call in a pass is killed after this long |

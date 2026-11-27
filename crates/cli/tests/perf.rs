@@ -1,4 +1,6 @@
 mod common;
+#[path = "perf/fetches.rs"]
+mod fetches;
 #[path = "perf/screens.rs"]
 mod screens;
 use common::*;
