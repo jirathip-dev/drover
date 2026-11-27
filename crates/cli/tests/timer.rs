@@ -516,7 +516,7 @@ fn drift_is_missing_outdated_or_loaded() {
     let (from, to) = if MAC {
         (">service<", ">serve<")
     } else {
-        (" service\n", " serve\n")
+        (" service ", " serve ")
     };
     edit("dev.drover.service", from, to);
     assert_eq!(drift(&up), both("loaded", "outdated (args or interval differ)"));

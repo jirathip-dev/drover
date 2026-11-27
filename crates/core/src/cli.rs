@@ -488,7 +488,7 @@ enum Cmd {
     )]
     Service {
         #[arg(help = "API v1 listen address (remote lanes reach it over the tailnet)")]
-        #[arg(long, default_value = "127.0.0.1:7778")]
+        #[arg(long, default_value = crate::timer::API)]
         api: String,
         #[arg(help = "Also serve the board here (the `serve` job's address)")]
         #[arg(long)]

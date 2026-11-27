@@ -59,9 +59,10 @@ next service starts over the dead one's socket, the next pass sweeps the marker 
 
 ## Install
 
-`drover timer install` writes and loads `dev.drover.service` (`drover service`, its API on `127.0.0.1:7778`) beside
-the tick, then unloads and removes the old `dev.drover.fast` job (#1802). `drover doctor` shows `✗ service — not
-running` while the job is missing or its socket is dead, and `✗ fast job — replaced by the service` while both are
+`drover timer install` writes and loads `dev.drover.service` (`drover service --api 127.0.0.1:7779`, off the
+board's 7777 and the webhooks' 7778, #1867) beside the tick, then unloads and removes the old `dev.drover.fast` job
+(#1802). `drover doctor` shows `✗ service — not running` while the job is missing or its socket is dead (naming the
+job or pid that holds the API port, with its fix), and `✗ fast job — replaced by the service` while both are
 installed.
 
 ## Line cap

@@ -12,8 +12,10 @@ pub const TICK: &str = "dev.drover.tick";
 pub const FAST: &str = "dev.drover.fast";
 /// `drover service`, kept alive; it runs the fast step itself.
 pub const SERVICE: &str = "dev.drover.service";
+/// The service's API address, off the board's and the webhooks' default ports.
+pub const API: &str = "127.0.0.1:7779";
 /// The build's own jobs (label, args); `install` derives each one's interval from its args.
-pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (SERVICE, &["service"])];
+pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (SERVICE, &["service", "--api", API])];
 /// The tick's steps in order (`tick.step` names the running one) and the `[limits]` keys that time them.
 pub const TICK_STEPS: [(&str, &[&str]); 8] = [
     (
