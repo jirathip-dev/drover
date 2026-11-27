@@ -107,9 +107,6 @@ pub trait Provider: Sync {
     fn efforts(&self) -> &'static [&'static str] {
         EFFORTS
     }
-    fn model_default(&self) -> Option<&'static str> {
-        None
-    }
     fn sessions(&self) -> Option<&'static str> {
         None
     }
@@ -178,9 +175,6 @@ pub trait Provider: Sync {
         None
     }
     fn login(&self) -> Option<&'static str> {
-        None
-    }
-    fn install(&self) -> Option<&'static str> {
         None
     }
     fn hook_dialect(&self) -> Option<&'static Dialect> {
