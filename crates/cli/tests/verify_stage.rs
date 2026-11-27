@@ -371,6 +371,7 @@ fn verify_fails_count_in_revs_rounds_with_no_limit() {
     let v = kinds(&c, "verdict").pop().unwrap();
     assert_eq!(v.str("stage"), Some("verify"));
     assert_eq!(v.val("files")[0]["name"], "shots/home-390.png");
+    ev(&c, 9, "needs-human", json!({"code": "STUCK", "reason": "stuck"}));
     let none = Fake::default();
     let s = Server::new(&c, &none, Some(ADDR.into()));
     let get = |p: &str| {
