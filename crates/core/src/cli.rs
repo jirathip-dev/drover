@@ -381,11 +381,6 @@ enum Cmd {
         cmd: Option<HostsCmd>,
     },
     #[command(
-        about = "Owner only: the token proxy remote ACP lanes' model calls go through, on `[proxy] port` (#637, docs/hosts.md)"
-    )]
-    #[command(hide = true)]
-    Proxy,
-    #[command(
         about = "Phone page (PWA): queue, lanes, host, events; buttons for queue order, pause/resume, role model/effort"
     )]
     Serve {
@@ -973,19 +968,6 @@ enum HostsCmd {
         about = "Empty a root (default the host's first): new lanes skip it, its lanes are saved and restarted on the next root"
     )]
     Eject { name: String, root: Option<String> },
-    #[command(
-        about = "The token proxy's per-lane keys (#637): id, state, lane, host; `revoke <id>` (owner only) ends one at once"
-    )]
-    Keys {
-        #[command(subcommand)]
-        cmd: Option<KeysCmd>,
-    },
-}
-
-#[derive(Subcommand)]
-enum KeysCmd {
-    #[command(about = "Owner only: this key stops signing at once; logs `proxy-key-revoked`")]
-    Revoke { id: String },
 }
 
 #[derive(Subcommand)]
@@ -1795,12 +1777,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     Some(HostsCmd::Eject { name, root }) => {
                         return crate::roots::eject(ctx, &cfg, r, out, &name, root.as_deref());
                     }
-                    Some(HostsCmd::Keys { cmd: None }) => crate::proxy::list(ctx, out)?,
-                    Some(HostsCmd::Keys {
-                        cmd: Some(KeysCmd::Revoke { id }),
-                    }) => crate::proxy::revoke(ctx, &cfg, &id, out)?,
                 },
-                Cmd::Proxy => crate::proxy::serve(ctx, &cfg, r)?,
                 Cmd::SelfUpdate { dry_run, pause, resume } => {
                     return crate::update::self_update(ctx, &cfg, r, out, (dry_run, pause, resume));
                 }

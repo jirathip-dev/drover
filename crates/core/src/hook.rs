@@ -869,11 +869,6 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     if r.first() == Some(&"setup") {
         return Some("REFUSED OWNER_ONLY: only the owner runs `drover setup`, never a lane (#303)".into());
     }
-    if r.first() == Some(&"proxy") || r.first() == Some(&"hosts") && r.contains(&"revoke") {
-        return Some(
-            "REFUSED OWNER_ONLY: only the owner runs the token proxy or revokes its keys, never a lane (#637)".into(),
-        );
-    }
     if !orchestrator && r.first() == Some(&"spawn") && r.contains(&"--force") {
         return Some(
             "REFUSED OWNER_ONLY: `spawn --force` passes HOST_BUSY: the owner's or an orchestrator's, never a lane's (#908)"

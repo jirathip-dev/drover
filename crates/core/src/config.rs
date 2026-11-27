@@ -37,8 +37,6 @@ pub struct Config {
     pub telegram: Option<toml::Value>,
     /// `[chat]`, new threads' orchestrator defaults over the fleet's `role.orchestrator` (`orchestrator::defaults`).
     pub chat: Chat,
-    /// `[proxy]`, the token proxy remote ACP lanes' model calls go through (`crate::proxy`, docs/hosts.md).
-    pub proxy: ProxyCfg,
     /// `[self_update]`, the release branch the live install follows and the optional staging serve.
     pub self_update: SelfUpdate,
     /// `[hygiene]`, the history and issue convention every fleet follows unless its own `[fleet.<n>.hygiene]` key says otherwise.
@@ -62,28 +60,6 @@ impl Default for SelfUpdate {
             branch: "main".into(),
             staging_serve: false,
             staging_addr: "127.0.0.1:7787".into(),
-        }
-    }
-}
-
-/// The proxy's port (on this host, and on each `shed-acp` host through an ssh tunnel), where it forwards, how long a lane key lives; `token-file`, the one 0600 token it signs with (`Proxy::setup`'s).
-#[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
-pub struct ProxyCfg {
-    pub port: u16,
-    pub upstream: String,
-    pub key_hours: u64,
-    #[serde(rename = "token-file")]
-    pub token_file: Option<String>,
-}
-
-impl Default for ProxyCfg {
-    fn default() -> Self {
-        ProxyCfg {
-            port: 41990,
-            upstream: crate::providers::proxied().map_or("", |p| p.upstream).into(),
-            key_hours: 12,
-            token_file: None,
         }
     }
 }
@@ -221,8 +197,6 @@ pub struct HostCfg {
     #[serde(default)]
     pub deny_commands_add: Vec<Deny>,
     pub allow_commands: Option<Vec<String>>,
-    /// `shed-acp`: the runtime its lanes start in (unset: the fleet's, as before).
-    pub runtime: Option<RuntimeKind>,
     /// Lanes running a turn at once on this host, all fleets (unset: no cap).
     pub max_working: Option<usize>,
     /// Lanes starting at once on this host (unset: `[limits] start_max`; the main host: `max_parallel_spawns`).
@@ -777,8 +751,6 @@ pub struct Limits {
     pub notify_secs: u64,
     pub gate_check_minutes: u64,
     pub shed_read_millis: u64,
-    pub proxy_connect_secs: u64,
-    pub proxy_retry_secs: u64,
     pub service_call_secs: u64,
     pub disk_probe_secs: u64,
     pub disk_hung_secs: u64,
@@ -922,8 +894,6 @@ impl Default for Limits {
             notify_secs: 15,
             gate_check_minutes: 30,
             shed_read_millis: 300,
-            proxy_connect_secs: 1,
-            proxy_retry_secs: 300,
             service_call_secs: 2,
             disk_probe_secs: 2,
             disk_hung_secs: 6,
@@ -1431,8 +1401,7 @@ impl Config {
 
     pub fn shed(&self) -> Option<crate::shed::Shed> {
         let first = || self.fleet.values().find_map(|f| f.runtime.as_ref());
-        let host = || self.hosts.keys().find_map(|h| self.host_acp(h));
-        self.runtime.as_ref().or_else(first).map(Runtime::shed).or_else(host)
+        self.runtime.as_ref().or_else(first).map(Runtime::shed)
     }
 
     /// Lanes that may start at once on host `name` (a name no `[hosts]` entry has, or a machine-less one, is the main host).
@@ -1448,25 +1417,6 @@ impl Config {
     pub fn start_release(&self, name: &str) -> StartRelease {
         let h = self.hosts.get(name).and_then(|h| h.start_release);
         h.unwrap_or(self.limits.start_release)
-    }
-
-    /// Host `name`'s own `runtime = "shed-acp"`: the shed-acp runtime (shed's defaults), else None.
-    pub fn host_acp(&self, name: &str) -> Option<crate::shed::Shed> {
-        self.hosts
-            .get(name)
-            .filter(|h| h.runtime == Some(RuntimeKind::ShedAcp))?;
-        Some(
-            Runtime {
-                kind: RuntimeKind::ShedAcp,
-                ..Runtime::default()
-            }
-            .shed(),
-        )
-    }
-
-    /// The runtime fleet `fleet`'s new lanes start in on host `host`: the host's own, else the fleet's.
-    pub fn shed_on(&self, fleet: &str, host: Option<&str>) -> Option<crate::shed::Shed> {
-        host.and_then(|h| self.host_acp(h)).or_else(|| self.shed_for(fleet))
     }
 
     /// The fleet, refused `BAD_PIPELINE` while its pipeline breaks a rule (that fleet stops, the others run).

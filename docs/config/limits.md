@@ -73,8 +73,6 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `notify_secs` | `15` | a notifier command or web push send is killed after this long |
 | `gate_check_minutes` | `30` | a premerge or gate check (a build or test run) is killed after this long |
 | `shed_read_millis` | `300` | how long drive's intake waits for shed's state changes |
-| `proxy_connect_secs` | `1` | the token proxy's liveness connect timeout |
-| `proxy_retry_secs` | `300` | a proxy lane's sign-out holds its host only if no call gets through the token proxy this long after it |
 | `service_call_secs` | `2` | a call to the running service's socket times out after this long |
 | `disk_probe_secs` | `2` | a folder listing slower than this on a host over `min_cpu_idle` marks its disk as not answering |
 | `disk_hung_secs` | `6` | under `min_cpu_idle` a call waits this long for a slow folder listing, then the disk is not answering |

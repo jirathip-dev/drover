@@ -411,7 +411,7 @@ pub struct Server<'a> {
     timing: Mutex<slo::Timing>,
     phone: Mutex<slo::Timing>,
     rss: std::sync::atomic::AtomicU64,
-    hosts_read: Mutex<(usize, Option<Vec<String>>)>,
+    hosts_read: Mutex<usize>,
     streams: Mutex<BTreeMap<String, usize>>,
     hub: hub::Hub,
     tails: tails::Tails,

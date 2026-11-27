@@ -384,6 +384,11 @@ pub fn stuck(events: &[Event], st: &States, s: &IssueState) -> bool {
     open || !crate::events::held_on(events, s).is_empty()
 }
 
+/// `s` holds a cap's slot: in flight and not stuck; the serial and in-flight caps both count by it.
+pub fn occupies(events: &[Event], st: &States, s: &IssueState) -> bool {
+    in_flight(&s.state) && !stuck(events, st, s)
+}
+
 /// In flight: a live impl/fix lane, or at review/ready.
 pub fn in_flight(state: &str) -> bool {
     state == "impl" || state.starts_with("fix") || state.starts_with("review") || state == "ready"
@@ -400,8 +405,7 @@ pub fn held(events: &[Event], fleet: &str, n: u64, g: &str) -> bool {
 pub fn holders<'a>(events: &[Event], st: &'a States, f: &Fleet, fleet: &str, g: &str) -> Vec<&'a IssueState> {
     let q = replay(events, fleet);
     let isin = |s: &IssueState| groups(&q, events, f, fleet, s.issue).iter().any(|x| x.name == g);
-    let holds =
-        |s: &&IssueState| in_flight(&s.state) && !held(events, fleet, s.issue, g) && !stuck(events, st, s) && isin(s);
+    let holds = |s: &&IssueState| occupies(events, st, s) && !held(events, fleet, s.issue, g) && isin(s);
     st.values().filter(|s| s.fleet == fleet).filter(holds).collect()
 }
 
@@ -424,7 +428,7 @@ pub fn fleet_use(
     let one = |g: &Serial| format!("{} {}/{}", g.name, holders(events, st, f, fleet, &g.name).len(), g.max);
     let gs: Vec<_> = f.serial.iter().map(one).collect();
     let serial = (!gs.is_empty()).then(|| format!("serial: {}", gs.join(" · ")));
-    let flight = flight(ctx, st, f, fleet).map(|(v, cap)| format!("in flight {}/{cap}", v.len()));
+    let flight = flight(ctx, events, st, f, fleet).map(|(v, s, cap)| format!("in flight {}/{cap}", v.len() + s.len()));
     let both: Vec<String> = flight.into_iter().chain(serial).collect();
     (!both.is_empty()).then(|| both.join(", "))
 }
@@ -441,31 +445,46 @@ pub fn fleets_use(
         .flat_map(|c| c.fleet.keys())
         .filter(|f| only.is_none_or(|o| o == *f));
     let line = |st: &States, f: &String| Some(format!("{f}: {}\n", fleet_use(ctx, events, st, f, cfg)?));
-    let all = |st: &States| total(ctx, st, cfg?).map(|(v, cap)| format!("in flight {}/{cap}\n", v.len()));
+    let all = |st: &States| total(ctx, events, st, cfg?).map(|(v, cap)| format!("in flight {}/{cap}\n", v.len()));
     crate::events::with_states(events, |st| {
         all(st).into_iter().chain(fleets.filter_map(|f| line(st, f))).collect()
     })
 }
 
-/// The fleet's PRs in flight (at impl, fix, review, verify or ready, or held with an open PR) and its cap, unless off.
-pub fn flight(ctx: &crate::Ctx, st: &States, f: &Fleet, fleet: &str) -> Option<(Vec<u64>, usize)> {
-    Some((flying(ctx, st, fleet), f.in_flight_cap()?))
+/// The issues of `fleet` with a spawn marker younger than `spawn_pending_max_secs` that no spawn, error or failure ended.
+pub fn starting(ctx: &crate::Ctx, events: &[Event], fleet: &str) -> Vec<u64> {
+    let (pre, window) = (
+        format!("spawn-{fleet}-"),
+        crate::config::limits().spawn_pending_max_secs,
+    );
+    let fresh = |l: &crate::db::Lease| {
+        ctx.now < l.expires_at && ctx.now.saturating_sub(l.at) <= window && !crate::starts::ended(events, l)
+    };
+    let issue = |l: crate::db::Lease| l.key.strip_prefix(&pre)?.strip_suffix(".pending")?.parse().ok();
+    let all = crate::db::leases(&ctx.state, &pre).into_iter();
+    all.filter(fresh).filter_map(issue).collect()
 }
 
-fn flying(ctx: &crate::Ctx, st: &States, fleet: &str) -> Vec<u64> {
+fn flying(ctx: &crate::Ctx, events: &[Event], st: &States, fleet: &str) -> Vec<u64> {
     let pr = |n: u64| crate::gh::cached_pr(ctx, fleet, n).at("state") == "OPEN";
-    let held = |s: &IssueState| matches!(s.state.as_str(), "queued" | "blocked" | "needs-human") && pr(s.issue);
-    let flies = |s: &&IssueState| s.fleet == fleet && (in_flight(&s.state) || held(s));
+    let parked = |s: &IssueState| matches!(s.state.as_str(), "queued" | "blocked" | "needs-human");
+    let held = |s: &IssueState| (in_flight(&s.state) || parked(s)) && pr(s.issue);
+    let flies = |s: &&IssueState| s.fleet == fleet && (occupies(events, st, s) || held(s));
     st.values().filter(flies).map(|s| s.issue).collect()
 }
 
 /// Every fleet's PRs in flight as (fleet, issue) and `max_in_flight_total`, unless `0` turns it off.
-pub fn total(ctx: &crate::Ctx, st: &States, cfg: &crate::config::Config) -> Option<(Vec<(String, u64)>, usize)> {
+pub fn total(
+    ctx: &crate::Ctx,
+    events: &[Event],
+    st: &States,
+    cfg: &crate::config::Config,
+) -> Option<(Vec<(String, u64)>, usize)> {
     let cap = Some(cfg.limits.max_in_flight_total).filter(|&n| n > 0)?;
     let all = cfg
         .fleet
         .keys()
-        .flat_map(|f| flying(ctx, st, f).into_iter().map(|n| (f.clone(), n)));
+        .flat_map(|f| flying(ctx, events, st, f).into_iter().map(|n| (f.clone(), n)));
     Some((all.collect(), cap))
 }
 
@@ -495,7 +514,7 @@ pub fn total_full(
     (fleet, n, pending): (&str, u64, &[Event]),
 ) -> Option<TotalFull> {
     let fresh = state(st, fleet, n) == "queued" && crate::gh::cached_pr(ctx, fleet, n).at("state") != "OPEN";
-    let (v, cap) = total(ctx, st, cfg).filter(|_| fresh)?;
+    let (v, cap) = total(ctx, events, st, cfg).filter(|_| fresh)?;
     let me = (fleet.to_string(), n);
     let v: Vec<_> = v.into_iter().filter(|k| *k != me).collect();
     let starts = pending.iter().filter_map(|p| Some((p.fleet.clone(), p.issue?)));
@@ -546,27 +565,43 @@ fn ahead(
             .filter(free)
             .collect();
         let first = ms.iter().map(|&m| entered(g, m)).min()?;
-        let used = flying(ctx, st, g).len() + starts.iter().filter(|s| s.0 == *g).count();
+        let used = flying(ctx, events, st, g).len() + starts.iter().filter(|s| s.0 == *g).count();
         let room = f.in_flight_cap().map_or(ms.len(), |c| c.saturating_sub(used));
         (rank(g, first) < me).then(|| ms.len().min(room))
     };
     others.filter_map(waiting).sum()
 }
 
-/// Why a first start of queued issue `n` waits: the fleet's other in-flight PRs and `pending` starts fill its cap: (PRs, starts, cap).
-pub fn flight_full(
+/// The fleet's in-flight slots and its cap, unless off: (its PRs that occupy a slot, or held with an open PR; its other starts; cap).
+pub fn flight(
     ctx: &crate::Ctx,
+    events: &[Event],
     st: &States,
     f: &Fleet,
     fleet: &str,
-    (n, pending): (u64, &[Event]),
+) -> Option<(Vec<u64>, Vec<u64>, usize)> {
+    let cap = f.in_flight_cap()?;
+    let v = flying(ctx, events, st, fleet);
+    let starts = starting(ctx, events, fleet)
+        .into_iter()
+        .filter(|m| !v.contains(m))
+        .collect();
+    Some((v, starts, cap))
+}
+
+/// Why a first start of queued issue `n` waits: the fleet's other in-flight slots fill its cap: (PRs, starts, cap).
+pub fn flight_full(
+    ctx: &crate::Ctx,
+    events: &[Event],
+    st: &States,
+    f: &Fleet,
+    (fleet, n): (&str, u64),
 ) -> Option<(Vec<u64>, usize, usize)> {
     let fresh = state(st, fleet, n) == "queued" && crate::gh::cached_pr(ctx, fleet, n).at("state") != "OPEN";
-    let (v, cap) = flight(ctx, st, f, fleet).filter(|_| fresh)?;
+    let (v, starts, cap) = flight(ctx, events, st, f, fleet).filter(|_| fresh)?;
     let v: Vec<u64> = v.into_iter().filter(|&m| m != n).collect();
-    let starts = pending.iter().filter(|p| p.fleet == fleet).filter_map(|p| p.issue);
-    let starts: std::collections::BTreeSet<u64> = starts.filter(|m| *m != n && !v.contains(m)).collect();
-    (v.len() + starts.len() >= cap).then_some((v, starts.len(), cap))
+    let starts = starts.into_iter().filter(|&m| m != n).count();
+    (v.len() + starts >= cap).then_some((v, starts, cap))
 }
 
 /// The queue as shown: merged issues drop out; a blocker counts until it is merged.
@@ -626,12 +661,12 @@ pub fn skipped(
     let free = view(events, st, fleet)
         .iter()
         .any(|i| i.issue == n && labels(i).is_empty());
-    if let Some((v, _, cap)) = f
+    if let Some((v, starts, cap)) = f
         .filter(|_| free)
-        .and_then(|f| flight_full(ctx, st, f, fleet, (n, &[])))
+        .and_then(|f| flight_full(ctx, events, st, f, (fleet, n)))
     {
-        let say = crate::promise::Say::InFlightCap(v.len(), cap).line();
-        return Some((format!("in-flight cap {}/{cap}", v.len()), say));
+        let say = crate::promise::Say::InFlightCap(v.len() + starts, cap).line();
+        return Some((format!("in-flight cap {}/{cap}", v.len() + starts), say));
     }
     let now = ctx.now;
     let e = events
