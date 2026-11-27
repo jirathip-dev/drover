@@ -138,7 +138,7 @@ fn each_orchestrator_is_served_with_the_owners_instructions_and_drovers_hook() {
     assert!(brief.contains(OWN) && brief.contains("# ROLE: ORCHESTRATOR"), "{brief}");
     assert!(brief.contains("Fleet for asks: sendmeter"), "{brief}");
     let own_part = brief.split("# drover — usage for agents").next().unwrap();
-    for verb in ["thread reply", "thread handoff", "--typed"] {
+    for verb in ["thread reply", "--typed"] {
         assert!(!own_part.contains(verb), "{verb}: {own_part}");
     }
 
@@ -373,15 +373,13 @@ fn a_cooee_chat_posts_each_owner_card_and_reads_how_it_settled() {
 
     let path = c.config.with_file_name("secrets").join("API_KEY");
     assert_eq!(std::fs::read_to_string(path).unwrap().trim(), "s3cr3t-value");
-    let (code, page) = call(&s, true, ("GET", "/api/v1/thread/c-1"), "");
-    assert_eq!(code, 200, "{page}");
-    let lines: Vec<&str> = page["msgs"]
-        .as_array()
+    let said: Vec<_> = read(&c.state)
         .unwrap()
         .iter()
-        .filter(|m| m["kind"] == "note")
-        .filter_map(|m| m["text"].as_str())
+        .filter(|e| e.kind == "thread-msg" && e.str("thread") == Some("c-1") && e.str("from") == Some("system"))
+        .cloned()
         .collect();
+    let lines: Vec<&str> = said.iter().filter_map(|e| e.str("text")).collect();
     assert_eq!(lines.len(), 4, "{lines:?}");
     assert!(
         lines[0].starts_with("run r1 approved by owner, running in"),
@@ -395,7 +393,7 @@ fn a_cooee_chat_posts_each_owner_card_and_reads_how_it_settled() {
     assert_eq!(lines[3], "secret API_KEY set ✓ (by owner)");
     let log = format!("{:?}", read(&c.state).unwrap().to_vec());
     let (_, cards) = call(&s, true, ("GET", "/screens/cards"), "");
-    for seen in [log, page.to_string(), cards.to_string()] {
+    for seen in [log, cards.to_string()] {
         assert!(!seen.contains("s3cr3t-value"));
     }
     assert!(

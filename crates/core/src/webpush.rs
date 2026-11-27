@@ -208,34 +208,15 @@ pub fn send(log: &Path, sub: &str, ev: &Event, only: Option<&str>) -> Result<Str
     } else {
         "queue"
     };
-    let mut url = ev.issue.map_or(String::new(), |n| format!("?issue={n}")) + "#" + tab;
+    let url = ev.issue.map_or(String::new(), |n| format!("?issue={n}")) + "#" + tab;
     let n = ev.issue.filter(|_| ev.kind == "needs-human");
-    let kinds = ["thread-msg", "needs-decision", "ask-owner"];
-    let thread = ev.str("thread").filter(|_| kinds.contains(&ev.kind.as_str()));
     let why = ev.str("reason").unwrap_or("?");
-    let evs = if n.is_some() || thread.is_some() {
-        working(log)?
-    } else {
-        Arc::default()
-    };
+    let evs = if n.is_some() { working(log)? } else { Arc::default() };
     let first = n.and_then(|n| finding(&evs, &ev.fleet, n)).unwrap_or("");
-    let (title, mut body) = match n {
+    let (title, body) = match n {
         Some(n) => (format!("#{n} needs you: {why}"), format!("{why}\n{first}")),
         None => ("drover".into(), plain(ev)),
     };
-    if let Some(t) = thread.and_then(|t| crate::orchestrator::find(&evs, t).ok()) {
-        let repo = if t.fleet == "all" { "all repos" } else { &t.fleet };
-        let head = format!(
-            "{repo} · {}",
-            crate::orchestrator::title(&evs, t.str("thread").unwrap_or_default())
-        );
-        let text = ev.str("text").and_then(|x| x.lines().find(|l| !l.trim().is_empty()));
-        body = match ev.str("question") {
-            Some(q) => format!("{head} asks: {q}"),
-            None => format!("{head}: {}", text.unwrap_or_default()),
-        };
-        url = format!("#threads/{}", t.str("thread").unwrap_or_default());
-    }
     let (wk, said) = match (ev.kind.as_str(), ev.issue) {
         ("merged", Some(n)) => ("merged", format!("#{n} merged")),
         ("needs-human" | "needs-decision", Some(n)) => ("needs", format!("{} #{n} needs you", ev.fleet)),

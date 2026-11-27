@@ -551,7 +551,6 @@ pub static VISITS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Default, Clone)]
 pub struct Threads {
-    pub new: Vec<usize>,
     of: HashMap<String, Vec<usize>>,
     asks: HashMap<(String, String), usize>,
     decisions: HashMap<(String, String), usize>,
@@ -569,7 +568,6 @@ impl Threads {
         self.forwards.extend(e.data.get("forwards").and_then(Value::as_u64));
         let id = (e.fleet.clone(), e.str("id").unwrap_or_default().to_string());
         match e.kind.as_str() {
-            "thread-new" => self.new.push(i),
             "needs-decision" => {
                 self.asks.entry(id).or_insert(i);
             }

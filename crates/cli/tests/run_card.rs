@@ -14,10 +14,7 @@ fn setup(name: &str, extra: &str) -> drover::Ctx {
         &d,
         &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n{extra}"),
     );
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Ops"]).1,
-        "t1\n"
-    );
+    attach_chat(&c, "sendmeter", "t1");
     c
 }
 
@@ -99,21 +96,8 @@ fn the_orchestrator_brief_lists_the_fleets_groups() {
     );
     c.exe = env!("CARGO_BIN_EXE_drover").into();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    let agents =
-        json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo", "claude-agent-acp"]}]);
-    let f = Fake::default()
-        .reply("shed help run", "--meta <JSON>")
-        .reply("shed agents --json", &agents.to_string())
-        .reply("shed", "");
-    let r = sh.cli(&f);
-    assert_eq!(
-        run(&c, &r, &["thread", "say", "t1", "tidy up"]).0,
-        0,
-        "{:?}",
-        f.calls.borrow()
-    );
-    assert!(sh.has("orchestrator-t1"), "{:?}", sh.methods());
-    let brief = std::fs::read_to_string(c.state.with_file_name("orchestrator").join("t1/.brief.md")).unwrap();
+    attach_chat(&c, "sendmeter", "t2");
+    let brief = std::fs::read_to_string(c.state.with_file_name("orchestrator").join("t2/brief.md")).unwrap();
     for want in [
         "## Capability groups ([orchestrator] allow)",
         "- `clean` (on): `clean --yes`, `--orphans`, `--lane`",
@@ -121,7 +105,7 @@ fn the_orchestrator_brief_lists_the_fleets_groups() {
         "- `hosts` (off): `hosts on|off|refresh`",
         "- `set` (off): `set` a role's harness, model or effort",
         "refused `GROUP_OFF`",
-        "drover card post <thread>",
+        "drover card post $DROVER_THREAD",
     ] {
         assert!(brief.contains(want), "{want}: {brief}");
     }
@@ -170,11 +154,6 @@ fn approve_runs_the_exact_command_once_and_posts_its_masked_output() {
     assert_eq!(
         (card.str("cmd"), card.str("dir"), card.str("host"), card.str("thread")),
         (Some("git log -1 main"), Some("/srv/app"), Some("main"), Some("t1"))
-    );
-    let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
-    assert!(
-        show.contains("run card r1: `git log -1 main`") && show.contains("touches: read-only"),
-        "{show}"
     );
 
     let leak = "token ghp_abcdefghij0123456789abcdefghij";

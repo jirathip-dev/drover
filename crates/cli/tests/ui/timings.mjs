@@ -1,5 +1,5 @@
 // #1312's phone-timings gate in Playwright's WebKit at 390 px on a real serve: node timings.mjs <url> <cookie name=value> <reps>.
-// Each rep switches tabs (queue, lanes), opens a lane's sheet, opens thread t1, sends in it and answers one of its asks;
+// Each rep switches tabs (queue, lanes) and opens a lane's sheet;
 // then the page leaves, so its batch of timings posts to serve. Prints one JSON object: every sample it posted, the steps done, errors.
 import { createRequire } from 'node:module';
 
@@ -34,15 +34,6 @@ try {
     await step('tab lanes', () => page.click('nav a[href="#lanes"]'), s => !!document.querySelector(`${s} .row[data-id*="sendmeter-impl-"]`), shown);
     await step('lane sheet', () => page.click('main section.tab:not([hidden]) .row[data-id*="sendmeter-impl-"]'), () => !document.getElementById('sheet').hidden && /sendmeter-impl-/.test(document.querySelector('#sheet .sh b')?.textContent ?? ''));
     await page.keyboard.press('Escape');
-    await step('tab threads', () => page.click('nav a[href="#threads"]'), () => !!document.querySelector('main .row[data-id="t1"], .scr[data-id="thread-t1"]'));
-    await page.evaluate(() => { location.hash = '#threads'; });
-    await until(() => document.querySelector('main .row[data-id="t1"]'), 'the thread list');
-    await step('thread open', () => page.click('main .row[data-id="t1"]'), () => !!document.querySelector('.scr[data-id="thread-t1"] .cmp textarea'));
-    const text = `ping ${i}`;
-    await page.fill('.scr[data-id="thread-t1"] .cmp textarea', text);
-    await step('send', () => page.click('.scr[data-id="thread-t1"] .cmp .cr button.primary'), t => [...document.querySelectorAll('.scr[data-id="thread-t1"] .card')].some(c => c.textContent.includes(t)), text);
-    const asks = await page.locator('.scr[data-id="thread-t1"] .choice').count();
-    await step('answer', () => page.locator('.scr[data-id="thread-t1"] .choice button.pick').first().click(), n => document.querySelectorAll('.scr[data-id="thread-t1"] .choice').length < n, asks);
   }
   await page.goto('about:blank');
   await wait(1000);

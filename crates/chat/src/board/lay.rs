@@ -44,7 +44,6 @@ pub(crate) struct Hot {
 pub(crate) enum Tap {
     Sheet(String),
     Open { path: String, keep: bool },
-    Thread(String),
     Show(String),
     Fold(String),
     Edit(String, String),
@@ -313,9 +312,7 @@ impl L<'_> {
             let keep = t.at("keep") == true;
             return Some(Tap::Open { path, keep });
         }
-        p("thread")
-            .map(Tap::Thread)
-            .or_else(|| p("url").or_else(|| p("copy")).map(Tap::Show))
+        p("url").or_else(|| p("copy")).map(Tap::Show)
     }
 
     pub(crate) fn block(&mut self, b: &Value, pos: &str) {

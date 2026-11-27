@@ -1,6 +1,6 @@
 mod common;
 use common::*;
-use drover::events::{read, Event};
+use drover::events::read;
 use drover::serve::Server;
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -54,46 +54,21 @@ fn host() -> Fake {
         .reply("which claude", "/usr/local/bin/claude\n")
 }
 
-fn starts(c: &drover::Ctx) -> Vec<Event> {
-    let all = read(&c.state).unwrap().to_vec().into_iter();
-    all.filter(|e| e.kind == "orchestrator-start").collect()
-}
-
-fn start_line(r: &Fake) -> String {
-    let calls = r.calls.borrow();
-    let start = calls.iter().find(|c| c.starts_with("shed run --acp claude-acp"));
-    start.cloned().unwrap_or_default()
-}
-
 #[test]
-fn a_fleet_without_a_orchestrator_role_starts_one_on_its_impl_role_from_the_board() {
+fn a_fleet_without_a_orchestrator_role_attaches_its_chat_on_its_impl_role() {
     let b = FakeShed::new();
     let c = acp_setup("cdef-start", &b);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let profile = c.config.with_file_name("claude").join("lane-orchestrator");
-    assert!(profile.join("settings.json").exists());
-    let f = host();
-    let cli = b.cli(&f);
-    let r = b.on(&cli);
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let res = req(&s, "/thread", "op=new&repo=sendmeter&text=Grill+%2312", &cookie);
-    assert!(res.ends_with("\r\n\r\nt1 started\n"), "{res}");
-    let st = &starts(&c)[0];
-    assert_eq!((st.str("harness"), st.str("model")), (Some("claude"), Some("opus")));
     let lane = profile.join("settings.json");
-    assert!(start_line(&f).contains(&*lane.to_string_lossy()), "{}", start_line(&f));
-    let (code, out) = run(&c, &Fake::default(), &["thread", "reply", "t1", "Scope first."]);
+    assert!(lane.exists());
+    let (code, out) = run(&c, &Fake::default(), &["attach", "sendmeter", "c-1"]);
     assert_eq!(code, 0, "{out}");
-    let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
-    assert_eq!(
-        show,
-        "t1 sendmeter: Grill #12\nowner: Grill #12\nOrchestrator: Scope first.\n"
-    );
+    assert!(out.contains(&format!("settings: {}", lane.display())), "{out}");
 }
 
 #[test]
-fn a_orchestrator_choice_in_config_writes_its_table_after_a_backup_and_the_next_start_uses_it() {
+fn a_orchestrator_choice_in_config_writes_its_table_after_a_backup() {
     let b = FakeShed::new();
     let c = acp_setup("cdef-set", &b);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
@@ -135,16 +110,6 @@ fn a_orchestrator_choice_in_config_writes_its_table_after_a_backup_and_the_next_
         (set.str("role"), set.str("key"), set.str("new")),
         (Some("orchestrator"), Some("model"), Some("sonnet"))
     );
-    let res = req(&s, "/thread", "op=new&repo=sendmeter&text=Next", &cookie);
-    assert!(res.ends_with("t1 started\n"), "{res}");
-    assert_eq!(starts(&c)[0].str("model"), Some("sonnet"));
-    let lane = c
-        .config
-        .with_file_name("claude")
-        .join("lane-orchestrator/settings.json");
-    let start = start_line(&f);
-    assert!(start.contains(&*lane.to_string_lossy()), "{start}");
-    assert!(start.contains("ANTHROPIC_MODEL='sonnet'"), "{start}");
 }
 
 #[test]

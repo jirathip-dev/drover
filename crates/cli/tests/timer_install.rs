@@ -18,7 +18,7 @@ fn timer_install_logs_who_ran_it() {
     let r = Fake::default();
     std::env::remove_var("DROVER_LANE");
     std::env::remove_var("DROVER_THREAD");
-    assert_eq!(run(&c, &r, &["thread", "new", "sendmeter", "Timer"]).1, "t1\n");
+    attach_chat(&c, "sendmeter", "t1");
 
     assert_eq!(run(&c, &r, &["timer", "install", "--no-load"]).0, 0);
     let e = &installs(&c)[0];
@@ -43,7 +43,4 @@ fn timer_install_logs_who_ran_it() {
     assert_eq!(*e.val("written"), json!([]), "already written");
     std::env::remove_var("DROVER_LANE");
     std::env::remove_var("DROVER_THREAD");
-    let (_, show) = run(&c, &r, &["thread", "show", "t1"]);
-    let line = "system: sendmeter:-:orchestrator ran `drover timer install`: wrote [], reloaded []";
-    assert!(show.contains(line), "{show}");
 }

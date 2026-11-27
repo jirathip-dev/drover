@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::events::{emit, working, Event};
-use crate::orchestrator::{archived, attached, deliver, find, link_of, log, of, role, say};
+use crate::orchestrator::{attached, of};
 use crate::runner::Runner;
 use crate::thread::{Registry, Target};
 use crate::Ctx;
@@ -12,33 +12,20 @@ pub fn home(events: &[Event], fleet: &str, issue: Option<u64>) -> Target {
     Registry::read(events).home(fleet, issue)
 }
 
-/// The thread a lane's ask on `fleet` goes to: `[fleet.<n>] ask_thread`, else the repo's most recently active one (neither archived); none without a conductor role. an attached cooee thread is one of them.
+/// The chat a lane's ask on `fleet` goes to: `[fleet.<n>] ask_thread`, else the repo's most recently active attached chat.
 pub fn route<'a>(cfg: &Config, events: &'a [Event], fleet: &str) -> Option<&'a str> {
-    let own = role(cfg, fleet).is_ok();
     let chat = |e: &Event| e.str("via") == Some("profile");
-    let repo = |e: &&'a Event| {
-        e.fleet == fleet && (own && e.kind == "thread-new" || e.kind == "orchestrator-attached" && !chat(e))
-    };
+    let repo = |e: &&'a Event| e.fleet == fleet && e.kind == "orchestrator-attached" && !chat(e);
     let ids = events.iter().filter(repo).filter_map(|e| e.str("thread"));
-    let live = |id: &&str| match link_of(events, id) {
-        Some(_) => attached(events, id).is_some_and(|e| e.fleet == fleet),
-        None => !archived(events, id),
-    };
+    let live = |id: &&str| attached(events, id).is_some_and(|e| e.fleet == fleet);
     let ids: Vec<&str> = ids.filter(live).collect();
     let pin = cfg.fleet.get(fleet).and_then(|f| f.ask_thread.as_deref());
     let newest = || ids.iter().max_by_key(|id| of(events, id).map(|e| e.seq).max()).copied();
     ids.iter().find(|id| Some(**id) == pin).copied().or_else(newest)
 }
 
-/// Lane ask `a` as a system row in thread `id`, typed into a drover thread's orchestrator (started or resumed); an attached chat's client types the row's prompt.
-pub fn lane_ask(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, a: &Event) -> Result<String> {
-    let events = working(&ctx.state)?;
-    let t = attached(&events, id).map_or_else(|| find(&events, id), Ok)?.clone();
-    let text = route_row(ctx, cfg, id, a)?;
-    deliver(ctx, cfg, r, &t, &format!("[{id}] system: {text}"))
-}
-
-pub(crate) fn route_row(ctx: &Ctx, cfg: &Config, id: &str, a: &Event) -> Result<String> {
+/// Lane ask `a` as a system row in attached chat `id`: its client types the row's prompt.
+pub fn lane_ask(ctx: &Ctx, cfg: &Config, id: &str, a: &Event) -> Result<String> {
     let s = |k| a.str(k).unwrap_or_default();
     let rec = a.val("recommend").as_u64();
     let opts = a.val("options").as_array().into_iter().flatten().zip(1..);
@@ -84,27 +71,27 @@ pub fn to_owner(ctx: &Ctx, cfg: &Config, id: &str, a: &Event, rec: Option<u64>, 
     emit(&ctx.state, cfg, Event::new(ctx.now, &a.fleet, a.issue, "ask-owner", d))
 }
 
-/// A one-line row from thread `id` into each thread that handed off to it (an issue filed, an ask answered).
+/// A one-line row from chat `id` into each chat that handed off to it (an issue filed, an ask answered).
 pub fn flow(ctx: &Ctx, cfg: &Config, id: &str, text: &str) -> Result<()> {
     let events = working(&ctx.state)?;
     let to_id = |e: &&Event| {
         e.kind == "thread-handoff" && e.str("to") == Some(id) && crate::orchestrator::moved(&events, e.seq).is_none()
     };
-    let srcs: std::collections::BTreeSet<_> = events.iter().filter(to_id).filter_map(|e| e.str("from")).collect();
-    for s in srcs {
+    let srcs: std::collections::BTreeMap<_, _> = (events.iter().filter(to_id))
+        .filter_map(|e| Some((e.str("from")?, e.fleet.as_str())))
+        .collect();
+    for (s, fleet) in srcs {
         let d = json!({"thread": s, "from": "system", "via": id, "text": text});
-        let e = Event::new(ctx.now, &find(&events, s)?.fleet, None, "thread-msg", d);
-        emit(&ctx.state, cfg, e)?;
+        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "thread-msg", d))?;
     }
     Ok(())
 }
 
-/// A card's settle line into thread `id` as `system`: typed into a drover thread's orchestrator, logged for a cooee chat.
-pub fn tell(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, line: &str) {
-    let chat = working(&ctx.state).ok().and_then(|e| attached(&e, id).cloned());
-    match chat {
-        Some(t) => log(ctx, cfg, &t, "system", (line, &[])),
-        None => say(ctx, cfg, r, (id, line, &[]), ("system", false)).map(drop),
-    }
-    .ok();
+/// A card's settle line into attached chat `id` as a `system` row; its client types the row's prompt.
+pub fn tell(ctx: &Ctx, cfg: &Config, _: &dyn Runner, id: &str, line: &str) {
+    let Some(t) = working(&ctx.state).ok().and_then(|e| attached(&e, id).cloned()) else {
+        return;
+    };
+    let d = json!({"thread": id, "from": "system", "text": line});
+    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d)).ok();
 }

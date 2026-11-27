@@ -179,8 +179,7 @@ fn screen(s: &Server, method: &str, path: &str, body: &str, extra: &str) -> (u16
 #[test]
 fn an_open_ask_row_opens_its_choice_recommended_first_and_an_answered_one_offers_none() {
     let c = ctx(&tmpdir("events-asks"), CONFIG);
-    let (code, out) = run(&c, &Fake::default(), &["thread", "new", "sendmeter", "scope"]);
-    assert_eq!((code, out.trim()), (0, "t1"));
+    attach_chat(&c, "sendmeter", "t1");
     let at = |ago, issue, kind: &str, d: Value| Event::new(NOW - ago, "sendmeter", issue, kind, d);
     for e in [
         at(
@@ -266,7 +265,7 @@ fn an_open_ask_row_opens_its_choice_recommended_first_and_an_answered_one_offers
     assert_eq!((status, &v["close"]), (200, &json!(true)), "{v}");
     let q2 = &rows("?kind=ask")[1];
     assert_eq!(q2["subtitle"], "answered · full", "{q2:?}");
-    assert_eq!(q2["tap"], json!({"thread": "t1"}), "{q2:?}");
+    assert_eq!(q2["tap"], Value::Null, "a chat's ask opens no drover thread: {q2:?}");
     let closed = sheet(&row);
     assert!(!closed.to_string().contains("\"choice\""), "{closed}");
     assert!(closed.to_string().contains("answered · full"), "{closed}");

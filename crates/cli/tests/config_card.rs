@@ -3,9 +3,6 @@ use common::*;
 use drover::events::{append, Event};
 use drover::serve::Server;
 use serde_json::{json, Value};
-use std::io::{Read, Write};
-use std::net::TcpStream;
-use std::time::{Duration, Instant};
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
@@ -15,10 +12,7 @@ fn setup(name: &str) -> drover::Ctx {
         &tmpdir(name),
         &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Models"]).1,
-        "t1\n"
-    );
+    attach_chat(&c, "sendmeter", "t1");
     msgs(&c, T, 0..3);
     c
 }
@@ -42,147 +36,15 @@ fn msgs(c: &drover::Ctx, ts: u64, ids: std::ops::Range<u64>) {
     }
 }
 
-fn chat(s: &Server, cookie: &str) -> Value {
-    chat_all(s, ADDR, cookie, T + 500)
-}
-
-fn thread(chat: &Value) -> Value {
-    let ts = chat["threads"].as_array().unwrap();
-    ts.iter().find(|t| t["id"] == "t1").unwrap().clone()
-}
-
-fn page(s: &Server, cookie: &str, q: &str) -> Value {
-    serde_json::from_str(&api(s, ADDR, cookie, T + 500, &format!("thread/t1?before={q}"))).unwrap()
-}
-
-fn configs(msgs: &Value) -> Vec<Value> {
-    let all = msgs.as_array().unwrap().iter();
-    all.filter(|m| m["kind"] == "config").cloned().collect()
-}
-
 #[test]
-fn a_waiting_card_stays_on_the_first_page_and_a_stale_one_cannot_apply() {
+fn a_stale_proposal_cannot_apply() {
     let c = setup("cfg-window");
     propose(&c);
-    msgs(&c, T + 100, 0..40);
-    let r = Fake::default();
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T + 500);
-    let all = chat(&s, &cookie);
-    let t = thread(&all);
-    let msgs = &t["page"]["msgs"];
-    assert_eq!(
-        (&msgs[0]["kind"], &msgs[0]["from"], &msgs[0]["open"]),
-        (&json!("config"), &json!("c1"), &json!(true)),
-        "kept first, above the window: {t}"
-    );
-    assert_eq!(msgs[1]["text"], "m10", "{t}");
-    assert_eq!(msgs.as_array().unwrap().len(), 31, "the 30 and the card");
-    assert_eq!(t["waiting"], json!(["c1"]), "on the thread's bar: {t}");
-    let repo = all["repos"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|r| r["repo"] == "sendmeter")
-        .unwrap();
-    assert_eq!(repo["rows"][0]["waiting"], json!(["c1"]), "on its row: {repo}");
-    let older = page(&s, &cookie, &format!("{}&n=30", t["page"]["older"]));
-    assert!(
-        older.to_string().contains("\"text\":\"m9\"") && configs(&older["msgs"]).is_empty(),
-        "{older}"
-    );
-
     let cur = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(&c.config, cur + "\n# hand edit\n").unwrap();
-    let all = chat(&s, &cookie);
-    let t = thread(&all);
-    assert!(
-        configs(&t["page"]["msgs"]).is_empty() && t["waiting"] == json!([]),
-        "{t}"
-    );
-    let older = page(&s, &cookie, "999999&n=60");
-    let cards = configs(&older["msgs"]);
-    assert_eq!(cards.len(), 1, "{older}");
-    assert_eq!(
-        (&cards[0]["from"], &cards[0]["open"]),
-        (&json!("c1"), &json!(false)),
-        "stale: {older}"
-    );
     let (code, out) = run(&c, &Fake::default(), &["config", "apply", "c1"]);
     assert!(code == 3 && out.contains("REFUSED STALE"), "{code} {out}");
     assert!(std::fs::read_to_string(&c.config).unwrap().ends_with("# hand edit\n"));
-}
-
-fn drain(s: &mut TcpStream, ms: u64) -> String {
-    let (end, mut out, mut b) = (Instant::now() + Duration::from_millis(ms), vec![], vec![0u8; 65_536]);
-    while Instant::now() < end {
-        match s.read(&mut b) {
-            Ok(0) => break,
-            Ok(n) => out.extend_from_slice(&b[..n]),
-            Err(_) => {}
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-fn serve(c: &drover::Ctx) -> (std::net::SocketAddr, FakeShed) {
-    let sh = FakeShed::new();
-    sh.attach(c);
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = l.local_addr().unwrap();
-    let c2 = c.clone();
-    std::thread::spawn(move || drover::serve::serve_on(&c2, &Fake::default(), l, false));
-    (addr, sh)
-}
-
-#[test]
-fn a_proposal_reaches_a_thread_open_on_the_phone_live() {
-    let c = setup("cfg-live");
-    let (addr, _sh) = serve(&c);
-    let mut s = TcpStream::connect(addr).unwrap();
-    s.write_all(format!("GET /live?tab=chat&thread=t1 HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
-        .unwrap();
-    s.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
-    assert!(drain(&mut s, 1_500).starts_with("HTTP/1.1 200 OK"));
-    propose(&c);
-    msgs(&c, T + 100, 0..40);
-    let chat = |got: &str| {
-        let parts = got.split("event: chat\ndata: ").skip(1);
-        parts
-            .filter_map(|l| serde_json::from_str::<Value>(l.lines().next()?).ok())
-            .last()
-    };
-    let (t0, mut got) = (Instant::now(), String::new());
-    while !chat(&got).is_some_and(|j| j.to_string().contains("\"line\":\"conductor: m39\""))
-        && t0.elapsed() < Duration::from_secs(5)
-    {
-        got += &drain(&mut s, 100);
-    }
-    let j = chat(&got).unwrap_or_else(|| panic!("no chat data within 5 s: {got}"));
-    assert_eq!(j["threads"], json!([]), "the push carries the rows, not each thread");
-    let mut o = TcpStream::connect(addr).unwrap();
-    o.write_all(format!("GET /api/v1/chat?thread=t1 HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n").as_bytes())
-        .unwrap();
-    let mut res = String::new();
-    o.read_to_string(&mut res).unwrap();
-    let opened: Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
-    let t = &opened["threads"][0];
-    let msgs = t["page"]["msgs"].as_array().unwrap();
-    let card = (msgs[0]["kind"].as_str(), msgs[0]["from"].as_str(), &msgs[0]["open"]);
-    assert_eq!(
-        card,
-        (Some("config"), Some("c1"), &json!(true)),
-        "first, past the window: {t}"
-    );
-    assert_eq!(msgs.last().unwrap()["text"], "m39", "{t}");
-    assert_eq!(t["waiting"], json!(["c1"]), "{t}");
-    let repo = j["repos"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|r| r["repo"] == "sendmeter")
-        .unwrap();
-    assert_eq!(repo["rows"][0]["waiting"], json!(["c1"]), "{repo}");
 }
 
 #[test]
@@ -316,7 +178,9 @@ fn an_applied_proposal_shows_applied_with_no_buttons_and_never_stale() {
     let backup = format!("{}.bak-{}", c.config.display(), c.now);
     let home = config_cards(&screen(&s, &cookie, "/screens/cards"));
     assert!(home.is_empty(), "settled: off the owner's cards: {home:?}");
-    let cards = config_cards(&screen(&s, &cookie, "/screens/threads/t1"));
+    let all = rows(&c, &s, T + 500);
+    let last = all.iter().rfind(|r| r["key"] == "config-c1").unwrap();
+    let cards = config_cards(&last["block"]);
     assert_eq!(cards.len(), 1, "{cards:?}");
     let card = cards[0].to_string();
     assert!(

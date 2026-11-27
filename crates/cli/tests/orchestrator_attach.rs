@@ -165,10 +165,6 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
     assert_eq!(post("orchestrator-detach", attach.clone())["code"], "NO_SUCH_THREAD");
     post("orchestrator-attach", attach.clone());
     assert_eq!(ask(&c, &r, Some(COOEE)).0, 0);
-    assert_eq!(run(&c, &r, &["thread", "archive", COOEE]).0, 0);
-    assert!(ask(&c, &r, Some(COOEE)).1.contains("REFUSED NO_SUCH_THREAD"));
-    post("orchestrator-attach", attach);
-    assert_eq!(ask(&c, &r, Some(COOEE)).0, 0);
 }
 
 const TOKEN: &str = "tok-attach";

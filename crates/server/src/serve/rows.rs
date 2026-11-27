@@ -19,7 +19,7 @@ fn view(ctx: &Ctx, events: &[Event], (subject, row): (&Event, Row)) -> RowView {
     };
     let handoff = (subject.kind == "thread-handoff").then(|| super::v1::handoff(events, subject, false));
     RowView {
-        block: super::chat::drawn(ctx, events, subject, &row, &id),
+        block: super::cards::drawn(ctx, events, subject, &row, &id),
         row,
         handoff,
     }

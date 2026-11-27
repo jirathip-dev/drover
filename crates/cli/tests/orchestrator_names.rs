@@ -83,11 +83,6 @@ fn the_old_names_load_and_act_the_same_with_one_doctor_line() {
         kinds(&c, "conductor-start").is_empty(),
         "old types read as the new ones"
     );
-    assert!(run(&c, &Fake::default(), &["thread", "show", "t1"])
-        .1
-        .contains("\nOrchestrator: Hi\n"));
-    let ls: Vec<Value> = serde_json::from_str(&run(&c, &Fake::default(), &["thread", "ls", "--json"]).1).unwrap();
-    assert_eq!(ls[0]["state"], "asleep", "{ls:?}");
     for (q, t) in [("q1", None), ("q2", Some("t1"))] {
         let d = json!({"id": q, "question": "Which?", "options": ["a", "b"], "thread": t, "kind": "owner"});
         ev(&c, NOW - 200, "needs-decision", d);
@@ -149,18 +144,6 @@ fn two_orchestrators_on_one_fleet_both_act_each_named_in_the_log_and_the_gates_s
     let c = two("orch-two");
     let sh = FakeShed::attached(&c);
     let r = Fake::default();
-    let new = |o: &[&str]| run(&c, &r, &[&["thread", "new", "sendmeter", "Plan"], o].concat());
-    assert_eq!(new(&["--orchestrator", "ada"]), (0, "t1\n".into()));
-    assert_eq!(new(&["--orchestrator", "bob"]), (0, "t2\n".into()));
-    assert_eq!(new(&[]).1, "t3\n", "unnamed: the first whose fleets cover it");
-    let (code, out) = run(&c, &r, &["thread", "new", "all", "Plan", "--orchestrator", "ada"]);
-    assert_eq!(code, 3, "Ada's fleets do not cover `all`: {out}");
-    let of: Vec<_> = kinds(&c, "thread-new")
-        .iter()
-        .map(|t| t.str("orchestrator").map(String::from))
-        .collect();
-    assert_eq!(of, [Some("ada".into()), Some("bob".into()), Some("ada".into())]);
-
     for (id, n) in [("ada", "12"), ("bob", "13")] {
         let (code, out) = as_orch(&c, &r, id, &["queue", "sendmeter", "add", n]);
         assert_eq!(code, 0, "{out}");
@@ -187,50 +170,4 @@ fn two_orchestrators_on_one_fleet_both_act_each_named_in_the_log_and_the_gates_s
     assert_eq!(spawns, [(Some(12), json!("ada")), (Some(13), json!("bob"))]);
     assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "14"]).0, 0);
     assert_eq!(kinds(&c, "queue").last().unwrap().data.get("orchestrator"), None);
-
-    let (_, ls) = run(&c, &r, &["thread", "ls", "sendmeter", "--json"]);
-    let rows: Vec<Value> = serde_json::from_str(&ls).unwrap();
-    let names: Vec<_> = rows.iter().map(|t| (t["thread"].clone(), t["name"].clone())).collect();
-    assert_eq!(
-        names,
-        [
-            (json!("t1"), json!("Ada")),
-            (json!("t2"), json!("Bob")),
-            (json!("t3"), json!("Ada"))
-        ]
-    );
-}
-
-#[test]
-fn renaming_an_orchestrator_changes_every_label_and_no_other_config() {
-    let _env = ENV.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let cfg = format!(
-        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n\n[orchestrator]\nname = \"Ada\"\n"
-    );
-    let c = ctx(&tmpdir("orch-rename"), &cfg);
-    let r = Fake::default();
-    assert_eq!(run(&c, &r, &["thread", "new", "sendmeter", "Grill"]).1, "t1\n");
-    assert_eq!(run(&c, &r, &["thread", "reply", "t1", "Which scope?"]).0, 0);
-    let ask = ["ask", "sendmeter", "-", "How fast?", "--option", "a", "--thread", "t1"];
-    assert_eq!(run(&c, &r, &ask).1, "q1\n");
-    let labels = |c: &drover::Ctx| {
-        let show = run(c, &r, &["thread", "show", "t1"]).1;
-        let ls = run(c, &r, &["thread", "ls"]).1;
-        format!("{show}{ls}")
-    };
-    let before = labels(&c);
-    for l in ["Ada: Which scope?", "Ada asks q1: How fast?", ", Ada "] {
-        assert!(before.contains(l), "{l} in {before}");
-    }
-    assert!(
-        !before.contains("conductor") && !before.contains("orchestrator"),
-        "{before}"
-    );
-
-    let renamed = cfg.replace("name = \"Ada\"", "name = \"Bob\"");
-    let changed: Vec<_> = cfg.lines().zip(renamed.lines()).filter(|(a, b)| a != b).collect();
-    assert_eq!(changed, [("name = \"Ada\"", "name = \"Bob\"")], "one field");
-    std::fs::write(&c.config, &renamed).unwrap();
-    let after = labels(&c);
-    assert_eq!(after, before.replace("Ada", "Bob"));
 }

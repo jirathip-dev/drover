@@ -1,7 +1,6 @@
 mod common;
 use common::*;
 use drover::events::{append, open_asks, read, Event};
-use drover::serve::Server;
 use serde_json::{json, Value};
 
 const NOW: u64 = 1_000_000;
@@ -138,11 +137,12 @@ fn check(c: &drover::Ctx, r: &Fake) -> String {
     out
 }
 
-fn choosing(c: &drover::Ctx) -> u64 {
-    let r = Fake::default();
-    let s = Server::new(c, &r, Some("127.0.0.1:7777".into()));
-    let needs: Value = serde_json::from_str(&api(&s, "127.0.0.1:7777", "", c.now, "needs")).unwrap();
-    needs["choosing"].as_u64().unwrap()
+fn choosing(c: &drover::Ctx) -> usize {
+    let events = drover::events::read(&c.state).unwrap();
+    let open = drover::thread::open(&events);
+    open.iter()
+        .filter(|(_, r)| r.kind == drover::thread::RowKind::Ask)
+        .count()
 }
 
 #[test]

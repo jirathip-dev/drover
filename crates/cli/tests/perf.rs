@@ -474,7 +474,6 @@ fn a_hundred_board_requests_on_a_30k_event_store_stay_under_the_cpu_budget() {
         "/api/v1/queue",
         "/api/v1/needs",
         "/api/v1/lanes",
-        "/api/v1/chat",
         "/screens/lanes",
         "/api/v1/events?since=29990",
         "/",
@@ -706,7 +705,6 @@ fn the_state_read_stays_under_300ms_on_a_150k_event_log() {
     for p in [
         "/api/v1/needs",
         "/api/v1/lanes",
-        "/api/v1/chat",
         "/api/v1/queue",
         "/api/v1/host",
         "/api/v1/issue/sendmeter/1000",
@@ -812,7 +810,6 @@ fn parity_r7_no_board_request_starts_a_process() {
         "/api/v1/queue",
         "/api/v1/needs",
         "/api/v1/lanes",
-        "/api/v1/chat",
         "/api/v1/events",
         "/api/v1/lessons",
         "/api/v1/config",

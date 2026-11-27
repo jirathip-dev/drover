@@ -158,7 +158,7 @@ writes only the changed cells, so there is no full redraw and no flicker. A chan
 The door is one new file in the server crate, a child of the screens module. The app stays `crates/chat`: one
 frame, a `threads` module (today's code, moved) and a `board` module (boundaries.md). `ratatui` and its crossterm
 stay in that crate only. `drover board` opens the app when stdout is a terminal and it is not in a lane; else it
-prints today's table through today's code. The hook keeps refusing `drover chat` in a lane and never refuses
+prints today's table through today's code. The hook keeps refusing drover chat in a lane and never refuses
 `drover board`, whose table lanes read: there the lane variable alone decides, and a hook test holds both lines.
 
 ### The chat tab stays as built

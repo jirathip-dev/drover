@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 pub mod route;
 
-/// Where a row goes: a thread by id, a repo's desk thread, or the owner alone.
+/// Where a row goes: a chat by id, a repo's desk (its owner cards), or the owner alone.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "k", rename_all = "kebab-case")]
@@ -147,6 +147,25 @@ impl Registry {
     }
 }
 
+/// Every old drover thread's first event, oldest first: history, as no thread is made any more.
+pub fn threads(events: &[Event]) -> Vec<&Event> {
+    events.iter().filter(|e| e.kind == "thread-new").collect()
+}
+
+/// Old drover thread `id`'s first event (`NO_SUCH_THREAD`).
+pub fn find<'a>(events: &'a [Event], id: &str) -> anyhow::Result<&'a Event> {
+    match crate::orchestrator::of(events, id).find(|e| e.kind == "thread-new") {
+        Some(t) => Ok(t),
+        None => crate::gate::refused("NO_SUCH_THREAD", format!("no thread {id}")),
+    }
+}
+
+/// Old drover thread `id`'s title: its last `thread title`, else the one it started with.
+pub fn title<'a>(events: &'a [Event], id: &str) -> &'a str {
+    let t = crate::orchestrator::of(events, id).rfind(|e| matches!(e.kind.as_str(), "thread-new" | "thread-title"));
+    t.and_then(|e| e.str("title")).unwrap_or_default()
+}
+
 /// In an orchestrator's lane, the thread it talks in (`DROVER_THREAD`): every event it logs carries it (`db::insert`).
 pub fn stamp() -> Option<String> {
     let lane = crate::config::env("DROVER_LANE")?;
@@ -218,6 +237,11 @@ fn row<'a>(events: &'a [Event], reg: &Registry, e: &'a Event) -> Option<(&'a Eve
                 .str("thread")
                 .map(|_| format!("DECISION {}: {}", s("id"), s("choice")));
             RowKind::Decision
+        }
+        ("thread-handoff", _) if e.val("desk") == true => {
+            to = Target::Desk { repo: s("to") };
+            open = crate::orchestrator::moved(events, e.seq).is_none();
+            RowKind::Handoff
         }
         ("thread-handoff", _) => {
             (to, prompt) = (

@@ -30,8 +30,6 @@ const POSTS: &[&str] = &[
     "menu",
     "act",
     "setup",
-    "chat-about",
-    "chat",
     "close",
     "qset",
     "lesson",
@@ -166,9 +164,6 @@ fn every_route_keeps_its_fixtures_shape() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let post = |op: &str, v: Value| call(&s, &c, ("POST", &format!("/api/v1/{op}")), &v.to_string(), &ck);
-    post("chat-about", json!({"fleet": "sendmeter", "issue": 30}));
-    let ev = drover::events::read(&c.state).unwrap();
-    let t = ev.iter().rev().find_map(|e| e.str("thread")).unwrap().to_string();
     post("setup", json!({"host": "bazzite", "name": "claude B"}));
     r.1.screen("drover-setup-claude-B", "Paste code here >\n");
     let mut fails = vec![];
@@ -190,13 +185,7 @@ fn every_route_keeps_its_fixtures_shape() {
         ("shed", "/api/v1/shed", Vec<ShedRow>),
         ("health", "/api/v1/health", Health)
     );
-    let cfg = drover::config::Config::load(&c.config).unwrap();
-    let h = [t.as_str(), "sendmeter", "Facets", "add facets\nthen reindex"];
-    drover::orchestrator::handoff(&c, &cfg, &r, h).unwrap();
     gets!(
-        ("chat", "/api/v1/chat", ChatTab),
-        ("thread/<t>", format!("/api/v1/thread/{t}"), ThreadPage),
-        ("repo/<fleet>/threads", "/api/v1/repo/sendmeter/threads", RepoThreads),
         ("lane/<agent>", format!("/api/v1/lane/{IMPL}"), LaneChat),
         ("herd", "/api/v1/herd", Herd),
         ("roles", "/api/v1/roles?fleet=sendmeter", Roles),

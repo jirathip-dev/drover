@@ -110,7 +110,7 @@ pub struct Moment {
     pub n: Option<u64>,
 }
 
-/// API v1's `needs`, the cards above every tab as this device sees them: the snapshot's time `snap` (0: none; the strip under the header shows its age once over 2 min), the open asks, each blocked lane's card, the `needs-human` issues, and `choosing` (`[chat·N]`). `rw`: the board takes forms (the answer boxes); `live`: and is no export; `paired`: the device may answer a lane or an issue; `pair`: the page offers Pair this phone.
+/// API v1's `needs`, the cards above every tab as this device sees them: the snapshot's time `snap` (0: none; the strip under the header shows its age once over 2 min), the open asks, each blocked lane's card and the `needs-human` issues. `rw`: the board takes forms (the answer boxes); `live`: and is no export; `paired`: the device may answer a lane or an issue; `pair`: the page offers Pair this phone.
 pub struct NeedsTab {
     pub now: u64,
     pub rw: bool,
@@ -119,7 +119,6 @@ pub struct NeedsTab {
     pub pair: bool,
     pub mtime: String,
     pub snap: u64,
-    pub choosing: usize,
     pub asks: Vec<NeedAsk>,
     pub blocked: Vec<Blocked>,
     pub issues: Vec<NeedIssue>,
@@ -275,96 +274,17 @@ pub struct LaneNow {
     pub t: Option<String>,
 }
 
-/// API v1's `chat`, the [chat] tab: a card per repo (`all` first) with its open threads' rows (`?archived=1`: the archived ones too), and `?thread=<t>`'s view alone (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
-pub struct ChatTab {
-    pub now: u64,
-    pub rw: bool,
-    pub error: Option<String>,
-    pub repos: Vec<ChatRepo>,
-    pub threads: Vec<ThreadView>,
-}
-
-/// A repo's card in colour `k`: its threads newest first, the archived ones apart; its empty thread's `harness` chip.
-pub struct ChatRepo {
-    pub repo: String,
-    pub k: String,
-    pub rows: Vec<ThreadRow>,
-    pub archived: Vec<ThreadRow>,
-    pub harness: Chip,
-}
-
-/// A composer chip: `name`'s current value `cur` (none: the default) and its choices `all`.
-pub struct Chip {
-    pub name: String,
-    pub cur: Option<String>,
-    pub all: Vec<String>,
-}
-
-/// A thread's row: unread, title, age, its `state` (choose, working, asleep, …), the threads it links to, the last line; the ids of the config proposals `waiting` for the owner.
-pub struct ThreadRow {
-    pub id: String,
-    pub title: String,
-    pub age: String,
-    pub unread: bool,
-    pub state: String,
-    pub waiting: Vec<String>,
-    pub links: Vec<Link>,
-    pub line: String,
-}
-
-/// A linked thread's chip: `from t5`, `continued in t6`.
-pub struct Link {
-    pub w: String,
-    pub t: String,
-}
-
-/// One thread: its bar (`ds`: fleet · harness · model · state), its last messages, the live line's `state`; working, the turn's start `since`, and the `queued` messages above the box; the config proposals `waiting`; its model and effort `chips`.
-pub struct ThreadView {
-    pub id: String,
-    pub title: String,
-    pub ds: String,
-    pub state: String,
-    pub waiting: Vec<String>,
-    pub since: Option<u64>,
-    pub queued: Vec<QueuedMsg>,
-    pub chips: Vec<Chip>,
-    pub page: ThreadPage,
-}
-
-/// A message queued for the turn's end, by its id `q`.
-pub struct QueuedMsg {
-    pub q: u64,
-    pub text: String,
-}
-
-/// A page of a thread's messages; `older`: the seq to load the messages before, else the `started` line's time and conductor folder `dir`; the thread's `id`, and whether it is `archived` (opened read-only, [restore]).
-pub struct ThreadPage {
-    pub id: String,
-    pub archived: bool,
-    pub msgs: Vec<Msg>,
-    pub older: Option<u64>,
-    pub started: u64,
-    pub dir: String,
-}
-
-/// A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`, `signin` on `host`; a conductor's answer, its `ask` and `open` while the owner may [change] it), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question; `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; `open` unless stale; once applied, `answer` by whom, when and its backup as `choice`), `secret` (why, `from` its name), `resumed` (the session), `sleep`, `fold` (a finished turn's run of commands, `cmds`); `link` the thread it links to; `run` (a run card, `from` its id).
+/// A card's content (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line; an orchestrator's answer, its `ask` and `open` while the owner may [change] it), `msg` (the owner's line), `ask` (the question; `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; `open` unless stale; once applied, `answer` by whom, when and its backup as `choice`), `secret` (why, `from` its name), `run` (a run card, `from` its id).
 pub struct Msg {
     pub seq: u64,
     pub ts: u64,
     pub kind: String,
     pub text: String,
-    pub link: Option<Link>,
     pub from: String,
-    pub files: Vec<FileRef>,
-    pub retry: bool,
-    pub signin: Option<String>,
-    pub host: String,
     pub ask: Option<Ask>,
     pub routine: bool,
     pub answer: Option<Answered>,
     pub open: bool,
-    pub cmds: Vec<String>,
-    pub handoff: Option<Handoff>,
     pub run: Option<RunCard>,
 }
 
@@ -383,7 +303,6 @@ pub struct RunCard {
     pub code: Option<i64>,
     pub tail: String,
 }
-
 
 /// A handoff as one agent→agent item (cooee): `id` its seq (a repo handoff's: its card's), `from` the sending conductor, `to` the thread id once delivered, else `{repo, pending: true}`; `summary` the text's first line; `state` pending, delivered, failed (`error`) or forwarded; `folded` in the sender's thread, the message form in the receiver's; while pending, the card's `choices`.
 pub struct Handoff {
@@ -429,33 +348,6 @@ pub struct RowView {
     pub row: drover_core::thread::Row,
     pub block: Value,
     pub handoff: Option<Handoff>,
-}
-
-/// API v1's `repo/<fleet>/threads`: the repo's conductor threads, newest-active first.
-pub struct RepoThreads {
-    pub repo: String,
-    pub threads: Vec<RepoThread>,
-}
-
-/// A conductor thread: its `last` line and time, `awake` (its conductor not asleep), `newest` on the ongoing one (the first not archived).
-pub struct RepoThread {
-    pub id: String,
-    pub title: String,
-    pub last: LastLine,
-    pub unread: bool,
-    pub awake: bool,
-    pub archived: bool,
-    pub newest: bool,
-}
-
-pub struct LastLine {
-    pub line: String,
-    pub ts: u64,
-}
-
-pub struct FileRef {
-    pub name: String,
-    pub size: u64,
 }
 
 /// A decided ask: the option `n` chosen (none: an "other" answer), its text, by whom, when.

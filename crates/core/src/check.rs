@@ -105,19 +105,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     }
     let agents: Option<Vec<Session>> =
         (local.as_ref().ok()).map(|a| a.iter().filter(|s| s.running() && s.lane()).cloned().collect());
-    if let Some(a) = &agents {
-        crate::orchestrator::sleep_idle(ctx, cfg, r, &events, a)?;
-        crate::orchestrator::silence(ctx, cfg, r, &events, a)?;
-        for t in events.iter().filter(|e| e.kind == "thread-new") {
-            let id = t.str("thread").unwrap_or_default();
-            if let Some((s, quiet)) = crate::orchestrator::hung(ctx, cfg, &events, a, id) {
-                let agent = s.str("agent").unwrap_or_default();
-                let why = format!("orchestrator {agent} working with no CPU or output for {}", age(quiet));
-                let d = json!({"key": format!("{}:{agent}", s.ts), "agent": agent, "thread": id, "reason": why});
-                fire(ctx, cfg, out, &events, (&t.fleet, None), "stall", d)?;
-            }
-        }
-    }
+    crate::orchestrator::retire(ctx, cfg, r, &events)?;
     for (kind, d) in crate::accounts::alerts(cfg, r, &events) {
         fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
     }
@@ -1885,17 +1873,10 @@ fn spawned<'a>(events: &'a [Event], agent: &str, host: Option<&str>) -> Result<&
     }
 }
 
-/// `drover stop`: Esc to the agent's pane (it pauses), or a thread's orchestrator ended; logs `stop`.
+/// `drover stop`: Esc to the agent's pane (it pauses); logs `stop`.
 pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent: &str) -> Result<()> {
     let events = working(&ctx.state)?;
-    let thread = agent.strip_prefix("orchestrator-").unwrap_or(agent);
-    let e = match spawned(&events, agent, None) {
-        Err(_) if crate::orchestrator::find(&events, thread).is_ok() => {
-            let a = crate::orchestrator::stop(ctx, cfg, r, thread)?;
-            return Ok(writeln!(out, "stopped {a}")?);
-        }
-        e => e?,
-    };
+    let e = spawned(&events, agent, None)?;
     term::keys(&On::of(r, Some(e)), e.str("pane").unwrap_or_default(), "Escape")?;
     emit(
         &ctx.state,

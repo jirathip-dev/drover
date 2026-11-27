@@ -5,7 +5,6 @@ pub(crate) mod lay;
 mod rows;
 
 use crate::ui::{boxed, put, seg, st, wrap, Lines, Seg, AMBER, BLUE, GREY, RED};
-use drover_core::events::Json;
 use drover_core::{clock, Ctx};
 use drover_server::serve::{Local, Place};
 use feed::{Ask, Note};
@@ -51,7 +50,6 @@ const KEYS: [(&str, &str); 19] = [
 pub(crate) enum Out {
     Stay,
     Quit,
-    Thread(String),
 }
 
 enum Source {
@@ -180,13 +178,6 @@ impl<'s, 'e> Board<'s, 'e> {
 
     fn roots(&self) -> Vec<&Place> {
         self.places.iter().filter(|p| p.root).collect()
-    }
-
-    pub(crate) fn badge(&self) -> Option<u64> {
-        match &self.stack.first()?.tree {
-            Tree::Shown(t) => t.at("badge").as_u64(),
-            _ => None,
-        }
     }
 
     fn top(&self) -> &View {
@@ -318,7 +309,6 @@ impl<'s, 'e> Board<'s, 'e> {
                 }
                 self.push(View::live(path));
             }
-            Tap::Thread(t) => return Out::Thread(t),
             Tap::Show(t) => self.push(View::held(json!({"type": "sheet", "id": "show", "title": "link",
                 "blocks": [{"type": "text", "id": "show-text", "markdown": t}]}))),
             Tap::Fold(id) => {

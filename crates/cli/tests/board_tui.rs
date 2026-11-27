@@ -467,12 +467,6 @@ fn places_menu_sheets_tab_paging_and_quit_keys_do_what_the_design_lists() {
         key(app, KeyCode::Char('j'));
         key(app, KeyCode::Char('k'));
         assert_eq!(cursor(&screen(&mut t, app)), at);
-        key(app, KeyCode::Down);
-        let place = cursor(&screen(&mut t, app)).to_string();
-        key(app, KeyCode::Tab);
-        assert!(screen(&mut t, app).contains("no threads"), "Tab: Threads");
-        key(app, KeyCode::Tab);
-        assert_eq!(cursor(&screen(&mut t, app)), place, "Tab back keeps the place");
         goto(&mut t, app, "#12");
         key(app, KeyCode::Enter);
         until(&mut t, app, |s| s.contains("‹ #12"));
@@ -493,7 +487,7 @@ fn it_wraps_at_40x18_splits_at_120x40_and_never_panics_on_a_tiny_or_resized_scre
     board(&c, &r, |app, t| {
         let narrow = screen(t, app);
         assert!(
-            narrow.lines().nth(1).unwrap().contains("Queue · Events · Lanes"),
+            narrow.lines().next().unwrap().contains("Queue · Events · Lanes"),
             "{narrow}"
         );
         let mut wide = term(120, 40);

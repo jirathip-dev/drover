@@ -86,7 +86,7 @@ fn reads(c: &drover::Ctx, args: &[&str]) -> (usize, String) {
 
 static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-const COMMANDS: [&[&str]; 4] = [&["status"], &["waiting"], &["clean"], &["thread", "ls"]];
+const COMMANDS: [&[&str]; 3] = [&["status"], &["waiting"], &["clean"]];
 
 #[test]
 fn settled_reads_cost() {
@@ -116,7 +116,6 @@ fn settled_issues_and_archived_threads_are_read_from_the_snapshot_only() {
                 assert!(clean_me[0].contains("#2002"), "{out}");
             }
             "clean" => assert!(out.contains("issue-kept") && out.lines().count() == 2, "{out}"),
-            "thread" => assert_eq!(out.lines().count(), usize::try_from(OPEN_THREADS).unwrap() + 1, "{out}"),
             _ => {}
         }
     }
@@ -148,9 +147,13 @@ fn settled_issues_and_archived_threads_are_read_from_the_snapshot_only() {
         full,
         "the snapshot rebuilt from the log"
     );
-    let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t190"]);
+    std::fs::write(c.config.with_file_name("cooee-token"), "tok-settled").unwrap();
+    let fake = Fake::default();
+    let s = drover::serve::Server::new(&c, &fake, Some("127.0.0.1:7777".into()));
+    let req = "GET /api/v1/thread/t190/rows?n=500 HTTP/1.1\r\nHost: 127.0.0.1:7777\r\nAuthorization: Bearer tok-settled\r\n\r\n";
+    let show = String::from_utf8_lossy(&s.respond(req, NOW)).into_owned();
     assert!(
         show.contains("message 9"),
-        "an archived thread still shows in full: {show}"
+        "an archived thread's rows still serve in full: {show}"
     );
 }

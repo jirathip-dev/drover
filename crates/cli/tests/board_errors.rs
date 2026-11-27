@@ -27,16 +27,9 @@ fn parity_85_a_tab_names_the_real_read_error() {
     let ev = Event::new(1, "acme", Some(1), "queue-add", serde_json::json!({}));
     std::fs::write(&c.state, serde_json::to_string(&ev).unwrap() + "\n").unwrap();
     let r = Fake::default();
-    for tab in ["queue", "chat"] {
-        let e = error(&Server::new(&c, &r, Some("127.0.0.1:7777".into())), tab);
-        assert!(e.contains("migrate --live"), "{tab}: {e}");
-    }
+    let e = error(&Server::new(&c, &r, Some("127.0.0.1:7777".into())), "queue");
+    assert!(e.contains("migrate --live"), "{e}");
     let c = ctx(&tmpdir("board-errors-cfg"), "[fleet.acme\n");
-    for tab in ["queue", "chat"] {
-        let e = error(&Server::new(&c, &r, Some("127.0.0.1:7777".into())), tab);
-        assert!(
-            e.starts_with("config invalid: ") && e.contains("(fleet.toml:1)"),
-            "{tab}: {e}"
-        );
-    }
+    let e = error(&Server::new(&c, &r, Some("127.0.0.1:7777".into())), "queue");
+    assert!(e.starts_with("config invalid: ") && e.contains("(fleet.toml:1)"), "{e}");
 }

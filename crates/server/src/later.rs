@@ -123,7 +123,7 @@ impl Server<'_> {
                 ("id", c["id"].as_str().unwrap_or_default().trim_start_matches("run-")),
             ])
         });
-        cards.extend(super::super::chat::owner_cards(ctx, ev, paired));
+        cards.extend(super::super::cards::owner_cards(ctx, ev, paired));
         cards.extend(tab.config.as_ref().map(|e| {
             json!({"type": "card", "id": "config-invalid", "kind": "alert", "tone": "bad",
                 "title": "fleet.toml is invalid", "blocks": [{"type": "text", "id": "config-why", "markdown": e}]})

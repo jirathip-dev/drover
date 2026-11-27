@@ -11,4 +11,5 @@
   `drover card post $DROVER_THREAD --cmd "<exact command>" --why "<why>" --blast "<what it touches>" --dir <folder>`
   (approval expires 15 min after posting; never a `CARD_FORBIDDEN` act). Each shows as a card over the chat; how it
   settled (exit code and output tail, applied or discarded, `secret <NAME> set ✓`) is a `system` line in this chat.
-- Handoffs need a drover thread: tell the owner to open one.
+- Hand work to another chat or a repo: `drover thread handoff $DROVER_THREAD <repo|chat id> "<title>" "<context>"`.
+  A repo handoff is an open card on that repo's desk; the owner may [move] it to an attached chat.

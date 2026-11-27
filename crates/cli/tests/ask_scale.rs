@@ -22,7 +22,7 @@ fn needs(s: &Server) -> Vec<String> {
 }
 
 #[test]
-fn the_needs_and_chat_views_are_linear_in_the_log_and_one_event_updates_the_index() {
+fn the_needs_view_is_linear_in_the_log_and_one_event_updates_the_index() {
     let c = ctx(&tmpdir("ask-scale"), CONFIG);
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     let ev = |issue: u64, kind: &str, d: Value| {
@@ -62,17 +62,12 @@ fn the_needs_and_chat_views_are_linear_in_the_log_and_one_event_updates_the_inde
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let before = VISITS.load(Relaxed);
     let open = needs(&s);
-    let chat: Value = chat_all(&s, ADDR, "", NOW + 500);
     let visits = VISITS.load(Relaxed) - before;
     let want: Vec<String> = (ASKS - AGENTS..ASKS)
         .filter(|j| j % 2 == 1)
         .map(|j| format!("q{j}"))
         .collect();
     assert_eq!(open, want);
-    assert!(
-        chat.to_string().contains("\"open\":false"),
-        "the chat tab shows t1's ask rows: {chat}"
-    );
     assert!(
         visits <= 2 * EVENTS,
         "{visits} event visits for a {EVENTS}-event log with {ASKS} asks"

@@ -190,8 +190,7 @@ impl Server<'_> {
             now: crate::now(),
             ..ctx
         };
-        let (res, later) = crate::orchestrator::deferred(|| self.work(&ctx, &f));
-        self.later(&ctx, later);
+        let res = self.work(&ctx, &f);
         self.deliver();
         let (state, code, msg) = match &res {
             Ok(m) => ("done", "OK".to_string(), m.clone()),

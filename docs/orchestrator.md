@@ -1,67 +1,44 @@
-# Orchestrator chat (#355, steps 1 to 3)
+# Orchestrator chat (#355, #1571)
 
-Talk to a **orchestrator** through drover itself. A **thread** belongs to one fleet's repo, or
-to `all` for cross-cutting work. Each thread is talked through by one orchestrator lane.
+Drover runs no chat of its own (#1773, the cut of `docs/architecture/cooee-threads/`). A chat lives in a client:
+cooee's Orchestrator agent, or a terminal session. The client attaches the chat to a repo, `all` or `none`, runs the
+agent on the returned profile, and the agent drives drover through its CLI, so its asks, cards and queued issues
+carry its chat id (`DROVER_THREAD`).
 
 ```sh
-drover thread new acme "Grill #12"          # prints t1
-drover thread say t1 "what should #12 cover?"
-drover thread show t1 [--json]              # the conversation; marks it read
-drover thread ls [FLEET] [--json]           # per repo: title, last message, unread •, awake/asleep
-drover chat [THREAD]                        # the owner's: the same threads live, full screen in a terminal
+drover attach acme [ID]          # a terminal chat: logs the attach, prints the brief path, settings path and env lines
+drover thread handoff <from> <repo|chat> <title> <text>
 ```
 
-## `drover chat` (#1352)
+`POST /api/v1/orchestrator-attach {fleet, thread}` does the same for a client; `-detach` ends the link. The owner
+answers every ask and card on the board, `drover board` and the page, chat or no chat.
 
-The owner's way in when the board is down: it needs only the drover binary, no `drover serve`. With no thread it
-opens the thread list (per repo, `all` first, newest on top; Enter opens one); `drover chat t1` opens t1 (an unknown
-id is refused as `thread show` refuses it). It reads the event log every 500 ms, so a reply, ask, card or settle line
-shows within a second, and ratatui redraws only the cells that changed. A line is sent as `thread say` sends it; with
-the box empty a number selects that option of the open ask and `a` / `d` approve / deny of the open card, its panel
-showing exactly what is sent or run; Enter confirms through `drover answer` / `card approve --sha` / `card deny`.
-The top line lists what is down from doctor's serve and shed checks (every 10 s); a shed that does not answer is
-started with its own job (`dev.shed.serve`, `shed.service`), a message waits for it and goes once it answers, and if it
-does not start the line gives the command to run. From 100 columns the list and the chat sit side by side. Tab
-switches to the Board tab (#1354, docs/terminal.md). The keys are the design's list (`docs/design/drover-chat/README.md`); Ctrl-C quits
-and restores the terminal. The lane hook refuses it (`OWNER_ONLY`).
+## Old drover threads
 
-## The orchestrator lane
+The threads drover ran before #1773 stay in the log as history. `drover check` gives each still-open one a closing
+`system` row (`closing: true`: attach its id in a client to carry on), ends its orchestrator's session once and logs
+`thread-archive` with `by: migration`; an archived thread is skipped, so it runs once. `GET
+/api/v1/thread/<id>/rows` still serves a thread's rows by id. Attach takes an archived thread's id: the chat that
+adopts it gets the issues that thread filed or queued (their rows route to it). The thread uploads folder stays on
+disk; deleting it is an owner run card. The Lanes tab shows no orchestrator rows.
+
+## The orchestrator role
 
 - **Role `orchestrator`, any harness:** `[fleet.<n>.role.orchestrator]` takes the usual role keys (`harness`, `model`,
-  `effort`, `mcp`). An `all` thread uses the first fleet that defines one. Without
-  one (#401), a fleet's orchestrator is its `impl` role on profile `lane-orchestrator` (which `profiles sync` writes); only a fleet with neither refuses `NO_ORCHESTRATOR`.
-  `drover spawn … orchestrator` refuses `BAD_VALUE`.
-- **[config] → Orchestrator** shows the role in effect (`default: impl` or `set`) with tappable harness, model (the
-  models the fleet's roles use) and effort choices. A tap from a paired device writes `[fleet.<n>.role.orchestrator]` in
-  place (the first one copies the impl role's keys), after saving the old file as `fleet.toml.bak`; it is refused
-  `DOCTOR` when `drover doctor` with the new file shows a ✗ it did not show before. The next orchestrator start uses it.
-- **Harness, model and effort (#404):** the orchestrator role keeps its powers; the owner picks only these. `[chat]`
-  sets new threads' defaults over the role (each key unset: the role's):
-
-  ```toml
-  [chat]
-  harness = "claude"   # the only harness (#1726)
-  model = "opus"
-  effort = "high"
-  ```
-
-  A thread keeps the harness it starts on for good (`drover thread new … --harness <h>`, or the empty thread's
-  harness chip; a thread from before #404 has the default). Its composer's model and effort chips offer the models
-  that roles (or `[chat]`) on its harness use and the harness's efforts. A pick logs `thread-model`, shows `model sonnet · effort low from the next turn`, and the
-  next message resumes the orchestrator's session on it. The header reads `repo · harness · model`.
-- **Model list (#860):** the model chip also offers fleet.toml's top-level `models = [...]`; add a model there (via
-  `drover config propose`) and the chip offers it. A send on a pick no longer offered is refused `BAD_VALUE` with a
-  system line naming the model and the list (the message stays); a model the CLI rejects at start is one system line
-  with its error, not retried.
-- **No worktree:** it runs in `<state dir>/orchestrator/<thread>/` (or `<[orchestrator] dir>/<thread>/`) in its own shed terminal (an ACP session on a `shed-acp` fleet), as agent
-  `orchestrator-<thread>`, with `DROVER_LANE=<fleet>:-:orchestrator` (so the lane hook guards it) and
-  `DROVER_THREAD=<thread>`.
-- **Its brief** (`.brief.md` there, rewritten at each start) is `roles/orchestrator/role.md` and `thread.md`, the thread and repo, then the
-  `[orchestrator]` profile:
+  `effort`, `mcp`). An `all` chat uses the first fleet that defines one. Without one (#401), a fleet's orchestrator is
+  its `impl` role on profile `lane-orchestrator` (which `profiles sync` writes); only a fleet with neither refuses
+  `NO_ORCHESTRATOR`. `drover spawn … orchestrator` refuses `BAD_VALUE`.
+- **[config] → Orchestrator** shows the role in effect (`default: impl` or `set`) with tappable harness, model and
+  effort choices. A tap from a paired device writes `[fleet.<n>.role.orchestrator]` in place (the first one copies the
+  impl role's keys), after saving the old file as `fleet.toml.bak`; it is refused `DOCTOR` when `drover doctor` with
+  the new file shows a ✗ it did not show before. `[chat]` is read by nothing since #1773 (a client picks its own model).
+- **Its folder:** `<state dir>/orchestrator/<chat>/` (or `<[orchestrator] dir>/<chat>/`): `drover attach` writes the
+  brief there, and the lane hook lets the agent write in it.
+- **Its brief** is `roles/orchestrator/role.md` and `chat.md`, the chat and repo, then the `[orchestrator]` profile:
 
   ```toml
   [orchestrator]
-  dir = "~/orchestrator"                            # optional: the threads' folders' root (default <state dir>/orchestrator)
+  dir = "~/orchestrator"                            # optional: the chats' folders' root (default <state dir>/orchestrator)
   instructions = "~/notes/orchestrator/AGENTS.md"   # inlined
   memory = "~/notes/orchestrator/memory"            # each *.md inlined
   skills = "~/notes/orchestrator/skills"            # listed, read on demand
@@ -70,97 +47,41 @@ and restores the terminal. The lane hook refuses it (`OWNER_ONLY`).
 
   [orchestrator.ada]                               # #780: more orchestrators, each a name and its fleets
   name = "Ada"
-  fleets = ["acme-api", "all"]                     # overlap allowed; `all` covers the cross-repo threads
+  fleets = ["acme-api", "all"]
   ```
 
-- **Role and name (#780):** code keys off the role `orchestrator` and an orchestrator's id; its `name` is free text
-  that `thread show`, `thread ls` and `why` print, so renaming it touches that one field. A thread talks to one
-  orchestrator: `thread new <repo> <title> --orchestrator <id>`, else the first `[orchestrator.<id>]` whose `fleets`
-  cover the repo, else the default (`[orchestrator]` itself). Its lane gets `DROVER_ORCHESTRATOR=<id>`, and every
-  event it logs carries `orchestrator: <id>`. Two orchestrators on one fleet go through the same queue, spawn and
-  merge gates as anyone.
 - **Old names (#780, one release):** `[conductor]`, `role.conductor`, `--by conductor-<thread>`, a lane's
   `DROVER_LANE` role `conductor` and the old `<state dir>/conductor/` folder are read as the new names, and so are
-  the log's old rows: `conductor-start|sleep|attached|detached` as `orchestrator-…`, `from: conductor` and
-  `by: conductor-<thread>`. New writes use the new names only. `doctor` prints one deprecation line while fleet.toml
-  has the old keys.
+  the log's old rows. New writes use the new names only.
 
-- **Sleep and resume:** `check` closes an awake orchestrator whose thread has been quiet for 30 min and that is not
-  working (`orchestrator-sleep`). The next message starts it again with the same session id. Claude Code is started
-  with `--session-id <uuid>` and resumed with `--resume <uuid>`, so the full conversation carries over. A harness
-  that can't resume gets the thread so far in its kick instead.
+## Asks and answers
 
-## Messages and asks
+- **Choices:** the agent runs `drover ask <fleet> - "<question>" --thread <chat> --option … --recommend N`. Every
+  surface shows it with its options, the recommended one first, and an "other" box. The decision row carries
+  `DECISION <id>: <text>` as its prompt, which the client types in. `--thread` with an unknown chat refuses
+  `NO_SUCH_THREAD`.
+- **Lane asks (#541):** an `ask` from an impl, rev, fix or design lane (no `--thread`) goes to its repo's attached
+  terminal chat (`[fleet.<n>] ask_thread`, else the most recently active one), logged `routed` (no push) with a
+  `system` row whose prompt the client types in; it stays open on the board. With no chat, the owner gets it. The
+  agent answers with `drover answer <fleet> <id> <n> --basis "<quote | q<id>>"`, logged `by: orchestrator-<chat>`,
+  only if the ask is a lane ask on its repo, names no owner topic, and the basis is 3+ words found verbatim in the
+  issue's spec (Amendments included) or an answered decision id; else `REFUSED OWNER_ASK` and the ask goes to the
+  owner as a choice row (`ask-owner`) with the agent's pick recommended. Each such answer posts `answered <id> for
+  #<n>: <choice>, because <basis>` with [change] for 30 min (no push).
+- **Amendments (#574):** the spec-amending verb (orchestrators and the owner, `--basis q<id>`) appends
+  `- **Amendment (<YYYY-MM-DD>)**: <text>` to the issue body's `## Amendments` section and re-runs the open PR's
+  failed spec-reading checks. `q<id>` must be an ask on that issue answered `by: owner` (or a routine ask's
+  `by: default`), else `REFUSED NO_DECISION`.
+- **Handoff (#413, #1610):** `drover thread handoff <from> <repo|chat> <title> <text>` from an attached chat: to
+  another attached chat, a row whose prompt is `[<to>] <from>: <text>`; to a repo (or `all`), an open card on that
+  repo's desk, with no thread made. [move] (`POST handoff-move`) sends it on to an attached chat and marks the first
+  one forwarded. While the link exists, the target's filed issues and answered asks each post one line back to the
+  source.
 
-- `thread say` logs `thread-msg` (from `owner`), then types `[<thread>] owner: <text>` into the orchestrator (waking it
-  first). The orchestrator answers with `drover thread reply <thread> "<text>"`.
-- **Choices:** the orchestrator runs `drover ask <fleet> - "<question>" --thread <thread> --option … --recommend N`.
-  The thread shows the ask with its options, the recommended one first. `drover answer <fleet> <id> <n>` (the
-  tap later) logs the decision, adds `DECISION <id>: <text>` to the thread and types it into the orchestrator.
-  `--thread` with an unknown thread refuses `NO_SUCH_THREAD`.
-- **Lane asks (#541):** an `ask` from an impl, rev, fix or design lane (no `--thread`) goes to its repo's orchestrator
-  thread first: `[fleet.<n>] ask_thread = "t6"`, else the repo's most recently active thread (archived ones never).
-  It is logged `routed` (no push) and typed into that orchestrator (woken as by `say`) as a system line the board hides;
-  it stays open on the board and the issue card. No thread (or the orchestrator not reached: `ask-owner`), the owner
-  gets it as before. #1491: a lane ask still open with no thread is routed to the repo's next new thread (the one
-  opened from it, or any): its system line is logged there, so that thread's orchestrator answers it as below, and an
-  owner line in it answers it `--typed`. The orchestrator answers with `drover answer <fleet> <id> <n> --basis "<quote | q<id>>"`, logged
-  `by: orchestrator-<thread>` with its `basis`, and only if the ask is a lane ask on its repo, its question and choice
-  name no owner topic (the `OWNER_TOPIC` words), and the basis is 3+ words found verbatim in the issue's spec
-  (Amendments included) or an answered decision id. An ask routed to no thread is `REFUSED OWNER_ASK: <id> was
-  routed to no thread`. Else `REFUSED OWNER_ASK: <why>; ask the owner`, and the ask is
-  logged `ask-owner` in the thread: a choice row (the orchestrator's pick recommended) that pushes like an ask. Each
-  orchestrator answer posts `answered <id> for #<n>: <choice>, because <basis>` with [change] for 30 min (no push); the
-  owner's pick there re-sends `DECISION <id>: <choice>` to the lane, `by: owner`, replacing it.
-- **Amendments (#574):** `drover amend <fleet> <issue> --basis q<id> "<text>"` (orchestrators and the owner; the lane
-  hook refuses it for impl, rev and design lanes) writes an owner's decision into the spec: it appends
-  `- **Amendment (<YYYY-MM-DD>)**: <text>` to the issue body's `## Amendments` section (made once, at the end), logs `amend`
-  `{id, text}` and re-runs the open PR's failed spec-reading checks (board-freeze). `q<id>` must be an ask on that
-  issue answered `by: owner` (or a routine ask's `by: default`), else `REFUSED NO_DECISION` before any GitHub call.
-  An orchestrator runs it as soon as an owner decision names an amendment; the thread shows it as a tool row.
-
-- **Files:** `drover thread reply <thread> "<text>" --file <path>` (repeatable) shows the files with the message:
-  images inline, any other file as a row. Only a file in the thread's orchestrator folder is taken (anything else is
-  refused: copy it in first), and the board serves only those. Files the owner attaches on the board (#405: several, up to 10 a message,
-  each at most 10 MB; picked at once or added with `[+]`, waiting above the box as thumbnails with `[×]`) or with
-  `drover thread say <thread> "<text>" --file <path>` (repeatable) are saved in the orchestrator's folder under
-  `uploads/` and each path is typed in with the message (`(attached: <path>)`), so the orchestrator can read them.
-- **Handoff (#413):** `drover thread handoff <from> <repo|thread> <title> <text>` goes at once to a thread
-  (`t6`) or, for a repo (or `all`), to its desk thread (#1610: no ask; the first handoff starts it, titled `Desk`, logged
-  `thread-facts` `{desk: true}`); `<title>` is the handoff row's subject. [move] (`POST handoff-move`) re-delivers it. It logs
-  `thread-handoff` `{from, to, title, text}`, then types `[<to>] <from>: <text>` into the target's orchestrator (started or
-  resumed, as with `say`). The source shows `continued in <to>` and the target `from <from>` with the text. While the
-  link exists, the target's filed issues (`gh issue create`: `filed #<n>: <title>`, or the title alone) and answered
-  thread asks (`answered <id>: <question> → <answer>`) each post one line back into the source. Any orchestrator may
-  hand off to any repo; an orchestrator's plain `thread new` refuses `USE_HANDOFF`, so every thread an orchestrator starts is
-  logged with its source. The owner's `thread new` (CLI or board) is unchanged.
-- **Commands:** the lane hook logs each `drover` or `gh` command the orchestrator runs (`thread-cmd`, not `thread
-  reply`); the board shows them as closed tool rows.
-
-## The Threads tab (#1072)
-
-**Threads** is the last tab of the standalone page only (`[queue] [events] [lanes] [threads·N]`; `cooee-plugin.toml`
-has no Threads place, so the Cooee plugin never shows it), N the threads where a choice waits. It is a JSON screen
-like the others (`docs/design/threads-tab/`): `/screens/threads` (the list), `/screens/threads/<id>` (a thread, opened
-in the same tab, its cards place hidden) and `/screens/threads/new/<repo>`. Its taps post `/action` `thread-new`,
-`thread-say`, `thread-retry`, `thread-archive`, `thread-restore` (the `POST /thread` ops) and `answer`. #1088: a
-thread tap or push opens `#threads/<id>` (back returns to the list), and its config, secret and run cards show in the
-thread. Files and queued messages come with #1086 and #1087.
-
-- **Archive (#405):** the thread's orchestrator stops (its pane closes; the folder, uploads and log stay) and the
-  thread moves to the "archived" row, its own list loaded only when opened (#1622); `restore` brings it back and its next message resumes the same session. CLI:
-  `drover thread archive|restore <thread>` (logged `thread-archive` / `thread-restore`). Nothing is deleted.
-- **Writes** are `POST /thread` (`op` = `new`, `say` with an optional base64 file of at most 10 MB, `answer`,
-  `read`, `retry`; #407 `queue`, `unqueue`, `steer`, `stop`) from a paired device, 10 a minute. #403: `new` and `say`
-  answer once the thread or message is logged; starting or resuming the orchestrator and typing the line run after
-  the reply. A failed delivery is a red system line with `[retry]` (`retry` types the same line again, logging no copy).
-
-**Push** (a `webpush` notifier, default `on`): an orchestrator's reply is `<repo> · <thread title>: <its first line>`, a
-choice `<repo> · <thread title> asks: <question>`. The owner's messages, commands and system lines never push.
-
-Events: `thread-new`, `thread-msg` (`files`; #413 `via`: a flow-back line), `thread-handoff`, `thread-cmd`, `thread-read`, #407 `thread-queue` (`text`, `files`, `q`: the one an edit replaces) and `thread-unqueue` (`q`, why: sent, removed), `orchestrator-start` (session, resumed),
-`orchestrator-sleep` (why: idle, gone, signed out); #387: `config-propose`, `config-settled`,
-`secret-request`, `secret-set`, `secret-dismissed`, `secret-rm` (names only).
+Events: `thread-msg` (an owner line a client copies through `said`, a `system` row), `thread-handoff` (`desk`),
+`orchestrator-attached`, `orchestrator-detached`; history only: `thread-new`, `thread-archive`, `orchestrator-start`,
+`orchestrator-sleep`; #387: `config-propose`, `config-settled`, `secret-request`, `secret-set`, `secret-dismissed`,
+`secret-rm` (names only).
 
 ## Config changes (#387)
 
@@ -180,8 +101,8 @@ always carries it: past the last 30 messages it stays right under the older-mess
 
 A feature that adds a fleet.toml key does nothing until the config turns it on. Its PR body carries a `## Rollout`
 section: the exact fleet.toml lines in a fenced block and which fleets they go in (`none`, or no section, rolls out
-nothing). `drover merge` of such a PR logs `rollout-open` once and posts one row to the thread whose orchestrator
-filed the issue (the lane hook logs `issue-filed` on its `gh issue create`), else the repo's newest thread:
+nothing). `drover merge` of such a PR logs `rollout-open` once and posts one row to the chat whose orchestrator
+filed the issue (the lane hook logs `issue-filed` on its `gh issue create`), else the repo's newest attached chat:
 `#<n> merged with a rollout, not applied yet:` with the snippet. That wakes the thread's orchestrator, which drafts the
 card at once with `drover config propose <thread> <file> --rollout <n>` (refused `NO_SUCH_ROLLOUT` unless #n's
 rollout is open), so the owner only taps [apply]. The apply logs `rollout-done` for #n and its line ends
@@ -209,12 +130,6 @@ thread's orchestrator. Nothing is ever applied by itself.
 - **Hard nos** (`CARD_FORBIDDEN`, at posting and, from an orchestrator's own shell, in the hook): printing or sending a
   secret's value, deleting production data, force-pushing or rewriting history, turning off branch protection or
   drover's gates. It is a pattern guard over the command's words, best effort like `deny_commands`.
-
-## Sign-in (#923)
-
-The orchestrator runs on the host's own login, like every lane ([accounts](accounts.md)). When the awake orchestrator
-shows a sign-in prompt, it sleeps and the thread gets a `<harness> is signed out: [sign in]` line; the button opens
-#303's setup terminal on the main host.
 
 ## Secrets (#387)
 

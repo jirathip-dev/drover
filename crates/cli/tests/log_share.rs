@@ -2,7 +2,7 @@ mod common;
 use common::*;
 use drover::events::{append, closed, shared, Event, REBUILDS};
 use drover::serve::Server;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::sync::atomic::Ordering::Relaxed;
 
 const NOW: u64 = 1_000_000;
@@ -37,20 +37,14 @@ fn a_render_on_the_log_it_holds_while_an_event_lands_rebuilds_no_ask_index() {
     let c = log_10k("share-render");
     let r = Fake::default();
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let choosing = || {
-        let needs: Value = serde_json::from_str(&api(&s, ADDR, "", NOW, "needs")).unwrap();
-        needs["choosing"].as_u64().unwrap()
-    };
-    api(&s, ADDR, "", NOW, "chat");
-    assert_eq!(choosing(), 20);
+    api(&s, ADDR, "", NOW, "needs");
     let before = REBUILDS.load(Relaxed);
     let held = shared(&c.state).unwrap();
     one_more(&c);
-    api(&s, ADDR, "", NOW, "chat");
+    api(&s, ADDR, "", NOW, "needs");
     let asks: Vec<&Event> = held.iter().filter(|e| e.kind == "needs-decision").collect();
     assert_eq!(asks.len(), 20);
     assert!(asks.iter().all(|a| closed(&held, a).is_none()));
-    assert_eq!(choosing(), 20);
     assert_eq!(
         REBUILDS.load(Relaxed),
         before,

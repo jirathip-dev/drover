@@ -4,13 +4,7 @@ use drover::serve::Server;
 use serde_json::Value;
 
 const BUDGET_MS: u64 = 150;
-const KINDS: [(&str, &str); 5] = [
-    ("tab", "a tab switch"),
-    ("sheet", "a lane's sheet"),
-    ("tap", "the thread opening"),
-    ("send", "a send"),
-    ("answer", "an answer"),
-];
+const KINDS: [(&str, &str); 2] = [("tab", "a tab switch"), ("sheet", "a lane's sheet")];
 
 fn health(addr: std::net::SocketAddr) -> Value {
     use std::io::{Read, Write};
@@ -76,7 +70,7 @@ fn kinds_over_budget(name: &str) -> Vec<String> {
 }
 
 #[test]
-fn tab_sheet_thread_send_and_answer_paint_within_150ms_on_the_large_board_in_webkit() {
+fn tab_and_sheet_paint_within_150ms_on_the_large_board_in_webkit() {
     if no_webkit() {
         return;
     }

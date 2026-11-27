@@ -26,7 +26,7 @@ use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-mod chat;
+mod cards;
 mod conn;
 #[path = "cooee.rs"]
 mod cooee;
@@ -407,7 +407,6 @@ pub struct Server<'a> {
     export: Option<bool>,
     snap: Mutex<(Option<u64>, Arc<Snapshot>)>,
     later: Mutex<Vec<(Ctx, Later)>>,
-    chat: Mutex<[(serde_json::Value, serde_json::Value); 2]>,
     timing: Mutex<slo::Timing>,
     phone: Mutex<slo::Timing>,
     rss: std::sync::atomic::AtomicU64,
@@ -424,7 +423,6 @@ fn hung_up(s: &TcpStream) -> bool {
 }
 
 enum Later {
-    Thread(Event, String),
     Prompt(Box<lanes::Lane>, String, String),
 }
 
@@ -574,18 +572,6 @@ impl Server<'_> {
     }
 }
 
-fn ctype(name: &str) -> &'static str {
-    match chat::ext(name).as_str() {
-        "png" => PNG,
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "json" => JSON,
-        "txt" | "md" | "log" => "text/plain; charset=utf-8",
-        _ => "application/octet-stream",
-    }
-}
-
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -654,11 +640,11 @@ fn need_ask(now: u64, mins: u64, ev: &[Event], a: &Event) -> NeedAsk {
             format!("routine · defaults to {n} in {left}")
         }),
         from: a.str("from").and_then(|f| f.split(':').next()).map(Into::into),
-        pngs: chat::files_of(a)
+        pngs: cards::files_of(a)
             .map(|f| f["name"].as_str().unwrap_or_default().into())
             .collect(),
         thread: a.str("thread").map(Into::into),
-        title: a.str("thread").map(|t| crate::conductor::title(ev, t).into()),
+        title: a.str("thread").map(|t| crate::thread::title(ev, t).into()),
     }
 }
 
@@ -793,7 +779,6 @@ impl<'a> Server<'a> {
             export: None,
             snap: Mutex::default(),
             later: Mutex::default(),
-            chat: Mutex::default(),
             timing: Mutex::default(),
             phone: Mutex::default(),
             rss: std::sync::atomic::AtomicU64::default(),
@@ -948,17 +933,11 @@ impl<'a> Server<'a> {
             .map(|()| keep)
     }
 
-    pub(crate) fn later(&self, ctx: &Ctx, jobs: impl IntoIterator<Item = (Event, String)>) {
-        lock(&self.later).extend(jobs.into_iter().map(|(e, l)| (ctx.clone(), Later::Thread(e, l))));
-    }
-
     fn deliver(&self) {
         let jobs = std::mem::take(&mut *lock(&self.later));
         for (c, job) in jobs {
-            match job {
-                Later::Thread(e, l) => chat::deliver(&c, &self.r, &(e, l)),
-                Later::Prompt(l, fleet, text) => self.tell(&c, &l, &fleet, &text),
-            }
+            let Later::Prompt(l, fleet, text) = job;
+            self.tell(&c, &l, &fleet, &text);
             self.kick.store(true, Relaxed);
         }
     }
@@ -1022,10 +1001,6 @@ impl<'a> Server<'a> {
                 lock(&self.clients).retain(|c| c.0.send(msg.clone()).is_ok());
             }
             w.herd = (now, hash(&j));
-        }
-        let agents = (changed && self.addr.is_some()).then(|| self.sessions(now)).flatten();
-        for job in agents.map(|a| chat::flush(at, &a.running())).unwrap_or_default() {
-            chat::deliver(at, &self.r, &job);
         }
         let heard = |p: bool| lock(&self.clients).iter().any(|c| c.1.is_some() == p);
         let (anon, owner) = (heard(false), heard(true));
@@ -1187,12 +1162,6 @@ impl<'a> Server<'a> {
                 }),
                 None => ("404 Not Found", "text/plain", text("not a theme file\n")),
             },
-            ("GET", p) if p.starts_with("/thread/") => {
-                let (t, name) = p[8..].split_once('/').unwrap_or_default();
-                let name = form(&format!("n={name}")).remove("n").unwrap_or_default();
-                let at = working(&ctx.state).ok().and_then(|ev| chat::file(ctx, &ev, t, &name, false));
-                disk_file(at, ctype(&name), "no such file in the thread\n")
-            }
             ("GET", p) if p.starts_with("/design/") => {
                 let mut it = p[8..].splitn(4, '/');
                 let (f, n, i, q) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().filter(|s| !s.is_empty()));
@@ -1201,7 +1170,7 @@ impl<'a> Server<'a> {
                 let ask = |e: &Event| crate::design::is_ask(e) && e.fleet == f && e.issue == Some(n) && q.is_none_or(|q| e.str("id") == Some(q));
                 let ev = crate::events::since(&ctx.state, &["needs-decision", "design-review"], 0).unwrap_or_default();
                 let k = ev.iter().rposition(ask);
-                let at = k.and_then(|k| chat::files_of(ev.get(k)?).nth(i.parse().ok()?)?.at("path").as_str().map(String::from));
+                let at = k.and_then(|k| cards::files_of(ev.get(k)?).nth(i.parse().ok()?)?.at("path").as_str().map(String::from));
                 let sha = k.filter(|_| q.is_some()).and_then(|k| ev.get(..k)?.iter().rfind(|e| e.is("design-review", &f, n))?.str("sha"));
                 self.round_file(sha, at, "no such design file\n")
             }
@@ -1338,11 +1307,10 @@ impl<'a> Server<'a> {
         let res = if path == "/thread" && ["answer", "card", "config"].contains(&op) {
             let mtime = ("mtime".to_string(), mtime(ctx));
             self.op(ctx, &f.clone().into_iter().chain([mtime]).collect())
+        } else if path == "/thread" && op == "secret" {
+            cards::secret(ctx, &self.r, f)
         } else if path == "/thread" {
-            let mut later = vec![];
-            let (res, more) = crate::conductor::deferred(|| chat::post(ctx, &self.r, f, &mut later));
-            self.later(ctx, later.into_iter().chain(more));
-            res
+            refused("BAD_VALUE", format!("no thread op `{op}`: a chat lives in a client"))
         } else if path == "/setup" {
             let (via, s) = (format!("web {}", dev.label), body::<crate::api::Setup>(f));
             Config::kept(ctx).and_then(|c| crate::setup::start(ctx, &c, &self.r, &s.host, &s.name, &via))
@@ -1613,12 +1581,10 @@ impl<'a> Server<'a> {
         })
     }
 
-    fn parts(&self, ctx: &Ctx, paired: bool) -> [(&'static str, String); 3] {
-        let rw = paired && self.addr.is_some();
+    fn parts(&self, ctx: &Ctx, paired: bool) -> [(&'static str, String); 2] {
         [
             ("needs", json!(self.needs_tab(ctx, paired)).to_string()),
             ("lanes", json!(self.lanes_tab(ctx, paired)).to_string()),
-            ("chat", json!(self.chat_tab(ctx, rw, &BTreeMap::new())).to_string()),
         ]
     }
 
@@ -1753,7 +1719,6 @@ impl<'a> Server<'a> {
             pair: !self.pairb().is_empty(),
             mtime: mtime(ctx),
             snap: self.snapshot().1.ts,
-            choosing: chat::choosing(ev),
             asks: asks.collect(),
             blocked: (all.iter().filter(|l| l.state.word() == "blocked"))
                 .map(|l| self.blocked(ctx, l, paired))

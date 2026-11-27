@@ -1,4 +1,4 @@
-use super::{attached, brief, defaults, hold, name, role, DEFAULT};
+use super::{attached, brief, hold, name, role, DEFAULT};
 use crate::config::{Config, Role};
 use crate::events::working;
 use crate::gate::refused;
@@ -44,7 +44,7 @@ pub fn seat<'a>(cfg: &'a Config, id: &str) -> Result<Seat<'a>> {
         name: name(cfg, id),
         fleet,
         fleets,
-        role: defaults(cfg, fleet)?.1,
+        role: role(cfg, fleet)?.1.clone(),
     })
 }
 

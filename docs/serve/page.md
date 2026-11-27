@@ -9,8 +9,8 @@ page (`web/src`, built to `web/dist/board.js` and `board.css`). The page shell (
 `[[places]]`: each `header-strip` place is a tab (Queue, Events, Lanes, in the manifest's order), each `menu-row` place
 opens from `[⚙]` (the Fleets sheet), and the `chat-cards` place is the cards above every tab (open asks, design
 reviews, needs-human issues, run cards and alerts, each folded to its one line and main button until tapped). A new
-screen in the manifest is a new tab with no change to the page. The Threads tab is the standalone page's own
-([orchestrator.md](../orchestrator.md)); asks and run cards show as cards. `drover doctor` and `GET /api/v1/host` give the
+screen in the manifest is a new tab with no change to the page. Asks and run cards show as cards (#1773 cut the
+Threads tab; a chat lives in a client, [orchestrator.md](../orchestrator.md)). `drover doctor` and `GET /api/v1/host` give the
 hosts view. The plain
 lifeboat ([lifeboat.md](../lifeboat.md)) stays the last resort when this page is broken too.
 

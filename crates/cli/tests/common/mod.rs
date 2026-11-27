@@ -659,24 +659,27 @@ pub fn api(s: &drover::serve::Server, host: &str, extra: &str, now: u64, path: &
     r[r.find("\r\n\r\n").unwrap() + 4..].to_string()
 }
 
-/// `GET chat?archived=1` with each listed thread's view, as opening it fetches it (`chat?thread=<id>`), in `threads`.
-pub fn chat_all(s: &drover::serve::Server, host: &str, extra: &str, now: u64) -> serde_json::Value {
-    let get = |q: &str| -> serde_json::Value {
-        serde_json::from_str(&api(s, host, extra, now, &format!("chat?{q}"))).unwrap()
-    };
-    let mut tab = get("archived=1");
-    let repos = tab["repos"].as_array().cloned().unwrap_or_default();
-    let ids = repos.iter().flat_map(|r| {
-        let rows = r["rows"].as_array().into_iter().flatten();
-        rows.chain(r["archived"].as_array().into_iter().flatten())
-            .cloned()
-            .collect::<Vec<_>>()
-    });
-    let views: Vec<_> = ids
-        .map(|r| get(&format!("thread={}", r["id"].as_str().unwrap()))["threads"][0].clone())
-        .collect();
-    tab["threads"] = serde_json::Value::Array(views);
-    tab
+/// Attach terminal chat `id` to `fleet`, as `drover attach` does.
+pub fn attach_chat(c: &Ctx, fleet: &str, id: &str) {
+    let (code, out) = run(c, &Fake::default(), &["attach", fleet, id]);
+    assert_eq!(code, 0, "attach {fleet} {id}: {out}");
+}
+
+/// Every row `GET /api/v1/rows?since=0` serves at `now`, the plugin token written first: each row's text, kind, key, `to`, open and block.
+pub fn rows(c: &Ctx, s: &drover::serve::Server, now: u64) -> Vec<serde_json::Value> {
+    let tok = c.config.with_file_name("cooee-token");
+    if !tok.exists() {
+        std::fs::write(&tok, "tok-test-rows").unwrap();
+    }
+    let token = std::fs::read_to_string(&tok).unwrap();
+    let req = format!(
+        "GET /api/v1/rows?since=0 HTTP/1.1\r\nHost: 127.0.0.1:7777\r\nAuthorization: Bearer {}\r\n\r\n",
+        token.trim()
+    );
+    let r = String::from_utf8_lossy(&s.respond(&req, now)).into_owned();
+    assert!(r.starts_with("HTTP/1.1 200"), "/api/v1/rows: {r}");
+    let v: serde_json::Value = serde_json::from_str(r.split_once("\r\n\r\n").unwrap().1).unwrap();
+    v["rows"].as_array().cloned().unwrap_or_default()
 }
 
 /// Replace the whole event log with JSONL `text` (as a test edits a log): the database goes, the next read imports `text`. Leases, devices and snapshots go with it.

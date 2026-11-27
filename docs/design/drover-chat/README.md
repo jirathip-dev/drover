@@ -1,6 +1,6 @@
 ## Summary
 
-Decision: `drover chat` is one full-screen terminal app with two tabs, Threads and Board. The top line holds the tabs, plus what is down on the right. Below it come the chat, then a fixed input box and one key-hint row. An answer takes two presses: a number, `a` or `d` opens a panel that shows exactly what will be sent or run, and Enter confirms. At 120 columns the thread list stays on the left and the chat sits beside it.
+Decision: drover chat is one full-screen terminal app with two tabs, Threads and Board. The top line holds the tabs, plus what is down on the right. Below it come the chat, then a fixed input box and one key-hint row. An answer takes two presses: a number, `a` or `d` opens a panel that shows exactly what will be sent or run, and Enter confirms. At 120 columns the thread list stays on the left and the chat sits beside it.
 Screens: thread list, chat, an open choice, a run card selected for approve, the card refused, and shed down (being started; would not start). Each is drawn at 40x18 and 120x40.
 Open questions: (1) The 120-column split view: keep it (recommended)? (2) While a choice or card is selected, its panel replaces the input box, which is empty by then anyway (recommended), instead of sitting above it. (3) With two asks open, the numbers answer the newest one (recommended). (4) List previews end in `…`, as on the phone. That is the one place text is shortened: OK?
 

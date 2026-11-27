@@ -106,11 +106,11 @@ fn changeable(c: &drover::Ctx, now: u64) -> bool {
     let r = Fake::default();
     let c = at(c, now);
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", now);
-    let chat: serde_json::Value = chat_all(&s, ADDR, &cookie, now);
-    let threads = chat["threads"].as_array().unwrap().iter();
-    let mut msgs = threads.flat_map(|t| t["page"]["msgs"].as_array().unwrap().clone());
-    msgs.any(|m| m["kind"] == "note" && m["ask"]["id"] == "q1" && m["open"] == true)
+    rows(&c, &s, now).iter().any(|r| {
+        r["text"].as_str().unwrap_or_default().contains(" q1")
+            && r["kind"] == "system"
+            && r["block"].to_string().contains("\"type\":\"choice\"")
+    })
 }
 
 #[test]

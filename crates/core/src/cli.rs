@@ -225,15 +225,11 @@ enum Cmd {
     },
     #[command(about = "The board's bug reports (#363), newest first: id, note, bundle path; with an id, that bundle")]
     Report { id: Option<String> },
-    #[command(about = "Owner only: the orchestrator threads full screen in a terminal; needs no serve")]
-    Chat { thread: Option<String> },
     #[command(
         about = "Attach a terminal chat to a repo, `all` or `none` (optionally an old chat's id): logs the attach, prints the brief path, the settings path and the env lines"
     )]
     Attach { repo: String, thread: Option<String> },
-    #[command(
-        about = "Orchestrator chat threads per repo (or `all`), each talked through by one orchestrator lane (docs/orchestrator.md)"
-    )]
+    #[command(about = "Handoffs between chats, or from a chat to a repo's desk (docs/orchestrator.md)")]
     Thread {
         #[command(subcommand)]
         cmd: ThreadCmd,
@@ -677,20 +673,7 @@ enum AskCmd {
 #[derive(Subcommand)]
 enum ThreadCmd {
     #[command(
-        about = "Start a thread for a fleet's repo (or `all`); prints its id. An orchestrator uses `thread handoff`"
-    )]
-    New {
-        repo: String,
-        title: String,
-        #[arg(help = "Its orchestrator's harness for good (default `[chat]`'s, else the orchestrator role's)")]
-        #[arg(long)]
-        harness: Option<String>,
-        #[arg(help = "The `[orchestrator.<id>]` it talks to (default: the first whose fleets cover the repo)")]
-        #[arg(long)]
-        orchestrator: Option<String>,
-    },
-    #[command(
-        about = "An orchestrator hands off to thread <to>, or to a repo's (or `all`'s) desk thread, at once with no tap; linked both ways, <text> wakes its orchestrator as from <from>"
+        about = "A chat hands off to attached chat <to>, or to a repo's (or `all`'s) desk, at once with no tap; the row's prompt carries <text> as from <from>"
     )]
     Handoff {
         from: String,
@@ -698,42 +681,6 @@ enum ThreadCmd {
         title: String,
         text: String,
     },
-    #[command(
-        about = "The owner's message: logged, then typed into the thread's orchestrator (started or resumed first)"
-    )]
-    Say {
-        id: String,
-        text: String,
-        #[arg(help = "Who wrote it, as the thread shows it")]
-        #[arg(long, default_value = "owner")]
-        by: String,
-        #[arg(help = "A file or image to send with it (repeatable, at most 10)")]
-        #[arg(long)]
-        file: Vec<PathBuf>,
-    },
-    #[command(about = "Retitle a thread: the orchestrator's short summary, once after its first reply")]
-    Title { id: String, title: String },
-    #[command(about = "Fold a thread into its repo's archived list; its orchestrator stops, nothing is deleted")]
-    Archive { id: String },
-    #[command(about = "Bring an archived thread back; its next message resumes the same session")]
-    Restore { id: String },
-    #[command(about = "The orchestrator's reply to the owner")]
-    Reply {
-        id: String,
-        text: String,
-        #[arg(help = "A file or image to show with it (repeatable)")]
-        #[arg(long)]
-        file: Vec<PathBuf>,
-    },
-    #[command(about = "The conversation, asks with their options; marks it read")]
-    Show {
-        id: String,
-        #[arg(help = "Machine-readable output")]
-        #[arg(long)]
-        json: bool,
-    },
-    #[command(about = "Per repo, its threads: title, last message, unread dot, orchestrator awake/asleep")]
-    Ls(Scope),
 }
 
 #[derive(Subcommand)]
@@ -1556,7 +1503,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             install: true,
         } => crate::timer::service_unit(ctx, r, out, &api, board.as_deref())?,
         Cmd::Service { api, board, .. } => (crate::SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
-        Cmd::Chat { thread } => anyhow::ensure!(crate::app(ctx, r, &crate::Open::Threads(thread))?, "needs a terminal"),
         cmd => {
             let cfg = match cmd {
                 Cmd::Check => check::config(ctx)?,
@@ -1593,7 +1539,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 } => spawn::profiles_sync(ctx, &cfg, &usage_doc(), out)?,
                 Cmd::Spawn { fleet, issue, role, o } => {
                     if crate::orchestrator::is_role(&role) {
-                        return gate::refused("BAD_VALUE", "an orchestrator starts from `drover thread say`");
+                        return gate::refused("BAD_VALUE", "an orchestrator runs in a client's chat (`drover attach`)");
                     }
                     if role == "orch" {
                         let why = "drover drives fleets itself; see drover timer";
@@ -1701,43 +1647,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         writeln!(out, "{k}={}", v.as_str().unwrap_or_default())?;
                     }
                 }
-                Cmd::Thread { cmd } => match cmd {
-                    ThreadCmd::New { .. } if crate::config::env("DROVER_THREAD").is_some_and(|t| !t.is_empty()) => {
-                        gate::refused("USE_HANDOFF", "an orchestrator starts threads with `thread handoff`")?;
-                    }
-                    ThreadCmd::New {
-                        repo,
-                        title,
-                        harness,
-                        orchestrator,
-                    } => {
-                        let o = (harness.as_deref(), orchestrator.as_deref());
-                        let id = crate::orchestrator::new_with(ctx, &cfg, &repo, &title, o)?;
-                        writeln!(out, "{id}")?;
-                    }
-                    ThreadCmd::Handoff { from, to, title, text } => {
-                        let to = crate::orchestrator::handoff(ctx, &cfg, r, [&from, &to, &title, &text])?;
-                        writeln!(out, "{to}")?;
-                    }
-                    ThreadCmd::Say { id, text, by, file } => {
-                        let name = |p: &PathBuf| p.file_name().map_or(String::new(), |n| n.to_string_lossy().into());
-                        let load =
-                            |p: &PathBuf| Ok((name(p), std::fs::read(p).with_context(|| p.display().to_string())?));
-                        let files = file.iter().map(load).collect::<Result<Vec<_>>>()?;
-                        crate::orchestrator::find(&working(&ctx.state)?, &id)?;
-                        let files = crate::orchestrator::upload(ctx, &cfg, &id, &files)?;
-                        let agent = crate::orchestrator::say(ctx, &cfg, r, (&id, &text, &files), (&by, false))?;
-                        writeln!(out, "{id}: -> {agent}")?;
-                    }
-                    ThreadCmd::Title { id, title } => crate::orchestrator::retitle(ctx, &cfg, &id, &title)?,
-                    ThreadCmd::Archive { id } => crate::orchestrator::archive(ctx, &cfg, r, &id, true)?,
-                    ThreadCmd::Restore { id } => crate::orchestrator::archive(ctx, &cfg, r, &id, false)?,
-                    ThreadCmd::Reply { id, text, file } => crate::orchestrator::reply(ctx, &cfg, &id, &text, &file)?,
-                    ThreadCmd::Show { id, json } => crate::orchestrator::show(ctx, &cfg, out, &id, json)?,
-                    ThreadCmd::Ls(Scope { fleet, json }) => {
-                        crate::orchestrator::ls(ctx, &cfg, out, fleet.as_deref(), json)?;
-                    }
-                },
+                Cmd::Thread {
+                    cmd: ThreadCmd::Handoff { from, to, title, text },
+                } => {
+                    let to = crate::orchestrator::handoff(ctx, &cfg, r, [&from, &to, &title, &text])?;
+                    writeln!(out, "{to}")?;
+                }
                 Cmd::Config { cmd } => {
                     let (id, apply) = match cmd {
                         ConfigCmd::Show { .. } => return crate::config::show(&cfg, out).map(|()| 0),

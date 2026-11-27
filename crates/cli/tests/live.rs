@@ -173,7 +173,7 @@ fn live_caps_clients_and_checks_host() {
         b
     };
     assert!(get("/frags?tab=lanes").starts_with("HTTP/1.1 404 "));
-    for part in ["needs", "lanes", "chat"] {
+    for part in ["needs", "lanes"] {
         let r = get(&format!("/api/v1/{part}"));
         let j: serde_json::Value = serde_json::from_str(&r[r.find("\r\n\r\n").unwrap() + 4..]).unwrap();
         assert!(j["now"].as_u64().is_some(), "{part}: {j}");

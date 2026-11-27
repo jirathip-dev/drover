@@ -35,7 +35,7 @@ pub struct Config {
     pub old_names: bool,
     /// The Telegram bridge is removed; a leftover `[telegram]` is a warning (`Config::warnings`).
     pub telegram: Option<toml::Value>,
-    /// `[chat]`, new threads' orchestrator defaults over the fleet's `role.orchestrator` (`orchestrator::defaults`).
+    /// `[chat]`: read by no code since the thread cut (#1773); kept so a fleet.toml that sets it still loads.
     pub chat: Chat,
     /// `[proxy]`, the token proxy remote ACP lanes' model calls go through (`crate::proxy`, docs/hosts.md).
     pub proxy: ProxyCfg,
