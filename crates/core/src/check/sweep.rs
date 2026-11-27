@@ -13,10 +13,12 @@ use std::io::Write;
 
 pub(super) type Off<'c> = Vec<(&'c str, &'c str, Option<Vec<Session>>)>;
 
-pub(super) fn disabled<'c>(cfg: &'c Config, r: &dyn Runner) -> Off<'c> {
+pub(super) fn disabled<'c>(ctx: &Ctx, cfg: &'c Config, r: &dyn Runner) -> Off<'c> {
+    let down = crate::hosts::cached(ctx);
     let hosts = cfg.hosts.iter().filter(|h| !h.1.enabled);
     let hosts = hosts.filter_map(|(n, h)| Some((n.as_str(), h.machine.as_deref()?)));
     hosts
+        .filter(|(n, _)| !down.get(*n).is_some_and(|s| !s.up))
         .map(|(n, m)| (n, m, crate::session::live_on(&On::new(r, Some(m))).ok()))
         .collect()
 }

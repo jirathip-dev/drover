@@ -534,8 +534,11 @@ enum Cmd {
         #[arg(help = "With --yes, remove the orphans too: folders under the worktree root no fleet owns")]
         #[arg(long)]
         orphans: bool,
+        #[arg(help = "List each lane and wip branch, not one summary line per host")]
+        #[arg(long)]
+        verbose: bool,
         #[arg(help = "The daily job (#557): merged/closed lanes idle 3+ days, at most 10")]
-        #[arg(long, hide = true, conflicts_with_all = ["fleet", "lane", "yes", "orphans"])]
+        #[arg(long, hide = true, conflicts_with_all = ["fleet", "lane", "yes", "orphans", "verbose"])]
         scheduled: bool,
     },
     #[command(
@@ -1727,7 +1730,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 } => crate::rename::run(ctx, r, out, (&old, &new), yes)?,
                 Cmd::Wip {
                     cmd: WipCmd::Prune { fleet, dry_run },
-                } => check::prune(ctx, &cfg, r, out, &fleet, dry_run)?,
+                } => check::prune(ctx, &cfg, r, out, &fleet, (dry_run, true))?,
                 Cmd::Secret { cmd } => match cmd {
                     SecretCmd::Request { thread, name, why } => {
                         crate::secret::request(ctx, &cfg, &thread, &name, &why)?;
@@ -1900,19 +1903,20 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     lane,
                     yes,
                     orphans,
+                    verbose,
                     scheduled,
                 } => {
                     if scheduled {
                         return check::scheduled(ctx, &cfg, r, out).map(|()| 0);
                     }
-                    let what = (None, lane.as_deref(), false, !crate::drive::in_act());
+                    let what = (None, lane.as_deref(), false, !crate::drive::in_act(), orphans, verbose);
                     check::clean_all(ctx, &cfg, r, out, fleet.as_deref(), what, yes)?;
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
                         check::strays(ctx, &cfg, out, yes).and_then(|()| check::secrets_files(ctx, out, yes))?;
                         check::remote_orphans(&cfg, r, out, (orphans && yes, yes))?;
                         for f in cfg.fleet.keys().filter(|f| fleet.as_ref().is_none_or(|x| x == *f)) {
-                            if let Err(e) = check::prune(ctx, &cfg, r, out, f, !yes) {
+                            if let Err(e) = check::prune(ctx, &cfg, r, out, f, (!yes, verbose)) {
                                 writeln!(out, "{f}: wip prune failed: {e:#}")?;
                             }
                         }

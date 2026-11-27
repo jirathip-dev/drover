@@ -811,25 +811,61 @@ pub fn teardown(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fl
     if seen.is_empty() {
         return Ok(());
     }
-    clean_all(ctx, cfg, r, out, Some(fleet), (Some(issue), None, false, false), true).map(drop)
+    clean_all(
+        ctx,
+        cfg,
+        r,
+        out,
+        Some(fleet),
+        (Some(issue), None, false, false, false, false),
+        true,
+    )
+    .map(drop)
 }
 
-/// Remove worktree + pane of lanes whose issue is merged (or closed on GitHub), dry run unless `yes`, and count the dirty ones kept; `--lane` refuses `UNSAFE_CLEAN` with the reason; `all` (an explicit `drover clean`) also sweeps each disabled host that answers its one bounded probe: its worktrees and dead lanes' scratch.
+/// Remove worktree + pane of lanes whose issue is merged (or closed on GitHub), dry run unless `yes`, and count the dirty ones kept; `--lane` refuses `UNSAFE_CLEAN` with the reason; `all` (an explicit `drover clean`) also sweeps each disabled host that answers its one bounded probe: its worktrees and dead lanes' scratch; `orphans` takes back the off-root lanes it settled; `verbose` lists each held lane.
 pub fn clean_all(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
     out: &mut dyn Write,
     fleet: Option<&str>,
-    (issue, lane, sched, all): (Option<u64>, Option<&str>, bool, bool),
+    (issue, lane, sched, all, orphans, verbose): (Option<u64>, Option<&str>, bool, bool, bool, bool),
     yes: bool,
 ) -> Result<usize> {
     let events = working(&ctx.state)?;
+    let parked: Vec<Event> = (crate::events::since(&ctx.state, &["clean-settled"], 0)?.into_iter())
+        .filter(|c| fleet.is_none_or(|f| f == c.fleet) && c.issue.is_some_and(|n| issue.is_none_or(|i| i == n)))
+        .map(|c| Event::new(c.ts, &c.fleet, c.issue, "spawn", Value::Object(c.data)))
+        .collect();
+    let last = |marks: &mut dyn Iterator<Item = &Event>| {
+        let mut m: BTreeMap<String, u64> = BTreeMap::new();
+        for c in marks {
+            let t = m.entry(c.str("worktree").unwrap_or_default().into()).or_default();
+            *t = (*t).max(c.ts);
+        }
+        m
+    };
+    let gone = last(&mut events.iter().filter(|c| c.kind == "clean"));
+    let settled = events.iter().filter(|c| c.kind == "clean-settled").chain(&parked);
+    let cleaned = last(
+        &mut events
+            .iter()
+            .filter(|c| c.kind == "clean")
+            .chain(settled.filter(|_| !orphans)),
+    );
+    let mut roots: BTreeMap<String, usize> = BTreeMap::new();
+    for c in parked.iter().filter(|_| !orphans) {
+        let wt = c.str("worktree").unwrap_or_default();
+        if gone.get(wt).is_none_or(|t| *t < c.ts) && Path::new(wt).exists() {
+            *roots.entry(root_of(wt)).or_default() += 1;
+        }
+    }
     let states = fold(&events);
     let agents = (crate::link::look(ctx, cfg, r, &mut std::io::sink(), true)?.sessions())
         .checked()
         .context("cannot list the live agents; refusing to clean blind")?;
-    let off = if all { disabled(cfg, r) } else { vec![] };
+    let off = if all { disabled(ctx, cfg, r) } else { vec![] };
     let mut seen = std::collections::BTreeSet::new();
     let (mut freed, mut removed, mut tallies) = (0, 0, (0, 0));
     let mut closed = BTreeMap::new();
@@ -855,8 +891,14 @@ pub fn clean_all(
     let spawns = (lanes(&events).into_iter().rev())
         .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && fleet.is_none_or(|f| f == e.fleet))
         .chain(&revs)
+        .chain(parked.iter().filter(|_| orphans))
         .filter(|e| e.issue.is_some_and(|n| issue.is_none_or(|i| i == n)))
-        .filter(|e| lane.is_none_or(|a| e.str("agent") == Some(a)));
+        .filter(|e| lane.is_none_or(|a| e.str("agent") == Some(a)))
+        .filter(|e| {
+            !e.str("worktree")
+                .and_then(|w| cleaned.get(w))
+                .is_some_and(|t| *t >= e.ts)
+        });
     let spawns = unset::unconfigured(cfg, out, &events, lane, spawns)?;
     let held = |e: &Event| {
         let away = e.str("host").filter(|_| e.str("machine").is_some());
@@ -864,13 +906,10 @@ pub fn clean_all(
             Some(h) => !off.iter().any(|o| o.0 == h && o.2.is_some()),
             None => crate::hosts::offline(ctx, Some(cfg), Some(e)).is_some(),
         };
-        let root = crate::roots::skip(ctx, cfg, e).map(|w| match w {
-            "off-root" => "off-root (not cleaned)",
-            "root-hung" => "root-hung (not cleaned)",
-            _ => "root unreachable (not cleaned)",
-        });
-        held.then_some("host unreachable (not cleaned)").or(root)
+        let root = crate::roots::skip(ctx, cfg, e).filter(|w| !(orphans && *w == "off-root"));
+        held.then_some("host unreachable").or(root)
     };
+    let mut by_host: BTreeMap<(String, &str), (usize, usize)> = BTreeMap::new();
     let there = crate::hosts::present(r, spawns.iter().copied().filter(|e| held(e).is_none()));
     for e in spawns {
         let (Some(n), Some(wt)) = (e.issue, e.str("worktree")) else {
@@ -878,9 +917,7 @@ pub fn clean_all(
         };
         let (on, held) = (On::of(r, Some(e)), held(e));
         let away = e.str("host").filter(|_| on.machine.is_some());
-        let gone = |c: &Event| c.kind == "clean" && c.str("worktree") == Some(wt) && c.ts >= e.ts;
-        let gone = || held.map_or_else(|| !there.contains(&(on.machine, wt)), |_| events.iter().any(gone));
-        if seen.contains(wt) || gone() {
+        if seen.contains(wt) || held.is_none() && !there.contains(&(on.machine, wt)) {
             continue;
         }
         let unsafe_lane =
@@ -914,11 +951,34 @@ pub fn clean_all(
         let shown = away.map_or(wt.into(), |h| format!("{h}:{wt}"));
         if let Some(why) = held {
             if lane.is_some() {
-                return unsafe_lane(why);
+                return unsafe_lane(&format!("{why} (not cleaned)"));
             }
-            writeln!(out, "keep {shown}: {why}")?;
+            if verbose {
+                writeln!(out, "keep {shown}: {why} (not cleaned)")?;
+            }
+            if why == "off-root" {
+                *roots.entry(root_of(wt)).or_default() += 1;
+                if yes {
+                    let mut d = e.data.clone();
+                    d.insert("why".into(), why.into());
+                    emit(
+                        &ctx.state,
+                        cfg,
+                        Event::new(ctx.now, &e.fleet, Some(n), "clean-settled", Value::Object(d)),
+                    )?;
+                }
+                continue;
+            }
+            let host = away.unwrap_or("this host");
+            let why = match why {
+                "host unreachable" if cfg.hosts.get(host).is_some_and(|h| !h.enabled) => "host off",
+                "host unreachable" => "host offline",
+                w => w,
+            };
+            by_host.entry((host.into(), why)).or_default().0 += 1;
             continue;
         }
+        by_host.entry((away.unwrap_or("this host").into(), "")).or_default().0 += 1;
         let gitdir = on.read(&Path::new(wt).join(".git"));
         let gitdir = gitdir
             .as_deref()
@@ -1000,6 +1060,7 @@ pub fn clean_all(
             writeln!(out, "keep {shown}: {reason}")?;
             continue;
         }
+        by_host.entry((away.unwrap_or("this host").into(), "")).or_default().1 += 1;
         if !yes {
             writeln!(out, "would remove {shown} (pane {pane}, {}#{n} {why})", e.fleet)?;
             continue;
@@ -1023,6 +1084,17 @@ pub fn clean_all(
         removed += 1;
         writeln!(out, "removed {shown} ({}#{n} {why})", e.fleet)?;
         emit(&ctx.state, cfg, Event::new(ctx.now, &e.fleet, Some(n), "clean", d))?;
+    }
+    for ((host, why), (n, done)) in by_host.iter().filter(|_| lane.is_none()) {
+        let did = if yes { "removed" } else { "would remove" };
+        match *why {
+            "" if *done == 0 => writeln!(out, "{host}: {n} lanes checked")?,
+            "" => writeln!(out, "{host}: {n} lanes checked, {done} {did}")?,
+            why => writeln!(out, "{host}: {n} lanes, {why} — not checked")?,
+        }
+    }
+    for (root, n) in roots.iter().filter(|_| lane.is_none()) {
+        writeln!(out, "orphan root {root}: {n} worktrees off-root; `drover clean --orphans --yes` saves them to wip/, then removes them")?;
     }
     let sheds = r.shed().filter(|_| lane.is_none()).map(term::Shed);
     for (b, t) in sheds.iter().flat_map(|b| {
@@ -1077,6 +1149,11 @@ pub fn clean_all(
     Ok(tallies.0)
 }
 
+fn root_of(wt: &str) -> String {
+    let p = Path::new(wt);
+    p.parent().and_then(Path::parent).unwrap_or(p).display().to_string()
+}
+
 fn pr_head<'a>(events: &'a [Event], fleet: &str, n: u64) -> Option<&'a str> {
     let m = events.iter().rfind(|m| m.is("merged", fleet, n))?;
     m.str("verdict_sha").filter(|s| !s.is_empty())
@@ -1099,7 +1176,7 @@ pub fn kept_row(ctx: &Ctx) -> Option<String> {
 }
 
 pub fn scheduled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let res = clean_all(ctx, cfg, r, out, None, (None, None, true, false), true);
+    let res = clean_all(ctx, cfg, r, out, None, (None, None, true, false, false, false), true);
     let res = res.and_then(|n| Ok(std::fs::write(ctx.state.with_file_name("clean.kept"), n.to_string())?));
     let mark = ctx.state.with_file_name("clean.failed");
     let Err(e) = res else {
@@ -1604,7 +1681,7 @@ pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &m
         }
     }
     total += trim_builds(ctx, cfg, cfg.limits.build_budget_gb, &live, o, !yes)?;
-    total += sweep_off(ctx, cfg, r, o, &disabled(cfg, r), !yes)?;
+    total += sweep_off(ctx, cfg, r, o, &disabled(ctx, cfg, r), !yes)?;
     total += sweep::hosts(ctx, cfg, r, o, if yes { Sweep::Apply } else { Sweep::Preview })?;
     let done = if yes { "freed" } else { "reclaimable" };
     writeln!(o, "{:.2} GB {done} {NOTE}", gb(total))?;
@@ -2289,7 +2366,14 @@ fn build(p: &str) -> bool {
 }
 
 /// `wip prune`: origin's `wip/*` branches of `fleet`'s repo, each with the size it adds over the integration branch, its issue's state and whether it carries build output, after the counts per issue. Unless `dry`, deleted on origin (a branch delete: never a history rewrite or force-push): those of a merged or closed issue but its newest per role, and that one too if it carries build output. An open issue's are kept.
-pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, dry: bool) -> Result<()> {
+pub fn prune(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    fleet: &str,
+    (dry, listed): (bool, bool),
+) -> Result<()> {
     let (f, states) = (cfg.fleet(fleet)?, fold(&working(&ctx.state)?));
     let dir = f.local_path().to_string_lossy().into_owned();
     let git = |a: &[&str]| ok(r, "git", &[&["-C", &dir][..], a].concat());
@@ -2344,14 +2428,18 @@ pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
         rows.push((b, size, n, st, has, go));
     }
     let gone = if dry { "would delete" } else { "deleted" };
-    for (n, (all, del)) in &counts {
+    let (wips, dels) = counts.values().fold((0, 0), |a, c| (a.0 + c.0, a.1 + c.1));
+    if !listed {
+        writeln!(out, "{fleet}: {wips} wip branches, {dels} {gone}, {} kept", wips - dels)?;
+    }
+    for (n, (all, del)) in counts.iter().filter(|c| listed || c.1 .1 > 0) {
         let st = n
             .and_then(|n| states.get(&(fleet.to_string(), n)))
             .map_or("?", |s| &s.state);
         let issue = n.map_or("no issue".into(), |n| format!("#{n} {st}"));
         writeln!(out, "{issue}: {all} wip, {del} {gone}, {} kept", all - del)?;
     }
-    for (b, size, n, st, has, go) in rows {
+    for (b, size, n, st, has, go) in rows.into_iter().filter(|r| listed || r.5) {
         let what = if go { gone } else { "kept" };
         let issue = n.map_or("no issue".into(), |n| format!("#{n} {}", st.map_or("?", |s| &s.state)));
         let has = if has { " · build output" } else { "" };
