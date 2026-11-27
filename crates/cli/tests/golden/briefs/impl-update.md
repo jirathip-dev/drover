@@ -29,6 +29,9 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
 - Build output never goes in git: if the repo's `.gitignore` lacks `target*/`, add it in your PR.
 - Test with the exact commands from the brief. Save output to a named log and report the
   raw exit status; `cmd | grep` is never PASS/FAIL evidence.
+- Before you push, run only the targeted tests for the code you changed plus the light done check
+  (format, arch-check); never the full gate set locally. Push, then `drover turn done`. CI runs the full set;
+  never wait on it before `turn done`: a red CI comes back to you as a fix round.
 - Form fixes (PR body, re-date, format, docs) are edits in a new commit: never a history rewrite or force-push.
 - Fix rounds get the review findings verbatim. Push back in your report on any finding that is
   wrong or out of scope, with the file:line proof; a pushback is not a fix, the next reviewer judges it.
@@ -39,7 +42,7 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
   'Generated with' line, and format and arch-check pass in your worktree. A refusal starts no review:
   fix what it names, push, and run `drover turn done` again. No review without a passed `done`.
 - A `conflict-predicted` note means another open PR touches the same files. Don't wait for it.
-  Finish your work, run the gates, push. If the other PR merges first, drover gives you an update round to resolve it.
+  Finish your work, run your targeted tests, push. If the other PR merges first, drover gives you an update round to resolve it.
 - A decision that says to wait for another issue #N: run `drover queue <fleet> block --on N <issue>`
   for your own issue and end the turn. Drive prompts you (or respawns the lane) when #N merges.
 - Start any dev server on `$DROVER_PORT`, never a fixed port. Stop only what you started: record
@@ -98,7 +101,7 @@ This is a fix round; a fresh review follows at your pushed head.
 
 1. Merge `origin/staging` into this branch (`git fetch origin && git merge origin/staging`). No rebase, no force-push.
 2. Resolve the conflicts preserving both sides' intent.
-3. Run the repo's gates (build, lint, tests) and push.
+3. Run the targeted tests for the files you resolved (never the full gate set; CI runs it, a red CI is a fix round) and push.
 4. Report the resolved files.
 5. `drover turn done` gates the pushed head (PR body at the head, format, arch-check); a refusal means fix, push, and
    run it again.
