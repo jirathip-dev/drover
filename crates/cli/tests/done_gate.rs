@@ -765,3 +765,91 @@ fn no_check_runs_off_ui_paths_or_without_the_setup() {
         assert!(kinds(&c, "turn-end").pop().unwrap().data.get("ui_check").is_none());
     }
 }
+
+#[test]
+fn a_heavy_done_check_waits_for_a_free_slot_and_runs_in_it() {
+    let (repo, mut c, _sh, bin) = ui_lane("done-heavy", None);
+    let cfg = std::fs::read_to_string(&c.config).unwrap().replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\ndone_checks = [\"sh build.sh\"]",
+    );
+    let cfg = cfg + "\n[fleet.sendmeter.heavy]\nbuild = [\"sh build.sh*\"]\n\n[hosts.mini]\nheavy_max = 1\n";
+    std::fs::write(&c.config, cfg).unwrap();
+    let (log, go) = (repo.dir.join("order.log"), repo.dir.join("go"));
+    std::fs::write(repo.wt.join("build.sh"), format!("echo check >> '{}'\n", log.display())).unwrap();
+    let exe = bin.join("drover-env");
+    let env = format!(
+        "#!/bin/sh\nexport FLEET_CONFIG='{}' FLEET_STATE='{}' DROVER_HOME='{}'\nexec '{}' \"$@\"\n",
+        c.config.display(),
+        c.state.display(),
+        repo.dir.join("home").display(),
+        env!("CARGO_BIN_EXE_drover")
+    );
+    std::fs::write(&exe, env).unwrap();
+    std::fs::set_permissions(&exe, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    c.exe = exe.to_string_lossy().into();
+    let slots = c.state.with_file_name("heavy");
+    let tickets = {
+        let slots = slots.clone();
+        move || {
+            drover::heavy::line(&slots)
+                .into_iter()
+                .map(|(_, t)| t)
+                .collect::<Vec<_>>()
+        }
+    };
+    let until = |what: &str, ok: &dyn Fn() -> bool| {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !ok() {
+            assert!(std::time::Instant::now() < end, "timed out waiting for {what}");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    };
+    let held = format!(
+        "for i in $(seq 400); do [ -f '{}' ] && break; sleep 0.05; done; echo held >> '{}'",
+        go.display(),
+        log.display()
+    );
+    let hold_slots = slots.clone();
+    let holder = std::thread::spawn(move || {
+        let me = drover::heavy::Ticket::new("holder".into(), "build".into(), held, None);
+        drover::heavy::run(&drover::runner::Real, &hold_slots, me, 1, 30, &|| None, |_, _| None).unwrap()
+    });
+    until("the holder's slot", &|| tickets().iter().any(|t| t.running));
+    let waiting = tickets.clone();
+    let (wlog, wgo) = (log.clone(), go.clone());
+    let watcher = std::thread::spawn(move || {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let queued = loop {
+            let t = waiting();
+            if let Some(q) = t.iter().find(|t| t.lane != "holder") {
+                break Some(q.clone());
+            }
+            if std::time::Instant::now() > end {
+                break None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let before = std::fs::read_to_string(&wlog).unwrap_or_default();
+        std::fs::write(&wgo, "").unwrap();
+        (queued, before)
+    });
+    let f = fake(&repo.head);
+    let (code, out) = run(&c, &ui(Git::new(&f), &bin, false), &["turn", "done"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(holder.join().unwrap(), 0);
+    let (queued, before) = watcher.join().unwrap();
+    let q = queued.expect("the done check queued for a heavy slot");
+    assert_eq!(
+        (q.kind.as_str(), q.cmd.as_str(), q.running),
+        ("build", "sh build.sh", false)
+    );
+    assert_eq!(before, "", "the check ran while the only slot was held");
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), "held\ncheck\n");
+    assert!(tickets().is_empty(), "{:?}", tickets());
+    assert_eq!(
+        kinds(&c, "turn-end").pop().unwrap().str("sha"),
+        Some(repo.head.as_str())
+    );
+}

@@ -84,11 +84,18 @@ fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64), role:
         head: &head,
         body: text,
     };
+    let heavy = crate::heavy::Heavy::at(cfg, f, sp.str("host"));
+    let exe = if on.machine.is_some() { "drover" } else { &ctx.exe };
     for c in checks(f, &on, Path::new(wt)) {
         let o = if c == crate::gatekeeper::CHECK {
             crate::gatekeeper::check(&on, Path::new(wt), &pr, &f.private_names, limit)
         } else {
-            on.run_for("sh", &argv(&["-c", &format!("cd \"$0\" && {c}"), wt]), "", limit)
+            on.run_for(
+                "sh",
+                &crate::heavy::Heavy::check(heavy.as_ref(), exe, &c, wt),
+                "",
+                limit,
+            )
         };
         let o = match o {
             Ok(o) if o.code == 0 => continue,

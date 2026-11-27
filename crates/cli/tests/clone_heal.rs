@@ -439,3 +439,33 @@ fn a_remote_fetch_racing_another_on_staging_is_retried_and_the_spawn_starts() {
     assert_eq!(retried[0].str("clone"), Some("/tmp/does-not-matter/sendmeter"));
     assert!(ev.iter().any(|e| e.kind == "spawn"), "{ev:#?}");
 }
+
+#[test]
+fn premerge_twice_in_one_fleet_reuses_its_worktree() {
+    let r = repos("premerge-reuse");
+    let _sh = FakeShed::attached(&r.c);
+    premerge(&r.local);
+    ready(&r.c, &r.head);
+    let mut first = merger(&r.local, &r.head);
+    first.0 = std::mem::take(&mut first.0).once("sh -c", 1, "src lines (formatted): 14885 / cap 14700\n");
+    let (code, out) = run(&r.c, &first, &["merge", "sendmeter", "3"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("STAGING_WOULD_BREAK"), "{out}");
+    let wt = r.c.state.with_file_name("premerge-sendmeter");
+    let add = format!("git -C {} worktree add -f --detach {}", r.local.display(), wt.display());
+    assert_eq!(first.0.count(&add), 1, "{:#?}", first.0.calls.borrow());
+    let v = json!({"verdict": "PASS", "sha": r.head, "round": 2});
+    append(&r.c.state, &Event::new(40, "sendmeter", Some(3), "verdict", v)).unwrap();
+    let second = merger(&r.local, &r.head);
+    let (code, out) = run(&r.c, &second, &["merge", "sendmeter", "3"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(second.0.count("sh -c"), 1, "{:#?}", second.0.calls.borrow());
+    assert!(!second.0.called(&add), "{:#?}", second.0.calls.borrow());
+    let merged = git(&wt, &["log", "-1", "--format=%P"]);
+    assert!(
+        merged.ends_with(&r.head),
+        "the reused worktree holds the second merge: {merged}"
+    );
+    let list = git(&r.local, &["worktree", "list"]);
+    assert_eq!(list.matches("premerge-sendmeter").count(), 1, "{list}");
+}

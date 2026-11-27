@@ -735,7 +735,8 @@ fn premerge_runs_the_cap_through_the_gatekeeper_wrapper() {
     assert_eq!(exit, 3, "{out}");
     let want = "REFUSED STAGING_WOULD_BREAK: ./.gatekeeper/run check --gate core/cap: FAIL core/cap: 14885 / cap 14700";
     assert!(out.contains(want), "{out}");
-    let cap = format!("sh -c cd \"$0\" && ./.gatekeeper/run check --gate core/cap {wt}");
+    let cap =
+        format!("sh -c renice -n 19 -p $$ >/dev/null 2>&1; cd \"$0\" && ./.gatekeeper/run check --gate core/cap {wt}");
     assert!(r.called(&cap), "{:#?}", r.calls.borrow());
     assert!(!r.called("cap-check"), "{:#?}", r.calls.borrow());
     assert!(!r.called("gh pr merge"));
@@ -841,7 +842,7 @@ fn named_premerge_failure_refuses_with_its_code_and_a_fix_round() {
     assert_eq!(exit, 3, "{out}");
     let want = "REFUSED BACKDATED_MIGRATION: migration 20260101_x.sql is behind the dev ledger";
     assert!(out.contains(want), "{out}");
-    assert!(r.called("sh -c cd \"$0\" && node scripts/check-migrations.mjs --base origin/staging --ledger"));
+    assert!(r.called("sh -c renice -n 19 -p $$ >/dev/null 2>&1; cd \"$0\" && node scripts/check-migrations.mjs --base origin/staging --ledger"));
     assert!(!r.called("gh pr merge"), "{:#?}", r.calls.borrow());
     let ev = read(&c.state).unwrap();
     let st = &fold(&ev)[&("sendmeter".to_string(), 12)];
@@ -880,7 +881,7 @@ fn list_form_premerge_still_runs_its_checks() {
         out.contains("REFUSED STAGING_WOULD_BREAK: make lint: lint: error: unused import"),
         "{out}"
     );
-    assert!(r.called("sh -c cd \"$0\" && make lint"));
+    assert!(r.called("sh -c renice -n 19 -p $$ >/dev/null 2>&1; cd \"$0\" && make lint"));
     assert!(!r.called(&format!("git -C {wt} diff")), "no `when`, no diff");
     assert!(!r.called("gh pr merge"));
     let p = read(&c.state)

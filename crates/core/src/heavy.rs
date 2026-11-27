@@ -64,6 +64,34 @@ pub fn hits(p: &str, s: &str) -> bool {
 }
 
 impl Heavy {
+    /// Fleet `f`'s heavy kinds under host `h`'s slot limits (None: the fleet has no heavy patterns).
+    pub fn of(f: &crate::config::Fleet, h: Option<&crate::config::HostCfg>) -> Option<Heavy> {
+        (!f.heavy.is_empty()).then(|| Heavy {
+            kinds: f.heavy.clone(),
+            max: h.and_then(|h| h.heavy_max).unwrap_or(3),
+            kind_max: h.map(|h| h.heavy_kind_max.clone()).unwrap_or_default(),
+            wait_minutes: h.and_then(|h| h.heavy_wait_minutes).unwrap_or(30),
+            routes: f.remote.clone(),
+            never: f.never_routed(),
+        })
+    }
+
+    /// Fleet `f`'s heavy kinds under host `host`'s slot limits (None or unknown: the main host's).
+    pub fn at(cfg: &crate::config::Config, f: &crate::config::Fleet, host: Option<&str>) -> Option<Heavy> {
+        let main = || cfg.hosts.values().find(|h| h.machine.is_none());
+        Self::of(f, host.and_then(|n| cfg.hosts.get(n)).or_else(main))
+    }
+
+    /// `run` as a check's `sh -c` argv in `wt` at background priority, in a `kind` slot (`exe heavy`) when it matches one.
+    pub fn check(me: Option<&Heavy>, exe: &str, run: &str, wt: &str) -> Vec<String> {
+        let line = match me.and_then(|h| Some((h, h.kind(run)?))) {
+            Some((h, kind)) => h.wrap(exe, kind, run, None),
+            None => run.to_string(),
+        };
+        let sh = format!("renice -n 19 -p $$ >/dev/null 2>&1; cd \"$0\" && {line}");
+        crate::runner::argv(&["-c", &sh, wt])
+    }
+
     /// The first kind with a pattern matching one of `cmd`'s commands (leading `VAR=value` words skipped).
     pub fn kind(&self, cmd: &str) -> Option<&str> {
         let segs = segments(cmd);

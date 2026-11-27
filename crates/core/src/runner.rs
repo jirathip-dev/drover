@@ -247,7 +247,7 @@ impl Real {
                 ..Out::default()
             });
         }
-        let mut pipes = None;
+        let (mut pipes, mut pid) = (None, None);
         let end = crate::clock::instant() + limit;
         let start = || {
             use std::os::unix::process::CommandExt;
@@ -259,11 +259,17 @@ impl Real {
                 .stderr(Stdio::piped())
                 .spawn()
                 .with_context(|| format!("cannot run {prog}"))?;
+            pid = Some(c.id());
+            running().insert(c.id());
             let _ = c.stdin.take().map(|mut s| s.write_all(input));
             pipes = Some((drain(c.stdout.take()), drain(c.stderr.take())));
             Ok(c)
         };
-        let ended = settle(dir.map(String::as_str), limit, start)?;
+        let ended = settle(dir.map(String::as_str), limit, start);
+        if let Some(p) = pid {
+            running().remove(&p);
+        }
+        let ended = ended?;
         let text = |b: std::sync::mpsc::Receiver<Vec<u8>>| {
             let left = end.saturating_duration_since(crate::clock::instant());
             let v = b.recv_timeout(left).ok()?;
@@ -287,6 +293,19 @@ impl Real {
             }
             Ended::Busy => fail(format!("an earlier call on {} has not ended", dir.map_or("", |d| d))),
         }
+    }
+}
+
+fn running() -> std::sync::MutexGuard<'static, std::collections::BTreeSet<u32>> {
+    static RUNNING: std::sync::Mutex<std::collections::BTreeSet<u32>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    RUNNING.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// SIGKILL to the process group of every call still running here, as a pass ending on its deadline leaves none behind.
+pub fn kill_running() {
+    for p in running().iter() {
+        drover_sys::kill_group(*p);
     }
 }
 
