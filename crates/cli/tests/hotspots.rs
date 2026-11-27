@@ -222,7 +222,7 @@ fn a_file_the_arch_toml_lists_frozen_or_generated_is_converted_and_never_hot() {
 }
 
 #[test]
-fn tick_skips_a_fleet_with_hotspots_off() {
+fn housekeep_skips_a_fleet_with_hotspots_off() {
     let c = fixture("hotspots-off");
     let _sh = FakeShed::attached(&c);
     let r = RealGit(
@@ -230,7 +230,7 @@ fn tick_skips_a_fleet_with_hotspots_off() {
             .reply("herdr status", "server:\n  status: running\n")
             .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n"),
     );
-    let (code, out) = run(&c, &r, &["tick"]);
+    let (code, out) = run(&c, &r, &["housekeep", "--only", "hotspots"]);
     assert_eq!(code, 0, "{out}");
     assert!(drover::hotspots::path(&c, "sendmeter").exists(), "{out}");
     assert!(!drover::hotspots::path(&c, "mirror").exists(), "{out}");
@@ -327,7 +327,7 @@ fn the_bar_rises_to_one_in_twenty_merges() {
 }
 
 #[test]
-fn tick_stores_the_list_daily_and_files_the_issue_weekly() {
+fn housekeep_stores_the_list_daily_and_files_the_issue_weekly() {
     let c = fixture("hotspots-daily");
     let _sh = FakeShed::attached(&c);
     let tick = |now: u64| {
@@ -336,7 +336,11 @@ fn tick_stores_the_list_daily_and_files_the_issue_weekly() {
                 .reply("herdr status", "server:\n  status: running\n")
                 .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n"),
         );
-        let (code, out) = run(&drover::Ctx { now, ..c.clone() }, &r, &["tick"]);
+        let (code, out) = run(
+            &drover::Ctx { now, ..c.clone() },
+            &r,
+            &["housekeep", "--only", "hotspots"],
+        );
         assert_eq!(code, 0, "{out}");
         (
             r.0.called("gh issue list -R jirathip-dev/sendmeter --state open --search \"hotspots"),

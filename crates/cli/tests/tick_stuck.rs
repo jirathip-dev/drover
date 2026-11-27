@@ -118,13 +118,23 @@ fn a_host_that_never_answers_costs_one_retried_probe_and_drive_still_starts() {
     assert_eq!(to_air, [PROBE, PROBE], "one probe retried once, nothing after it");
     assert!(r.spent.get() <= 60, "{}s on the Air", r.spent.get());
     let mark = r.seen.borrow()[0].clone();
-    assert!(mark.contains(r#""step":"check""#) && mark.contains("air"), "{mark}");
+    assert!(mark.contains(r#""step":"drive""#) && mark.contains("air"), "{mark}");
     assert!(!r.mark.exists(), "the tick's step marker goes when it ends");
     assert_eq!(r.beats.borrow()[0], format!("{NOW} {NOW}"));
     assert!(
         !r.mark.with_file_name("tick.beat").exists(),
         "the heartbeat goes when the tick ends"
     );
+    drop(calls);
+    let r = Hang {
+        f: local(),
+        mark: c.state.with_file_name("tick.step"),
+        spent: Shared::new(0),
+        seen: Shared::default(),
+        beats: Shared::default(),
+    };
+    let (code, out) = run(&c, &r, &["housekeep"]);
+    assert_eq!(code, 0, "{out}");
     let cached = drover::hosts::cached(&c);
     assert!(!cached["air"].up, "the Air shows offline");
     assert!(out.contains("air: 1 lanes, host offline — not checked"), "{out}");
@@ -133,7 +143,7 @@ fn a_host_that_never_answers_costs_one_retried_probe_and_drive_still_starts() {
 }
 
 #[test]
-fn the_ticks_clean_never_probes_a_disabled_hosts_worktrees() {
+fn housekeepings_clean_never_probes_a_disabled_hosts_worktrees() {
     let (c, _sh) = setup("stuck-disabled", "enabled = false");
     let r = local().reply("herdr status", "server:\n  status: running\n");
     let air = FakeShed::new();
@@ -141,7 +151,7 @@ fn the_ticks_clean_never_probes_a_disabled_hosts_worktrees() {
         f: &r,
         hosts: vec![("air", &air)],
     };
-    let (code, out) = run(&c, &on, &["tick"]);
+    let (code, out) = run(&c, &on, &["housekeep", "--only", "clean"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("air: 1 lanes, host off — not checked"), "{out}");
     let calls = r.calls.borrow();
@@ -412,7 +422,7 @@ fn a_fleet_with_due_work_and_no_finished_pass_for_three_tick_intervals_raises_on
 }
 
 #[test]
-fn a_ticks_clean_never_probes_worktrees_on_a_host_gone_from_hosts_and_sums_them_up_once() {
+fn housekeepings_clean_never_probes_worktrees_on_a_host_gone_from_hosts_and_sums_them_up_once() {
     let (c, _sh) = setup("stuck-gone", "");
     for i in 100..150 {
         let wt = format!("/Users/me/.local/share/drover/work/sendmeter/issue-{i}");
@@ -433,7 +443,7 @@ fn a_ticks_clean_never_probes_worktrees_on_a_host_gone_from_hosts_and_sums_them_
         hosts: vec![("air", &air)],
     };
     let start = std::time::Instant::now();
-    let (code, out) = run(&c, &on, &["tick"]);
+    let (code, out) = run(&c, &on, &["housekeep", "--only", "clean"]);
     assert_eq!(code, 0, "{out}");
     assert!(start.elapsed() < Duration::from_secs(5), "{:?}", start.elapsed());
     let calls = r.calls.borrow();
