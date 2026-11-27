@@ -432,11 +432,16 @@ fn idle_lane(name: &str, merged: bool, status: &str) -> (drover::Ctx, PathBuf, i
     (c, wt, r)
 }
 
-struct Stamped(Fake, std::sync::Mutex<Vec<(String, usize)>>);
+struct Stamped(
+    Fake,
+    std::sync::Mutex<Vec<(String, usize)>>,
+    std::sync::Arc<std::sync::Mutex<common::fake_shed::State>>,
+);
 impl drover::runner::Runner for Stamped {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         let line = format!("{prog} {}", args.join(" "));
-        self.1.lock().unwrap().push((line, sh().methods().len()));
+        let seen = self.2.lock().unwrap().seen.len();
+        self.1.lock().unwrap().push((line, seen));
         self.0.run(prog, args)
     }
     fn sleep(&self, secs: u64) {
@@ -468,7 +473,7 @@ fn a_merged_issues_idle_lane_pane_closes_after_the_limit_with_its_work_on_wip() 
         "idle under idle_merged_minutes (15): {out}"
     );
     assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "lane-closed"));
-    let r1 = Stamped(r(900), std::sync::Mutex::default());
+    let r1 = Stamped(r(900), std::sync::Mutex::default(), sh().state.clone());
     let (code, out) = run(&at(&c, 900), &r1, &["housekeep", "--only", "clean"]);
     assert_eq!(code, 0, "{out}");
     let w = wt.display();
