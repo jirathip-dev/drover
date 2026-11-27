@@ -61,7 +61,7 @@ stateDiagram-v2
 ```mermaid
 flowchart TD
     j0["dev.drover.tick: drover tick"] --> t0
-    j1["dev.drover.fast: drover drive"] --> d0
+    j1["dev.drover.service: drover service"] --> d0
     t0["check"] --> t1
     t1["drive"] --> t2
     t2["clean"] --> t3

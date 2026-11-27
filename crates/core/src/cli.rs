@@ -499,9 +499,6 @@ enum Cmd {
         #[arg(help = "Also serve the board here (the `serve` job's address)")]
         #[arg(long)]
         board: Option<String>,
-        #[arg(help = "Write its launchd/systemd unit and print the commands that load it; loads nothing")]
-        #[arg(long)]
-        install: bool,
     },
     #[command(
         about = "Alert once per state on stall, lane-dead, ready-unmerged, ci-missing, ask-waiting, orphan-lane, outbox-stale; idempotent, safe from cron"
@@ -1531,12 +1528,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 crate::providers::get(h).sync(ctx, &role, &role, &p, &usage_doc(), out)?;
             }
         }
-        Cmd::Service {
-            api,
-            board,
-            install: true,
-        } => crate::timer::service_unit(ctx, r, out, &api, board.as_deref())?,
-        Cmd::Service { api, board, .. } => (crate::SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
+        Cmd::Service { api, board } => (crate::SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
         Cmd::Chat { thread } => anyhow::ensure!(crate::app(ctx, r, &crate::Open::Threads(thread))?, "needs a terminal"),
         cmd => {
             let cfg = match cmd {

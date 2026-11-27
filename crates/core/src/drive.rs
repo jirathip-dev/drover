@@ -239,6 +239,7 @@ thread_local! {
     static IN_ACT: Cell<bool> = const { Cell::new(false) };
     static ROOM: RefCell<(bool, Option<(&'static str, String)>)> = const { RefCell::new((false, None)) };
     static SLOT: Cell<bool> = const { Cell::new(false) };
+    static UNHEARD: Cell<bool> = const { Cell::new(false) };
     static FULL_ON: RefCell<Vec<String>> = const { RefCell::new(vec![]) };
 }
 
@@ -669,7 +670,7 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
 }
 
 fn start_pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
-    let late = 2 * cfg.limits.pass_max_secs + cfg.limits.fast_secs;
+    let late = (2 * cfg.limits.pass_max_secs + cfg.limits.fast_secs).max(cfg.limits.slow_secs);
     let fresh = last_pass(ctx, fleet).is_some_and(|t| ctx.now.saturating_sub(t) <= late);
     if held(ctx, &format!("drive-{fleet}.lock")).is_some() || crate::service::wake(ctx, fleet) && fresh {
         return Ok(());
@@ -773,6 +774,7 @@ pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
         }
     };
     mark("look, repair");
+    UNHEARD.set(false);
     crate::link::look(ctx, cfg, r, out, KICK.get().is_some()).map_or_else(|e| drop(writeln!(out, "look: {e:#}")), drop);
     if let Err(e) = repair(ctx, cfg, r, out, fleet) {
         writeln!(out, "repair: {e:#}")?;
@@ -831,7 +833,7 @@ fn one(
     laps.lap("closed issues");
     mark("PR reads, gates, steps");
     let mut res = failed(
-        pass(ctx, cfg, (r, seen), out, name),
+        lanes(ctx, cfg, r, out, name).and_then(|l| l.map_or(Ok(()), |s| pass(ctx, cfg, (r, seen), out, name, &s))),
         out,
         name,
         "PR reads, gates, steps",
@@ -840,7 +842,7 @@ fn one(
     mark("spawns");
     res = res.or(failed(starts(ctx, cfg, r, out, name), out, name, "spawns"));
     if KICK.get().is_none() {
-        res = res.or(failed(undriven::cards(ctx, cfg, out, name), out, name, "spawns"));
+        res = res.or(failed(undriven::cards(ctx, cfg, r, out, name), out, name, "spawns"));
     }
     laps.lap("spawns");
     let acts = pass::shadow(ctx, cfg, out, name)?;
@@ -857,6 +859,32 @@ fn one(
         append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", laps.with(d))).ok();
     }
     res.map_or(Ok(()), Err)
+}
+
+fn lanes(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    fleet: &str,
+) -> Result<Option<crate::session::Sessions>> {
+    if UNHEARD.get() {
+        return Ok(None);
+    }
+    let got = match crate::link::view::View::load(ctx, cfg)?.sessions().checked() {
+        Ok(s) => Ok(s),
+        Err(_) => crate::link::look_at(ctx, cfg, r, None).and_then(|v| v.sessions().checked()),
+    };
+    let why = match got {
+        Ok(s) => return Ok(Some(s)),
+        Err(e) => e,
+    };
+    UNHEARD.set(true);
+    writeln!(
+        out,
+        "{fleet}: the main host gave no word ({why:#}): its lane checks skipped this pass"
+    )?;
+    Ok(None)
 }
 
 fn failed(res: Result<()>, out: &mut dyn Write, fleet: &str, step: &str) -> Option<anyhow::Error> {
@@ -882,7 +910,10 @@ fn repair(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         if s.state == "impl" {
             let live = match &mut agents {
                 Some(a) => a,
-                None => agents.insert(crate::link::view::View::load(ctx, cfg)?.sessions().checked()?.running()),
+                None => match lanes(ctx, cfg, r, out, fleet)? {
+                    Some(l) => agents.insert(l.running()),
+                    None => return Ok(()),
+                },
             };
             let lane = s.active_lane().is_some_and(|(_, l)| live.iter().any(|a| a.name == l));
             if lane
@@ -1152,9 +1183,9 @@ fn pass(
     (r, seen): (&dyn Runner, &dyn Runner),
     out: &mut dyn Write,
     fleet: &str,
+    sessions: &crate::session::Sessions,
 ) -> Result<()> {
     let f = cfg.fleet(fleet)?;
-    let sessions = crate::link::view::View::load(ctx, cfg)?.sessions().checked()?;
     let agents = sessions.running();
     let ev = working(&ctx.state)?;
     let st = fold(&ev);
@@ -1462,7 +1493,7 @@ fn pass(
                 updated = true;
                 catch_up(ctx, cfg, r, out, fleet)?;
             }
-        } else if let Some(a) = stall::stalled(ctx, cfg, &events, &sessions, w) {
+        } else if let Some(a) = stall::stalled(ctx, cfg, &events, sessions, w) {
             let start = matches!(
                 &a,
                 stall::Act::Respawn(_, "failed start") | stall::Act::Escalate("START_FAILED", _)

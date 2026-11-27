@@ -25,7 +25,7 @@ fn timer_install_logs_who_ran_it() {
     assert_eq!(e.str("by"), Some("owner"));
     let jobs = json!([
         "dev.drover.tick",
-        "dev.drover.fast",
+        "dev.drover.service",
         "dev.drover.update",
         "dev.drover.clean"
     ]);

@@ -9,6 +9,8 @@ mod no_baseline;
 mod remote_unlisted;
 #[path = "drive/rev_unlisted.rs"]
 mod rev_unlisted;
+#[path = "drive/stale_view.rs"]
+mod stale_view;
 #[path = "drive/undriven.rs"]
 mod undriven;
 #[path = "drive/update_limit.rs"]
@@ -729,7 +731,11 @@ fn a_dead_pids_lock_is_taken_over_at_once_and_a_live_ones_respected() {
     lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
     std::fs::remove_file(&sh().sock).unwrap();
     let bad = Fake::default().once("kill -0 4242", 1, "");
-    assert!(run(&c, &bad, &["drive"]).0 != 0);
+    assert_eq!(
+        run(&c, &bad, &["drive"]).0,
+        0,
+        "a main host with no word skips, never fails"
+    );
     gone();
 }
 
