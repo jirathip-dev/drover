@@ -894,11 +894,7 @@ pub fn clean_all(
         .chain(parked.iter().filter(|_| orphans))
         .filter(|e| e.issue.is_some_and(|n| issue.is_none_or(|i| i == n)))
         .filter(|e| lane.is_none_or(|a| e.str("agent") == Some(a)))
-        .filter(|e| {
-            e.str("worktree")
-                .and_then(|w| cleaned.get(w))
-                .is_none_or(|t| *t < e.ts)
-        });
+        .filter(|e| e.str("worktree").and_then(|w| cleaned.get(w)).is_none_or(|t| *t < e.ts));
     let spawns = unset::unconfigured(cfg, out, &events, lane, spawns)?;
     let held = |e: &Event| {
         let away = e.str("host").filter(|_| e.str("machine").is_some());
