@@ -1038,10 +1038,7 @@ fn a_fast_step_over_50k_worktree_files_walks_none_of_them() {
         "#949 perf (50,000 worktree files): drive {fast_ms} ms, {fast} entries walked · housekeep {slow_ms} ms, {bytes} bytes summed"
     ));
     assert_eq!(fast, 0, "drive walked {fast} entries: {out}");
-    assert!(
-        bytes >= 50_000,
-        "housekeeping's budget summed only {bytes} bytes of 50,000 one-byte files: {slow_out}"
-    );
+    assert!(bytes >= 50_000, "summed {bytes} of 50,000 one-byte files: {slow_out}");
 }
 
 #[test]
