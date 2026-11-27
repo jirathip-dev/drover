@@ -947,6 +947,28 @@ pub fn dirty_past(r: &dyn Runner, wt: &Path, kept: Option<&str>) -> Option<Strin
     }
 }
 
+fn progressed(
+    now: u64,
+    stall: u64,
+    events: &[Event],
+    live: &[&Session],
+    (fleet, issue, agent): (&str, u64, &str),
+) -> Option<u64> {
+    let from = last_spawn(events, agent).map_or(0, |e| e.ts);
+    let mine = |e: &&Event| {
+        e.ts >= from
+            && (e.is("pushed", fleet, issue)
+                || e.is("turn-end", fleet, issue)
+                || e.kind == "lane-state" && e.str("agent") == Some(agent))
+    };
+    let at = if live.iter().any(|a| a.busy()) {
+        Some(now)
+    } else {
+        events.iter().rfind(mine).map(|e| e.ts)
+    };
+    at.map(|t| now.saturating_sub(t)).filter(|a| *a < stall)
+}
+
 /// `spawn`'s flags.
 #[derive(Default, clap::Args)]
 pub struct Opts {
@@ -962,6 +984,9 @@ pub struct Opts {
     /// Kill the live agent / unfinished lane in the way, then spawn (logged)
     #[arg(long)]
     pub supersede: bool,
+    /// Why a live lane still progressing inside `stall_minutes` is superseded (logged on the `supersede` event)
+    #[arg(long, requires = "supersede")]
+    pub why: Option<String>,
     /// Run the lane on this `[hosts.<name>]` (default: the least-busy enabled host whose tags cover the needs)
     #[arg(long)]
     pub host: Option<String>,
@@ -1214,6 +1239,27 @@ fn start(
             format!("{msg}{}", if stale { "" } else { "; `--supersede` replaces it" }),
         );
     }
+    let asked = o.by.as_deref().is_some_and(|b| b != "drive") && o.why.is_none();
+    if let Some(age) = (asked && !stale && !live.is_empty())
+        .then(|| {
+            progressed(
+                ctx.now,
+                cfg.limits.stall_minutes * 60,
+                &events,
+                &live,
+                (fleet, issue, &p.agent),
+            )
+        })
+        .flatten()
+    {
+        let age = crate::events::age(age);
+        return refused(
+            "LANE_PROGRESSING",
+            format!(
+                "lane {names:?} progressed {age} ago, inside stall_minutes; `--supersede --why \"<text>\"` replaces it"
+            ),
+        );
+    }
 
     lane_admit(ctx, (cfg, r), &events, (fleet, issue, role), o.force)?;
     crate::respawn::guard(ctx, cfg, &events, (fleet, issue, role))?;
@@ -1290,7 +1336,7 @@ fn start(
             crate::check::reap(ctx, cfg, &old, was, (fleet, Some(issue)), owt)?;
         }
         let why: Vec<&str> = dup.iter().map(|d| d.1.as_str()).collect();
-        let mut d = json!({"role": role, "agent": p.agent, "killed": killed, "reason": why.join("; "), "wip": wip});
+        let mut d = json!({"role": role, "agent": p.agent, "killed": killed, "reason": why.join("; "), "wip": wip, "why": o.why, "by": o.by});
         if let Some(e) = stale {
             d.put("stale_host", json!(e.str("host")))
                 .put("stale_pane", json!(e.str("pane")));
