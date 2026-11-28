@@ -466,7 +466,14 @@ fn brief(
                 " The design moves: also a short clip of it (`clip.gif` or `clip.mp4`) beside the images."
             } else {
                 ""
-            }
+            },
+            blocks = recipe.blocks.as_ref().map_or(String::new(), |b| format!(
+                include_str!("../roles/brief-blocks.md"),
+                pack = b.pack.as_ref().map_or(
+                    "none found in Cargo.toml, package.json or Package.swift: name that under `Open questions:`".into(),
+                    |p| format!("`{p}`")
+                )
+            ))
         ),
         "architect" => {
             let hot = include_str!("../roles/brief-hotspots-architect.md");
@@ -1362,7 +1369,7 @@ fn start(
         let body = iss.at("body").as_str().unwrap_or("");
         let recipe = match p.family {
             "design" => crate::design::Recipe::at(r, &local, &p.base, body),
-            _ => crate::design::Recipe::of("", body),
+            _ => crate::design::Recipe::of("", body, &|_| None),
         };
         crate::design::tools(ctx, cfg, r, (fleet, issue, &p.agent), &recipe)?;
         let spec = refspec(&p.branch);
