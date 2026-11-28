@@ -433,7 +433,7 @@ pub fn fleet_use(
     (!both.is_empty()).then(|| both.join(", "))
 }
 
-/// A `<fleet>: in flight 7/8, serial: …` line per fleet (or `only`) with a cap in use: status and waiting.
+/// A `<fleet>: in flight 7/8, serial: …` line per fleet (or `only`) with a cap in use, and its `integration` check line: status and waiting.
 pub fn fleets_use(
     ctx: &crate::Ctx,
     events: &[Event],
@@ -444,7 +444,11 @@ pub fn fleets_use(
         .iter()
         .flat_map(|c| c.fleet.keys())
         .filter(|f| only.is_none_or(|o| o == *f));
-    let line = |st: &States, f: &String| Some(format!("{f}: {}\n", fleet_use(ctx, events, st, f, cfg)?));
+    let line = |st: &States, f: &String| {
+        let checked = crate::integration::line(ctx.now, events, f).map(|l| format!("{f}: {l}\n"));
+        let used = fleet_use(ctx, events, st, f, cfg).map(|u| format!("{f}: {u}\n"));
+        Some(used.into_iter().chain(checked).collect::<String>()).filter(|s| !s.is_empty())
+    };
     let all = |st: &States| total(ctx, events, st, cfg?).map(|(v, cap)| format!("in flight {}/{cap}\n", v.len()));
     crate::events::with_states(events, |st| {
         all(st).into_iter().chain(fleets.filter_map(|f| line(st, f))).collect()
@@ -755,7 +759,9 @@ pub fn board(
         "Q", "ISSUE", "STATE", "LANE", "EFF", "AGE"
     );
     let serial = fleet_use(ctx, events, &st, fleet, cfg).map_or(String::new(), |s| format!(", {s}"));
-    let mut lines = vec![format!("{fleet}: {} queued, {active} active{serial}", q.len()), head];
+    let mut lines = vec![format!("{fleet}: {} queued, {active} active{serial}", q.len())];
+    lines.extend(crate::integration::line(now, events, fleet));
+    lines.push(head);
     let row = |pos: String, n: u64, last: Option<String>| {
         let s = st.get(&(fleet.to_string(), n));
         let f = cfg.and_then(|c| c.fleet.get(fleet));
