@@ -1616,6 +1616,7 @@ pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &m
     total += sweep_off(ctx, cfg, r, o, &disabled(ctx, cfg, r), !yes)?;
     total += sweep::hosts(ctx, cfg, r, o, if yes { Sweep::Apply } else { Sweep::Preview })?;
     let done = if yes { "freed" } else { "reclaimable" };
+    write!(o, "{}", crate::roots::caches(ctx, cfg))?;
     writeln!(o, "{:.2} GB {done} {NOTE}", gb(total))?;
     if yes {
         return Ok(());
@@ -1640,7 +1641,7 @@ fn touched(r: &dyn Runner, wt: &Path) -> Option<u64> {
 }
 
 #[expect(clippy::as_conversions, reason = "u64 to f64 has no std From; display only")]
-fn gb(bytes: u64) -> f64 {
+pub fn gb(bytes: u64) -> f64 {
     bytes as f64 / 1_073_741_824.0
 }
 

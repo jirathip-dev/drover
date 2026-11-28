@@ -216,6 +216,8 @@ pub struct HostCfg {
     pub min_cpu_idle: Option<f64>,
     pub min_free_mem_gb: Option<f64>,
     pub swapout_rate: Option<f64>,
+    /// #1641: set on this host's entry, its lanes share sccache and pnpm's store in `<root>/.cache`, sccache capped at this size (`"50G"`).
+    pub cache_size: Option<String>,
 }
 
 /// The point a starting lane frees its start slot.

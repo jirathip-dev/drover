@@ -882,3 +882,31 @@ fn a_new_lane_worktree_leaves_out_docs_archive_unless_opted_out() {
     let off = "[fleet.sendmeter.hygiene]\ndocs_trust = []\n\n[limits]";
     assert_eq!(sparse(off, "sparse-off"), None);
 }
+
+#[test]
+fn a_host_with_cache_size_gives_its_lanes_sccache_and_pnpms_store_under_its_root() {
+    let caches = |hosts: &str| {
+        let c = ctx(&tmpdir("spawn-caches"), &(CONFIG.to_string() + hosts));
+        let _sh = on_shed(&c);
+        let keys = [
+            "RUSTC_WRAPPER=",
+            "SCCACHE_DIR=",
+            "SCCACHE_CACHE_SIZE=",
+            "npm_config_store_dir=",
+        ];
+        let w = raw_export(&plan(&c, &shed_fake(), "impl"));
+        w.into_iter()
+            .filter(|w| keys.iter().any(|k| w.starts_with(k)))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        caches("\n[hosts.mini]\nroot = \"/c\"\ncache_size = \"40G\"\n"),
+        [
+            "RUSTC_WRAPPER='sccache'",
+            "SCCACHE_CACHE_SIZE='40G'",
+            "SCCACHE_DIR='/c/.cache/sccache'",
+            "npm_config_store_dir='/c/.cache/pnpm'"
+        ]
+    );
+    assert!(caches("\n[hosts.mini]\nroot = \"/c\"\n").is_empty());
+}

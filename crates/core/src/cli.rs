@@ -1945,6 +1945,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
                         check::strays(ctx, &cfg, out, yes).and_then(|()| check::secrets_files(ctx, out, yes))?;
                         check::remote_orphans(&cfg, r, out, (orphans && yes, yes))?;
+                        write!(out, "{}", crate::roots::caches(ctx, &cfg))?;
                         for f in cfg.fleet.keys().filter(|f| fleet.as_ref().is_none_or(|x| x == *f)) {
                             if let Err(e) = check::prune(ctx, &cfg, r, out, f, (!yes, verbose)) {
                                 writeln!(out, "{f}: wip prune failed: {e:#}")?;

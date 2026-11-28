@@ -46,7 +46,12 @@ while its agent is working, or its agent still runs in shed and it is an open is
 a lane no longer running in shed counts as finished, verdict or not (#1215), so its build folder goes too.
 Under `min_free_gb` every non-working lane's goes, largest first; each removal is logged with host, size and reason. `drover clean` lists the Cargo folders lanes left in `[limits] stray_roots`
 (`/tmp`, `$TMPDIR`) untouched a day, and with `--yes` removes them and each removed worktree's Claude temp dir. Node fleets: pnpm's store is
-already shared; for npm set `npm_config_cache`. `clone_build = ["target"]` (or `["node_modules"]`) APFS-clones (`cp -cR`) each listed
+already shared; for npm set `npm_config_cache`. #1641: `cache_size = "50G"` in this host's `[hosts.<name>]` entry
+gives each lane started here `RUSTC_WRAPPER=sccache`, `SCCACHE_DIR=<root>/.cache/sccache`,
+`SCCACHE_CACHE_SIZE=<cache_size>` and `npm_config_store_dir=<root>/.cache/pnpm`, so the host's lanes build each
+dependency once; a lane's own crates stay in its `.build/<agent>`. The host setup recipe installs sccache; unset, no
+lane gets them. The tools trim themselves: `reclaim`, `clean` and doctor print `shared cache <dir>: <GB> (kept)`
+and never delete it. A fleet's `env` or `shared_cache` key of the same name wins. `clone_build = ["target"]` (or `["node_modules"]`) APFS-clones (`cp -cR`) each listed
 folder of the local checkout into a new lane (never a reopened one) when its lockfile matches: `Cargo.lock`
 for `target`, `package-lock.json` and `pnpm-lock.yaml` for `node_modules`; other names are logged and skipped.
 It runs beside the kick once the lane has started, never over a folder the lane already has, and logs

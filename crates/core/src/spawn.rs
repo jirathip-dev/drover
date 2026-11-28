@@ -422,6 +422,15 @@ fn shared_target<'a>(root: &Path, f: &'a Fleet, agent: &str) -> impl Iterator<It
         .filter(|v| !f.env.contains_key(&v.0) && !f.shared_cache.contains_key(&v.0))
 }
 
+fn caches(ctx: &Ctx, cfg: &Config, f: &Fleet, placed: Option<&crate::hosts::Placed>) -> Vec<(String, String)> {
+    let root = placed.map_or(ctx.worktrees.as_path(), |pl| pl.root.as_path());
+    let own = |k: &String| f.env.contains_key(k) || f.shared_cache.contains_key(k);
+    let here = placed.is_none_or(|pl| pl.machine.is_none());
+    (crate::roots::cache_env(cfg, root).into_iter())
+        .filter(|v| here && !own(&v.0))
+        .collect()
+}
+
 /// #1478: a `swift_build` fleet's Swift build folders, each an env var naming a folder in the lane's `.build/<agent>`.
 pub const SWIFT: [(&str, &str); 2] = [("DROVER_DERIVED_DATA", "xcode"), ("DROVER_SWIFT_SCRATCH", "swiftpm")];
 
@@ -1112,6 +1121,7 @@ fn start(
                 .insert("DROVER_RULES".into(), p.rules_file().display().to_string());
         }
     }
+    p.env.extend(caches(ctx, cfg, f, placed.as_ref()));
     let hm = placed.as_ref().and_then(|pl| pl.home.as_deref());
     let home = |a: Vec<String>| crate::hosts::rehome(a, hm);
     let wt = p.worktree.to_string_lossy().into_owned();
