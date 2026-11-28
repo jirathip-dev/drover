@@ -240,7 +240,7 @@ X1 carries a second addition, a process's CPU time, for option T below.
     There is no D6. What this ADR owes #1644 is D1: a VM is a shed machine like any other host.
     CI runners are `<owner>/runners`' (the owner, 2026-11-23): the Mini's native runners, the Docker slots,
     the runner VMs and their image with its toolchains and sccache. They are not shed-cloud's, and a runner is
-    no shed machine. `runners.rs`, the `drover runners` verbs, `[ci_runners]` and the recipe's `runner_*` lines
+    no shed machine. `runners.rs`, the `runners` verbs, `[ci_runners]` and the recipe's `runner_*` lines
     are deleted once `runners` covers them (#1644 as amended); nothing of them moves to shed. No step here
     touches them: `runners.rs` reaches no host through `On`, only `gh` and `cloud.rs`'s recipe loader
     (`cloud::load`, `cloud::run`), so D1 leaves it as it is and it goes before `cloud.rs` or with it.

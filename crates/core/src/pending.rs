@@ -38,9 +38,11 @@ pub struct Pending {
 }
 
 impl Pending {
-    /// Its card is back: a hard refusal, or (never an extend's) still not started after `BACK_SECS`.
+    /// Its card is back: a hard refusal, or (never an extend's, nor one waiting for host room) still not started after `BACK_SECS`.
     pub fn back(&self, now: u64) -> bool {
-        self.failed || self.action != "extend" && now >= self.since + BACK_SECS && self.reason.as_deref() != Some(LOAD)
+        let room = |r: &str| r == LOAD || crate::starts::ROOM.contains(&r);
+        self.failed
+            || self.action != "extend" && now >= self.since + BACK_SECS && !self.reason.as_deref().is_some_and(room)
     }
     /// The row's line while it waits: `starting, waiting for host: <reason> · <age>`.
     pub fn line(&self, now: u64) -> Option<String> {
@@ -161,10 +163,10 @@ pub fn refused(ctx: &Ctx, (fleet, n): (&str, u64), code: &str, why: &str) -> Res
     let Some(p) = of(&ev, fleet, n).filter(|p| !p.failed) else {
         return Ok(false);
     };
-    let soft = SOFT.contains(&code);
+    let soft = SOFT.contains(&code) || crate::starts::ROOM.contains(&code);
     let signals = why.split(" (top:").next().unwrap_or_default();
     let load = code == "HOST_BUSY"
-        && signals.contains("load/cpu")
+        && signals.contains("cpu idle")
         && !signals.contains("pressure")
         && !signals.contains("swap");
     let reason = match () {
@@ -196,14 +198,13 @@ pub(crate) fn stuck(
         "HOST_FULL",
         "IN_FLIGHT",
         "ALREADY_DONE",
-        "LANE_LIVE",
         "EXIT",
         "ERROR",
-        "ROUND_LIMIT",
-        "UPDATE_LIMIT",
+        "STUCK",
     ];
     let carded = step == "start" || step == "respawn" && crate::drive::owner_refusal(code);
-    if carded || waits.contains(&code) || SOFT.contains(&code) || crate::starts::stops(Some(code)) {
+    let stale_check = step == "review" && code == "LANE_LIVE";
+    if carded || stale_check || waits.contains(&code) || SOFT.contains(&code) || crate::starts::stops(Some(code)) {
         return Ok(());
     }
     let mine = crate::events::of_issue(ev, fleet, n);

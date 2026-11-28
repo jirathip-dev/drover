@@ -1,0 +1,95 @@
+[
+ {
+  "blocks": [
+   {
+    "markdown": "**Rate-limit the public search endpoint per API key or per client IP?**",
+    "type": "text"
+   },
+   {
+    "action": "answer",
+    "id": "q2",
+    "options": [
+     {
+      "label": "per API key",
+      "value": "per API key"
+     },
+     {
+      "label": "per client IP",
+      "value": "per client IP"
+     },
+     {
+      "label": "both, key first: throttle each API key at 600 requests a minute, then each client IP at 120 a minute for anonymous traffic behind shared NAT",
+      "value": "both, key first: throttle each API key at 600 requests a minute, then each client IP at 120 a minute for anonymous traffic behind shared NAT"
+     }
+    ],
+    "other": {
+     "placeholder": "other\u2026"
+    },
+    "recommended": "per API key",
+    "type": "choice"
+   }
+  ],
+  "buttons": [
+   {
+    "action": "later",
+    "id": "ask-q2-later",
+    "label": "later",
+    "type": "button",
+    "values": {
+     "card": "ask-q2"
+    }
+   }
+  ],
+  "fold": {
+   "line": "#21 \u00b7 owner \u00b7 Rate-limit the public search endpoint per API ke\u2026 \u00b7 18m",
+   "main": {
+    "action": "answer",
+    "block": "q2",
+    "label": "per API key",
+    "value": "per API key"
+   }
+  },
+  "id": "ask-q2",
+  "kind": "ask",
+  "meta": "owner \u00b7 18m",
+  "title": "acme-api #21",
+  "tone": "warn",
+  "type": "card"
+ },
+ {
+  "type": "card",
+  "id": "new-issue",
+  "kind": "new-issue",
+  "fold": {
+   "line": "+ new issue \u00b7 a line or a screenshot, for any repo"
+  },
+  "blocks": [
+   {
+    "type": "text",
+    "markdown": "A scope lane reads the repo, asks you here one question at a time, then shows the draft. Nothing is filed until you approve it."
+   },
+   {
+    "type": "composer",
+    "id": "new-issue",
+    "action": "new-issue",
+    "label": "scope",
+    "placeholder": "one line: the bug or the feature",
+    "chips": [
+     {
+      "name": "repo",
+      "cur": "acme-web",
+      "all": [
+       "acme-api",
+       "acme-web",
+       "acme-ios",
+       "docs"
+      ]
+     }
+    ],
+    "values": {
+     "req": "new"
+    }
+   }
+  ]
+ }
+]

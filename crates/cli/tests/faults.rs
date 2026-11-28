@@ -108,7 +108,7 @@ fn a_spawn_whose_link_drops_a_connection_fails_cleanly_and_the_next_one_starts()
     let d = tmpdir("fault-loss");
     let c = ctx(&d, &config(&sh));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    sh.fault(Fault::Loss(2));
+    sh.fault(Fault::Loss(3));
     let (code, out) = spawn(&c);
     assert_ne!(code, 0, "{out}");
     assert!(kinds(&c, "spawn").is_empty(), "{out}");
@@ -131,7 +131,10 @@ fn a_pass_after_the_lanes_shed_host_vanished_mid_lane_ends_within_its_bound() {
         ..c.clone()
     };
     let (_, out) = within("drive", move || run(&later, &spawn_fake(), &["drive"]));
-    assert!(out.contains("sendmeter spawns: no shed server"), "{out}");
+    assert!(
+        out.contains("sendmeter: the main host gave no word (no shed server"),
+        "{out}"
+    );
     assert_eq!(
         kinds(&c, "spawn").len(),
         1,
@@ -375,7 +378,7 @@ fn drain_through(fault: Ssh) {
     let wt = d.join("worktree");
     std::fs::create_dir_all(wt.join(".drover")).unwrap();
     std::fs::write(wt.join(".git"), "gitdir: elsewhere\n").unwrap();
-    let ask = json!({"args": ["ask", "sendmeter", "12", "Which way?", "--option", "a", "--option", "b"],
+    let ask = json!({"args": ["ask", "sendmeter", "12", "Which way to main?", "--option", "a", "--option", "b"],
                      "lane": "sendmeter:12:impl", "ts": (NOW - 30) * 1000});
     let ob = wt.join(".drover/outbox.jsonl");
     std::fs::write(&ob, format!("{ask}\n")).unwrap();
@@ -397,7 +400,7 @@ fn drain_through(fault: Ssh) {
     );
     assert!(kinds(&c, "needs-decision").is_empty());
     assert!(
-        std::fs::read_to_string(&ob).unwrap().contains("Which way?"),
+        std::fs::read_to_string(&ob).unwrap().contains("Which way to main?"),
         "the line waits on its host"
     );
 
@@ -415,7 +418,7 @@ fn drain_through(fault: Ssh) {
         1,
         "delivered once the link is back, and only once: {asks:?}"
     );
-    assert_eq!(asks[0].str("question"), Some("Which way?"));
+    assert_eq!(asks[0].str("question"), Some("Which way to main?"));
 }
 
 #[test]

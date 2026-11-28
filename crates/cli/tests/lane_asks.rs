@@ -54,11 +54,11 @@ fn setup(name: &str, extra: &str, threads: &[&str]) -> (drover::Ctx, FakeShed) {
         &format!("integration = \"staging\"\n{extra}"),
     );
     let conf = format!(
-        "{conf}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\naccount = \"C\"\n\n[[notify]]\ntype = \"webpush\"\nsub = \"mailto:owner@example.com\"\n"
+        "{conf}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n\n[[notify]]\ntype = \"webpush\"\nsub = \"mailto:owner@example.com\"\n"
     );
     let sh = FakeShed::new();
     let conf = format!(
-        "{conf}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        "{conf}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n",
         sh.sock.display()
     );
     let mut c = ctx(&d, &conf);
@@ -149,7 +149,7 @@ fn chat(c: &drover::Ctx, now: u64) -> Vec<serde_json::Value> {
     let c = at(c, now);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", now);
-    let chat: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, now, "chat")).unwrap();
+    let chat: serde_json::Value = chat_all(&s, ADDR, &cookie, now);
     chat["threads"]
         .as_array()
         .unwrap()
@@ -162,63 +162,73 @@ fn change(msgs: &[serde_json::Value], id: &str) -> bool {
     msgs.iter().any(|m| m["kind"] == "note" && m["ask"]["id"] == id)
 }
 
+fn legacy_ask(c: &drover::Ctx, id: &str, q: &str) {
+    let d = json!({"id": id, "question": q, "options": ["yes", "no"], "recommend": 2, "agent": LANE,
+        "kind": "owner", "lane_ask": true, "routed": "t1"});
+    append(&c.state, &Event::new(NOW, "sendmeter", Some(36), "needs-decision", d)).unwrap();
+}
+
 #[test]
-fn a_lane_ask_wakes_the_newest_thread_and_stays_open_without_a_push() {
+fn a_lane_ask_on_an_owner_topic_goes_straight_to_the_owner_never_to_a_thread() {
     let _env = env();
-    let (c, sh) = setup("lane-ask-newest", "", &["Old", "New"]);
-    assert_eq!(lane_ask(&c, &sh, "Split it?"), "q1");
+    let (c, sh) = setup("lane-ask-owner", "ask_thread = \"t1\"", &["Pinned", "Newer"]);
+    assert_eq!(lane_ask(&c, &sh, "Add a new dependency for the sender?"), "q1");
     let a = &kinds(&c, "needs-decision")[0];
-    assert_eq!((a.str("routed"), a.str("thread")), (Some("t2"), None));
-    let thread = c.state.with_file_name("orchestrator").join("t2/.thread.md");
     assert_eq!(
-        std::fs::read_to_string(thread).unwrap(),
-        "system: lane ask q1 on #36 from sendmeter-impl-36 (owner): Split it? [1] yes [2] no (recommended). \
-         Answer it only if the issue spec or a past decision settles it: `drover answer sendmeter q1 <n> --basis \
-         \"<verbatim spec quote | q<id>>\"`; else run it without --basis and it goes to the owner.\n"
+        (a.str("routed"), a.str("thread"), a.val("recommend").clone()),
+        (None, None, json!(2))
     );
-    let st = &kinds(&c, "orchestrator-start")[0];
-    assert_eq!((st.str("thread"), st.str("runtime")), (Some("t2"), Some("shed-acp")));
-    let (_, asks) = run(&c, &Fake::default(), &["asks", "sendmeter", "--json"]);
-    let asks: serde_json::Value = serde_json::from_str(&asks).unwrap();
-    assert_eq!(
-        (asks[0]["id"].clone(), asks[0]["closed"].clone()),
-        (json!("q1"), json!(null))
-    );
-    assert_eq!(pushes(&c), 0, "a routed ask does not push");
-    let chat = chat(&c, NOW + 5);
-    assert!(
-        !chat
-            .iter()
-            .any(|m| m["text"].as_str().unwrap_or_default().contains("lane ask q1")),
-        "the chat hides the wake line: {chat:?}"
-    );
-}
-
-#[test]
-fn the_pinned_thread_wins_over_the_newest() {
-    let _env = env();
-    let (c, sh) = setup("lane-ask-pinned", "ask_thread = \"t1\"", &["Pinned", "Newer"]);
-    lane_ask(&c, &sh, "Split it?");
-    assert_eq!(kinds(&c, "needs-decision")[0].str("routed"), Some("t1"));
-    let wake = kinds(&c, "thread-msg");
-    assert_eq!((wake.len(), wake[0].str("thread")), (1, Some("t1")));
-}
-
-#[test]
-fn with_no_thread_the_ask_goes_to_the_owner_as_before() {
-    let _env = env();
-    let (c, sh) = setup("lane-ask-none", "", &[]);
-    lane_ask(&c, &sh, "Split it?");
-    assert_eq!(kinds(&c, "needs-decision")[0].str("routed"), None);
     assert!(kinds(&c, "thread-msg").is_empty() && kinds(&c, "orchestrator-start").is_empty());
-    assert_eq!(pushes(&c), 1, "the owner's ask pushes");
+    assert!(kinds(&c, "ask-owner").is_empty());
+    assert_eq!(pushes(&c), 1, "the owner's card pushes");
+    as_owner();
+    assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Later"]).0, 0);
+    assert!(kinds(&c, "thread-msg").is_empty(), "a new thread picks up no lane ask");
+    let (code, out) = run(&c, &sh.cli(&host()), &["answer", "sendmeter", "q1", "2"]);
+    assert_eq!((code, out.as_str()), (0, "sendmeter q1: no -> sendmeter-impl-36\n"));
+}
+
+#[test]
+fn a_lane_ask_on_an_in_scope_choice_is_refused_and_logs_nothing() {
+    let _env = env();
+    let (c, sh) = setup("lane-ask-in-scope", "", &["Run"]);
+    as_lane();
+    for q in ["Split the snapshot tests per pane?", "Use insta or plain asserts?"] {
+        let args = [
+            "ask",
+            "sendmeter",
+            "36",
+            q,
+            "--option",
+            "a",
+            "--option",
+            "b",
+            "--recommend",
+            "1",
+        ];
+        let (code, out) = run(&c, &sh.cli(&host()), &args);
+        assert_eq!(code, 3, "{q}: {out}");
+        assert!(
+            out.starts_with("REFUSED IN_SCOPE:") && out.contains("decide it yourself") && out.contains("## Decisions"),
+            "{q}: {out}"
+        );
+    }
+    as_owner();
+    assert!(kinds(&c, "needs-decision").is_empty() && kinds(&c, "thread-msg").is_empty());
+    assert_eq!(pushes(&c), 0);
+    let (code, _) = run(
+        &c,
+        &Fake::default(),
+        &["ask", "sendmeter", "36", "Split it?", "--option", "a"],
+    );
+    assert_eq!(code, 0, "the owner's own ask is not checked");
 }
 
 #[test]
 fn a_spec_quote_answer_reaches_the_lane_posts_an_fyi_and_pushes_nothing() {
     let _env = env();
     let (c, sh) = setup("lane-ask-answer", "", &["Run"]);
-    lane_ask(&c, &sh, "Split it?");
+    legacy_ask(&c, "q1", "Split it?");
     let quote = "Keep the old sender behind a flag until the owner says so.";
     let (code, out) = orchestrator_answer(&c, &sh, "t1", "q1", "2", quote);
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: no -> sendmeter-impl-36\n"));
@@ -236,10 +246,11 @@ fn a_spec_quote_answer_reaches_the_lane_posts_an_fyi_and_pushes_nothing() {
     );
     assert_eq!(pushes(&c), 0, "an orchestrator's answer pushes nothing");
 
-    let q2 = lane_ask(&c, &sh, "Split the tests too?");
-    let (code, out) = orchestrator_answer(&c, &sh, "t1", &q2, "1", &q2);
+    legacy_ask(&c, "q2", "Split the tests too?");
+    let q2 = "q2";
+    let (code, out) = orchestrator_answer(&c, &sh, "t1", q2, "1", q2);
     assert!(code == 3 && out.contains("REFUSED OWNER_ASK"), "{out}");
-    let (code, out) = orchestrator_answer(&c, &sh, "t1", &q2, "1", "q1");
+    let (code, out) = orchestrator_answer(&c, &sh, "t1", q2, "1", "q1");
     assert_eq!((code, out.as_str()), (0, "sendmeter q2: yes -> sendmeter-impl-36\n"));
 }
 
@@ -249,7 +260,7 @@ fn an_owner_topic_is_refused_and_put_to_the_owner_in_the_thread() {
     let (c, sh) = setup("lane-ask-owner-topic", "", &["Run"]);
     let quote = "Keep the old sender behind a flag";
     for (q, id) in [("Promote staging→main now?", "q1"), ("Rotate the secret first?", "q2")] {
-        lane_ask(&c, &sh, q);
+        legacy_ask(&c, id, q);
         let (code, out) = orchestrator_answer(&c, &sh, "t1", id, "1", quote);
         assert_eq!(
             (code, out.as_str()),
@@ -280,7 +291,7 @@ fn an_owner_topic_is_refused_and_put_to_the_owner_in_the_thread() {
 fn an_empty_or_unmatched_basis_is_refused() {
     let _env = env();
     let (c, sh) = setup("lane-ask-basis", "", &["Run"]);
-    lane_ask(&c, &sh, "Split it?");
+    legacy_ask(&c, "q1", "Split it?");
     for (basis, why) in [
         ("", "no --basis"),
         ("Keep the new sender behind a flag", "--basis is neither"),
@@ -302,7 +313,7 @@ fn the_owner_changes_a_orchestrator_answer_within_30_minutes_only() {
     let _env = env();
     let (c, sh) = setup("lane-ask-change", "", &["Run"]);
     let quote = "Keep the old sender behind a flag";
-    lane_ask(&c, &sh, "Split it?");
+    legacy_ask(&c, "q1", "Split it?");
     assert_eq!(orchestrator_answer(&c, &sh, "t1", "q1", "2", quote).0, 0);
     let board = chat(&c, NOW + 60);
     assert!(
@@ -325,7 +336,7 @@ fn the_owner_changes_a_orchestrator_answer_within_30_minutes_only() {
     assert_eq!(kinds(&c, "decision").last().unwrap().str("by"), Some("owner"));
     assert!(!change(&chat(&c, NOW + 29 * 60 + 5), "q1"), "changed: no more [change]");
 
-    lane_ask(&c, &sh, "Split the tests too?");
+    legacy_ask(&c, "q2", "Split the tests too?");
     assert_eq!(orchestrator_answer(&c, &sh, "t1", "q2", "2", quote).0, 0);
     assert!(change(&chat(&c, NOW + 60), "q2"));
     let late = NOW + 30 * 60;
@@ -337,63 +348,10 @@ fn the_owner_changes_a_orchestrator_answer_within_30_minutes_only() {
 }
 
 #[test]
-fn a_lane_ask_filed_before_its_repo_has_a_thread_is_routed_to_the_first_thread_opened() {
-    let _env = env();
-    let (c, sh) = setup("lane-ask-late-thread", "", &[]);
-    assert_eq!(lane_ask(&c, &sh, "Split it?"), "q1");
-    assert_eq!(lane_ask(&c, &sh, "Split the tests too?"), "q2");
-    as_owner();
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Split it?"]).0,
-        0
-    );
-    let quote = "Keep the old sender behind a flag until the owner says so.";
-    let (code, out) = orchestrator_answer(&c, &sh, "t1", "q1", "2", quote);
-    assert_eq!((code, out.as_str()), (0, "sendmeter q1: no -> sendmeter-impl-36\n"));
-    let rows: Vec<_> = kinds(&c, "thread-msg")
-        .iter()
-        .filter(|e| e.str("lane_ask").is_some())
-        .map(|e| (e.str("thread").map(String::from), e.str("lane_ask").map(String::from)))
-        .collect();
-    assert_eq!(
-        rows,
-        [
-            (Some("t1".into()), Some("q1".into())),
-            (Some("t1".into()), Some("q2".into()))
-        ]
-    );
-    let line = "yes, split the tests too";
-    let d = json!({"thread": "t1", "from": "owner", "text": line});
-    append(&c.state, &Event::new(NOW + 10, "sendmeter", None, "thread-msg", d)).unwrap();
-    as_orchestrator("t1");
-    let (code, out) = run(
-        &c,
-        &sh.cli(&host()),
-        &["answer", "sendmeter", "q2", "1", "--typed", line],
-    );
-    as_owner();
-    assert_eq!((code, out.as_str()), (0, "sendmeter q2: yes -> sendmeter-impl-36\n"));
-    assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Next"]).0, 0);
-    assert_eq!(
-        kinds(&c, "thread-msg")
-            .iter()
-            .filter(|e| e.str("thread") == Some("t2"))
-            .count(),
-        0
-    );
-}
-
-#[test]
 fn an_answer_on_an_ask_routed_to_no_thread_says_so() {
     let _env = env();
     let (c, sh) = setup("lane-ask-unrouted", "", &["Run"]);
-    as_owner();
-    let (code, out) = run(
-        &c,
-        &sh.cli(&host()),
-        &["ask", "sendmeter", "36", "Split it?", "--option", "yes"],
-    );
-    assert_eq!((code, out.as_str()), (0, "q1\n"));
+    assert_eq!(lane_ask(&c, &sh, "Drop the old sender's deleted rows?"), "q1");
     let (code, out) = orchestrator_answer(&c, &sh, "t1", "q1", "1", "Keep the old sender behind a flag");
     assert_eq!(
         (code, out.as_str()),

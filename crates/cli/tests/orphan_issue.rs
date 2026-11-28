@@ -72,10 +72,7 @@ fn fix_lane_ended_without_pushing_alerts_once_at_30_min() {
 #[test]
 fn no_change_fix_round_with_merge_label_alerts_once() {
     let d = tmpdir("orphan-445");
-    let cfg = CONFIG.replace(
-        "integration = \"staging\"",
-        "integration = \"staging\"\nmerge_label = \"full-ci\"",
-    );
+    let cfg = CONFIG.replace("merge_label = \"off\"", "merge_label = \"full-ci\"");
     let mut c = ctx(&d, &cfg);
     spawn(&c, T0, 8, "impl");
     ev(&c, T0 + 10, Some(8), "pushed", json!({"sha": SHA}));

@@ -1,0 +1,7 @@
+about = "the thread view in WebKit (#1086, #1087: opens at the end, older above in place, image viewer, keyboard; attachments, a failed send, queue and steer)"
+fix = "fix the page or the flow the test names; a timing budget is raised only in its own issue"
+budget_secs = 600
+leg = "ui-webkit"
+setup = ["rust", "node"]
+paths = ["web/**", "assets/**", "crates/server/**", "crates/cli/tests/support/webview.mjs", "scripts/webkit.sh", "crates/cli/tests/threads_tab.rs", "crates/cli/tests/ui/duo.mjs"]
+run = "scripts/webkit.sh cargo test --locked --test threads_tab webkit -- --test-threads=1"

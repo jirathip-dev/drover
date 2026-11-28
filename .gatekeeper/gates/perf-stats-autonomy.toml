@@ -1,0 +1,10 @@
+about = "perf in release (#962: stats autonomy on 150,000 events); the numbers go to the job summary"
+fix = "make the case fit its budget; a budget is raised only in its own issue"
+budget_secs = 900
+leg = "release"
+setup = ["rust", "node"]
+needs = ["quiet-host"]
+paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "assets/**", "demo/**", "web/dist/**"]
+run = '''
+cargo test --release --locked --test perf -- stats_autonomy_on_a_150k --nocapture --test-threads=1
+'''

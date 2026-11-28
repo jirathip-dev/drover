@@ -29,22 +29,27 @@ next = { push = "rev" }
 name = "rev"
 kind = "check"
 role = "rev"
-rounds = 3              # [limits] review_rounds
 next = { PASS = "gates", FAIL = "impl" }
 
 [[fleet.x.pipeline.stage]]
 name = "gates"
 kind = "gate"
-rounds = 3              # [limits] update_rounds
 next = { ok = "merge", ci_red = "impl", conflict = "impl:update" }
 ```
 
-- **Rounds:** `[limits] review_rounds` and `update_rounds` are the built-in pipeline's limits. A fleet with its own
-  pipeline sets `rounds` on each check, which limits its reviews, and on the gate, which limits its update rounds.
-  A gate without `rounds` takes `update_rounds`.
-- **Out of rounds** always goes to `park` (needs-human). It is not an outcome you map.
-- **Red CI** after a PASS is the gate's FAIL at the same head. It counts against the rounds of the check that reviews
-  the fix (`ci_red` → impl → `push` → rev), as before #173. In the last round it goes to park at once.
+- **No round limit (#1809):** rounds are counted (`review(n)`, `fix(n)`), never limited. `[limits] review_rounds`,
+  `update_rounds` and a stage's `rounds` are retired: an old fleet.toml with them still loads, the keys are ignored
+  and `drover doctor` notes them.
+- **Rev blocks only on the AC:** a blocker is an AC or `## Amendments` miss or a hard rule (`[ac]`, `[amendment]`,
+  `[rules]`, `[parity]`, `[for-humans]`, `[trailer]`, a form category); `drover verdict` refuses any other
+  (`OUT_OF_SCOPE`). Every other finding is a `- follow-up [<category>] file:line: what` line. A PASS lands the PR
+  with its follow-ups open: `drover merge` files each as its own issue (title, file:line, the PR and head), queued
+  last, logging `follow-up-filed`, never twice for one finding at one head.
+- **Stuck is the only stop**, always to `park` (needs-human, one card with code `STUCK` naming it): the same blocking
+  finding (category and file) in a check's last 3 FAILs at 3 heads (2 fix rounds); red CI at the same check for 2 fix
+  rounds; or an update round due while the PR still conflicts after 2 update rounds in a row. Findings that change
+  each round never park. It is not an outcome you map; `extend` gives one more round.
+- **Red CI** after a PASS is the gate's FAIL at the same head, a `- blocking [ci] <check>` finding.
 
 ## The verify stage (#417)
 
@@ -56,7 +61,6 @@ A fleet that defines `[fleet.<n>.role.verify]` gets one more check in the built-
 name = "verify"
 kind = "check"
 role = "verify"
-rounds = 3              # [limits] review_rounds, shared with rev
 next = { PASS = "gates", FAIL = "impl" }
 ```
 
@@ -65,8 +69,8 @@ next = { PASS = "gates", FAIL = "impl" }
   Any visual deviation from the approved `docs/design/<slug>/` PNGs is a FAIL. Its screenshots (1440 and 390 wide)
   stay in its lane's folder, listed by path in `verdict.md`; the verdict event carries them, and the board's
   needs-you card shows them inline.
-- **Rounds:** a verify FAIL counts in rev's rounds (the round of the head rev reviewed), so the third FAIL across both
-  parks the issue. Its fix pushes a new head, which goes rev → verify again. A verify PASS is for its own head only.
+- **Rounds:** a verify FAIL adds to rev's round count, never to a limit; verify is stuck on its own last 3 FAILs.
+  Its fix pushes a new head, which goes rev → verify again. A verify PASS is for its own head only.
 - **When it runs:** for a head rev PASSed, if the issue had a design stage (#412), the PR touches the fleet's
   `ui_paths` (globs), or it is queued `--verify`. `queue add N --verify [on|off]` and `queue set N verify on|off`
   force it either way. Otherwise drive logs `verify-skipped` at that head and the issue goes on to the gates.
@@ -74,7 +78,7 @@ next = { PASS = "gates", FAIL = "impl" }
   Queue card says so, and the issue goes on to the gates. It never blocks. `roles/verify-recipe.md` is the brief
   for an impl lane that writes the recipe (Launch, Doctor, Drive, Evidence, Feature map, Known noise), proving each step.
 - Fleets without a `verify` role run the pipeline above, unchanged. A custom pipeline places a check with role
-  `verify` itself; it gets the same prompt and skip rules, and counts its own rounds.
+  `verify` itself; it gets the same prompt and skip rules.
 
 ## A custom pipeline: two checks
 
@@ -94,27 +98,24 @@ next = { push = "rev" }
 name = "rev"
 kind = "check"
 role = "rev"
-rounds = 3
 next = { PASS = "sec", FAIL = "impl" }
 
 [[fleet.atlas.pipeline.stage]]
 name = "sec"
 kind = "check"
 role = "sec"
-rounds = 2
 next = { PASS = "gates", FAIL = "impl" }
 
 [[fleet.atlas.pipeline.stage]]
 name = "gates"
 kind = "gate"
-rounds = 3
 next = { ok = "merge", ci_red = "impl", conflict = "impl:update" }
 ```
 
 - rev's PASS spawns a `sec` lane on the same head.
 - `drover merge` needs a PASS from rev **and** sec at the PR's head (`STALE_VERDICT` names the missing one).
 - A FAIL in either check goes to a fix round in impl. The new head is reviewed from rev again.
-- Each check counts its own rounds: sec parks on its 2nd FAIL, whatever rev has used.
+- Each check is stuck on its own FAILs: sec parks when its last 3 FAILs block on the same finding.
 
 ## Roles
 
@@ -131,8 +132,7 @@ The first stage is the start. Each rule names the stage and its `fleet.toml` lin
 | `start` | the first stage is a `build` |
 | `name` / `kind` | names are unique and not `merge`/`park`; the kind is `build`, `check` or `gate` |
 | `unreachable` | every stage is reachable from the start |
-| `no end` | every stage has a path to `merge` or `park` (out of rounds does not count) |
-| `no limit` | every loop passes a check with `rounds` |
+| `no end` | every stage has a path to `merge` or `park` (stuck does not count) |
 | `unmapped` | every outcome of the kind is mapped, to a stage that exists. `push` goes to a check, `PASS` to a check, gate or merge, `ok` to merge, and `FAIL`/`ci_red`/`conflict` to a build or park. |
 | `no role` | every build and check names a role that is defined (and not `design`) |
 | `self-review` | a check's role is not a build stage's role |
@@ -146,7 +146,7 @@ Queue card.
 ## Events
 
 `spawn` events carry `stage` and `check`, and `verdict` events carry `stage` (the stage that gave it) and `loop` (the
-check whose rounds it counts). Events from before #173 fold as before: `rev` is the check and `impl` the build.
+check whose rounds it counts), plus `follow_ups` (its `follow-up` lines). Events from before #173 fold as before: `rev` is the check and `impl` the build.
 
 ## Autonomy numbers (#962)
 
@@ -162,8 +162,7 @@ the later start wins. `--json` prints the same numbers. `--explain` prints the o
   - a manual `spawn`, `verdict` or `kill`;
   - an extra round;
   - a park or an unpark;
-  - a `--force` override;
-  - an `--owner-override` merge.
+  - a `--force` override.
 
   "By the owner" means the event's `by` is set and is not `orchestrator-*`, `default`, `drive`, `lane` or
   `external`, and no orchestrator lane logged the event. Since #962, `spawn` (from the CLI), `verdict` and
@@ -189,8 +188,8 @@ the later start wins. `--json` prints the same numbers. `--explain` prints the o
 ## The board
 
 The Pipeline group of the fleet's `[config]` sheet draws the pipeline as a node graph. `serve` sends the pipeline as
-data (`data-pipe`: stages, outcomes, rounds, `n here` counts, broken rules), and assets/serve.js (removed in #927) draws it.
-The graph shows each stage's kind, role and `n here`, the loops back with their round limits, and the rail to park.
+data (`data-pipe`: stages, outcomes, `n here` counts, broken rules), and assets/serve.js (removed in #927) draws it.
+The graph shows each stage's kind, role and `n here`, the loops back, and the rail to park.
 It is read-only: edit `fleet.toml`. Each issue card starts with its chain (`○ ─ ▲ impl ─ ◆ rev ─ ◫ gates ─ ✓ merge`),
 with the current stage lit and a check that PASSed at the head ticked. The mockup is in docs/design/pipeline/ on
 branch `design-173`.

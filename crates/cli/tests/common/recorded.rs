@@ -46,7 +46,7 @@ pub fn recorded(name: &str) -> (drover::Ctx, OnShed) {
         T - 1_900,
         Some(5),
         "needs-human",
-        json!({"code": "ROUND_LIMIT", "reason": "review rounds ran out (4/3)"}),
+        json!({"code": "STUCK", "reason": "review rounds ran out (4/3)"}),
     );
     let ask = json!({"id": "q7", "question": "Move the branch out?", "options": ["move", "refuse"], "recommend": 1, "kind": "routine"});
     ev(T - 300, None, "needs-decision", ask);

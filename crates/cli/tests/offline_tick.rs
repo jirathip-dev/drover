@@ -114,17 +114,13 @@ fn a_host_that_drops_after_its_probe_costs_one_timeout_and_drive_still_starts() 
 }
 
 #[test]
-fn a_tick_past_its_budget_skips_the_rest_says_so_and_ends() {
+fn a_tick_past_its_budget_runs_no_housekeeping_and_still_starts_local_work() {
     let (c, sh) = setup("drop-budget", "", "slow_secs = 0\n");
     let r = Dropped::new(main_host());
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert!(r.timeouts().len() <= 1, "only the sweep tries air: {:#?}", r.timeouts());
-    assert!(
-        out.contains("tick: past its 0 s budget; skipped: clean, lesson, triage"),
-        "{out}"
-    );
-    assert!(!c.state.with_file_name("clean.at").exists(), "no clean: {out}");
+    assert!(!out.contains("removed "), "the tick cleans nothing: {out}");
     assert!(!out.contains("compact:") && !out.contains("sendmeter lesson"), "{out}");
     assert!(sh.has("sendmeter-impl-12"), "drive still starts local work: {out}");
 }
@@ -164,10 +160,7 @@ fn a_tick_past_its_budget_still_pushes_a_remote_lanes_commits_every_pass() {
             !out.contains("not sent (the tick past its budget)"),
             "pass {pass}: {out}"
         );
-        assert!(
-            out.contains("tick: past its 0 s budget; skipped: clean, lesson, triage, deps, soak, hotspots, compact"),
-            "pass {pass}: {out}"
-        );
+        assert!(!out.contains("removed "), "pass {pass}: the tick cleans nothing: {out}");
     }
 }
 

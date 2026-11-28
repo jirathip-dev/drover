@@ -157,10 +157,10 @@ pub(super) fn scene_screen(h: &Herd) -> k::Block {
         _ => 0,
     };
     let (sky, level) = hosts::weather(host);
-    let load = host.load.map_or("?".into(), |l| format!("{l:.2}"));
+    let load = host.load.map_or("?".into(), |l| format!("{l:.0}%"));
     let swap = host.swapouts.map_or("?".into(), |s| format!("{s:.0}"));
     let line = format!(
-        "load {load} · mem {} · swap {swap}",
+        "cpu {load} busy · mem {} · swap {swap}",
         host.pressure.as_deref().unwrap_or("?")
     );
     let weather = k::Weather {

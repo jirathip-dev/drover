@@ -1,0 +1,7 @@
+about = "url taps are real links in WebKit (#1085: no window.open, no white page in the Home Screen app)"
+fix = "fix the page or the flow the test names; a timing budget is raised only in its own issue"
+budget_secs = 600
+leg = "ui-webkit"
+setup = ["rust", "node"]
+paths = ["web/**", "assets/**", "crates/server/**", "crates/cli/tests/support/webview.mjs", "scripts/webkit.sh", "crates/cli/tests/url_links.rs"]
+run = "scripts/webkit.sh cargo test --locked --test url_links"

@@ -1,0 +1,6 @@
+about = "the page in Chrome on the real server (#927: answer, run cards, pause/resume, stop, Fleets, offline)"
+fix = "fix the page or the flow the test names"
+budget_secs = 600
+leg = "ui"
+setup = ["rust", "node"]
+run = "scripts/chrome.sh cargo test --locked --test page"

@@ -73,7 +73,7 @@ fn a_paired_device_sees_queue_lanes_asks_and_cards_and_a_load_runs_no_subprocess
     let (status, page) = req(&s, "GET", "", "", &ck);
     assert_eq!(
         r.calls.borrow()[before..],
-        [] as [String; 0],
+        <[String; 0]>::default(),
         "a page load ran a subprocess"
     );
     assert_eq!(status, "HTTP/1.1 200 OK");

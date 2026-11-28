@@ -22,11 +22,12 @@ fn serve() -> String {
                 "/blue" => ("200 OK", page("<div style=\"height:100vh;background:#00f\"></div>")),
                 _ => ("404 Not Found", String::new()),
             };
-            let _ = write!(
+            write!(
                 s,
                 "HTTP/1.1 {status}\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
-            );
+            )
+            .ok();
         }
     });
     format!("http://{addr}")

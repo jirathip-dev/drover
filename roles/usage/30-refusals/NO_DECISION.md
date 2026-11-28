@@ -1,1 +1,1 @@
-- NO_DECISION: amend: `--basis` is no ask on that issue answered by the owner (or a routine default)
+- NO_DECISION: amend: `--basis` is no ask on that issue answered by the owner (or an old routine ask's default)

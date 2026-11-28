@@ -291,47 +291,20 @@
       "type": "card"
     },
     {
-      "blocks": [
+      "id": "archived",
+      "rows": [
         {
-          "id": "l-archived",
-          "rows": [
-            {
-              "figure": {
-                "state": "idle"
-              },
-              "id": "t1",
-              "subtitle": {
-                "text": "sendmeter · you: split it",
-                "tone": ""
-              },
-              "swipe": [
-                {
-                  "action": "thread-restore",
-                  "label": "restore",
-                  "values": {
-                    "thread": "t1"
-                  }
-                }
-              ],
-              "tap": {
-                "open": "/screens/threads/t1"
-              },
-              "title": "Search worker split",
-              "type": "row",
-              "value": {
-                "label": "{}",
-                "since": "1970-01-11T12:55:00Z"
-              }
-            }
-          ],
-          "type": "list"
+          "accessory": "chevron",
+          "id": "archived-row",
+          "tap": {
+            "open": "/screens/threads/archived"
+          },
+          "title": "archived",
+          "type": "row",
+          "value": "1"
         }
       ],
-      "fold": {
-        "line": "▸ 1 archived"
-      },
-      "id": "archived",
-      "type": "card"
+      "type": "list"
     }
   ],
   "id": "threads",

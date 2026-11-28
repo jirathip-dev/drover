@@ -41,7 +41,6 @@
             }
           ],
           "integration": "staging",
-          "line_cap": null,
           "local": "/tmp/does-not-matter/sendmeter",
           "max_impl": null,
           "max_rev": null,
@@ -75,7 +74,6 @@
                   "push": "rev"
                 },
                 "role": "impl",
-                "rounds": null,
                 "run": "claude · opus · effort none"
               },
               {
@@ -89,7 +87,6 @@
                   "PASS": "gates"
                 },
                 "role": "rev",
-                "rounds": 3,
                 "run": "claude · default · effort none"
               },
               {
@@ -104,14 +101,12 @@
                   "ok": "merge"
                 },
                 "role": null,
-                "rounds": 3,
                 "run": null
               }
             ]
           },
           "repo": "jirathip-dev/sendmeter",
           "required": [],
-          "review_rounds": 3,
           "roles": [
             {
               "accounts": [],
@@ -169,8 +164,7 @@
             }
           ],
           "serial": [],
-          "stall_minutes": 30,
-          "update_rounds": 3
+          "stall_minutes": 30
         },
         "done": [],
         "done_n": 0,
@@ -185,6 +179,7 @@
           "pass": false,
           "tone": "a"
         },
+        "epics": [],
         "k": "g",
         "marks": {},
         "name": "sendmeter",
@@ -336,7 +331,7 @@
       }
     ],
     "live": true,
-    "mtime": "1795519971678530620",
+    "mtime": "1795824828245488219",
     "now": 1000000,
     "rw": true
   },

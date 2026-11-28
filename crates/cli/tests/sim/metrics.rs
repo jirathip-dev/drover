@@ -92,28 +92,34 @@ pub fn log<'a>(
         .filter(|(_, e)| e.kind == "verdict" && merged.contains(&e.issue.unwrap_or(0)))
         .map(|(_, e)| (e.issue, e.str("sha")))
         .collect();
-    m.rounds = rounds.len() as u64;
-    m.lanes = lanes.len() as u64;
+    m.rounds = u64::try_from(rounds.len()).unwrap();
+    m.lanes = u64::try_from(lanes.len()).unwrap();
     m
 }
 
 fn quantile(v: &mut [u64], q: f64) -> u64 {
     v.sort_unstable();
     let k = (0..=v.len())
-        .find(|&k| k as f64 >= q * v.len() as f64)
+        .find(|&k| f64::from(u32::try_from(k).unwrap()) >= q * f64::from(u32::try_from(v.len()).unwrap()))
         .unwrap_or(v.len());
     v.get(k.saturating_sub(1)).copied().unwrap_or(0)
 }
 
 /// The metrics over `runs`: queue→merge quantiles over every merged issue, the rest a mean per run (minutes where the name says so), review rounds per merge.
 pub fn summary(runs: &[Metrics]) -> BTreeMap<&'static str, f64> {
-    let k = runs.len().max(1) as f64;
-    let sum = |f: fn(&Metrics) -> u64| runs.iter().map(f).sum::<u64>() as f64;
+    let k = f64::from(u32::try_from(runs.len().max(1)).unwrap());
+    let sum = |f: fn(&Metrics) -> u64| f64::from(u32::try_from(runs.iter().map(f).sum::<u64>()).unwrap());
     let mut all: Vec<u64> = runs.iter().flat_map(|m| m.to_merge.clone()).collect();
     let round = |x: f64| (x * 100.0).round() / 100.0;
     BTreeMap::from([
-        ("queue_to_merge_p50_min", quantile(&mut all, 0.5) as f64 / 60.0),
-        ("queue_to_merge_p90_min", quantile(&mut all, 0.9) as f64 / 60.0),
+        (
+            "queue_to_merge_p50_min",
+            f64::from(u32::try_from(quantile(&mut all, 0.5)).unwrap()) / 60.0,
+        ),
+        (
+            "queue_to_merge_p90_min",
+            f64::from(u32::try_from(quantile(&mut all, 0.9)).unwrap()) / 60.0,
+        ),
         ("wasted_spawns", sum(|m| m.wasted) / k),
         ("supersedes_per_lane", sum(|m| m.supersedes) / sum(|m| m.lanes).max(1.0)),
         ("idle_lane_min", sum(|m| m.idle) / 60.0 / k),

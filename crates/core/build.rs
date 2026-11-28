@@ -36,18 +36,11 @@ fn tomls(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn main() {
-    let tail: String = files(Path::new("roles/usage"))
-        .iter()
-        .map(|p| format!("\n{}", joined(p)))
-        .collect();
-    let out = PathBuf::from(std::env::var_os("OUT_DIR").unwrap_or_default());
-    std::fs::write(out.join("usage-tail.md"), tail).unwrap_or_default();
-    println!("cargo:rerun-if-changed=roles/usage");
-    let root = std::env::current_dir().unwrap_or_default().join("flow");
-    let mut flow = vec![];
-    tomls(&root, &mut flow);
-    let list: String = flow
+fn collect(out: &Path, dir: &str, file: &str, name: &str) {
+    let root = std::env::current_dir().unwrap_or_default().join(dir);
+    let mut found = vec![];
+    tomls(&root, &mut found);
+    let list: String = found
         .iter()
         .map(|p| {
             let rel = p.strip_prefix(&root).unwrap_or(p).to_string_lossy().replace('\\', "/");
@@ -55,11 +48,27 @@ fn main() {
         })
         .collect();
     std::fs::write(
-        out.join("flow_files.rs"),
-        format!("const FILES: &[(&str, &str)] = &[\n{list}];\n"),
+        out.join(file),
+        format!("const {name}: &[(&str, &str)] = &[\n{list}];\n"),
     )
     .unwrap_or_default();
-    println!("cargo:rerun-if-changed=flow");
+    if root.exists() {
+        println!("cargo:rerun-if-changed={dir}");
+    }
+}
+
+fn main() {
+    let tail: String = files(Path::new("roles/usage"))
+        .iter()
+        .map(|p| format!("\n{}", joined(p)))
+        .collect();
+    let out = PathBuf::from(std::env::var_os("OUT_DIR").unwrap_or_default());
+    std::fs::write(out.join("usage-tail.md"), tail).unwrap_or_default();
+    if Path::new("roles/usage").exists() {
+        println!("cargo:rerun-if-changed=roles/usage");
+    }
+    collect(&out, "flow", "flow_files.rs", "FILES");
+    collect(&out, "roles/jobs", "jobs_files.rs", "BUILTIN");
     println!("cargo:rustc-env=DROVER_SHA={}", git(&["rev-parse", "HEAD"]));
     let dir = git(&["rev-parse", "--git-dir"]);
     if !dir.is_empty() {

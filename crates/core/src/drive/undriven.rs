@@ -1,6 +1,7 @@
 use super::ACTS;
 use crate::config::Config;
 use crate::events::{emit, working, Event};
+use crate::runner::Runner;
 use crate::{gh, waiting, Ctx};
 use anyhow::Result;
 use serde_json::json;
@@ -20,8 +21,10 @@ pub(super) fn skip(n: u64, why: String) {
     SKIPS.with_borrow_mut(|m| m.insert(n, why));
 }
 
-pub(super) fn cards(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str) -> Result<()> {
-    let sessions = crate::link::view::View::load(ctx, cfg)?.sessions().checked()?;
+pub(super) fn cards(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
+    let Some(sessions) = super::lanes(ctx, cfg, r, out, fleet)? else {
+        return Ok(());
+    };
     let (agents, ev, f) = (sessions.running(), working(&ctx.state)?, cfg.fleet(fleet)?);
     let log = waiting::Log::new(&ev);
     let acted = |n: u64| ACTS.with_borrow(|m| m.get(fleet).is_some_and(|a| a.iter().any(|a| a["issue"] == n)));

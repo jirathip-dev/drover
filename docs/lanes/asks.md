@@ -1,23 +1,23 @@
 # Asks
 
-A lane that needs a decision runs `drover ask <fleet> <issue> "<question>" --option … --recommend <n> --kind routine|owner`
-and waits for a `DECISION <id>: <text>` prompt.
+#1813: a lane decides every in-scope choice itself (fix rounds, ordering, already-decided specs, test or tooling
+choices inside the issue's scope) and lists it in its PR body under `## Decisions`. `drover ask` is for owner topics
+only: scope or feature changes, spend, security or secret trade-offs, anything touching main or production, data
+deletion, a new dependency. A lane runs `drover ask <fleet> <issue> "<question>" --option … --recommend <n>` and waits
+for a `DECISION <id>: <text>` prompt; the ask goes straight to the owner as a card (the phone gets a push), never to
+an orchestrator thread.
 
-- **owner** (the default; an unmarked ask is one) always waits for a person. Scope or feature changes, spend,
-  security or secret trade-offs, anything touching main or production, data deletion, a new dependency. The
-  phone gets a push for each one.
-- **routine** needs `--recommend` (else `NO_RECOMMENDATION`). Fix rounds, ordering, size or cap targets already set
-  by an issue, already-decided specs, test or tooling choices inside the issue's scope. If nobody answers within
-  `[limits] ask_default_minutes` (30), `drover check` takes the recommended option through the same path as
-  `drover answer`: a `decision` with `by: "default"`, and the lane gets
-  `DECISION <id>: <option> (default after 30 min, nobody replied)`. The phone hears of the default taken, never of
-  the routine ask merely waiting, and a routine ask raises no `ask-waiting`.
-- A routine ask whose question or options use an owner word (`main`, `production`/`prod`, `secret`, `token`,
+- A lane's ask whose question and options use no owner word (`main`, `production`/`prod`, `secret`, `token`,
   `delete`, `spend`, `cost`, `$`, `dependency`, `scope`, or a plural or inflection such as `secrets`, `deleting`) is
-  refused `OWNER_TOPIC`. The list is a backstop, not the definition.
+  refused `IN_SCOPE` and nothing is logged: decide it, note it under `## Decisions`, carry on. Asks from outside a
+  lane (the owner, an orchestrator) are not checked.
+- There is no `--kind` any more: `--kind routine` is an unknown option. A routine ask filed before #1813 and still
+  open defaults once as it did: after `[limits] ask_default_minutes` (30) `drover check` takes its recommendation,
+  `by: "default"`, and the lane gets `DECISION <id>: <option> (default after 30 min, nobody replied)`.
+- The #1809 stuck card (the same blocking finding through 2 fix rounds, or CI red on the same check twice) goes to
+  the owner as a card, never into a thread.
 
-The needs-you card tags each ask `routine · defaults to 2 in 24m` or `owner · waits for you`. A defaulted
-decision shows on its issue row as `decided by default: <option>` with **[change]**: answering again (also
+A defaulted decision shows on its issue row as `decided by default: <option>` with **[change]**: answering again (also
 `drover answer`) logs a new `decision` and prompts the lane, or the next lane's brief carries it. A decision
 someone made is final (`ALREADY_ANSWERED`).
 

@@ -1,0 +1,9 @@
+about = "web/src TypeScript lines (soft budget, reported only; #265 Q5)"
+fix = "nothing to fix: reported only"
+budget_secs = 5
+paths = ["web/src/**"]
+run = '''
+n=$(cat web/src/*.ts | wc -l)
+echo "web/src TypeScript lines: $n"
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "web/src TypeScript lines: $n" >> "$GITHUB_STEP_SUMMARY"; fi
+'''

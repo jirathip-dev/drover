@@ -168,3 +168,101 @@ pub fn stops(code: Option<&str>) -> bool {
         )
     )
 }
+
+/// Refusals that mean a host has no room now: such a start waits its turn in the line, with no card.
+pub const ROOM: [&str; 5] = ["HOST_BUSY", "MEM_LOW", "DISK_LOW", "HOST_FULL", "SPAWN_PENDING"];
+
+/// A start waiting for room: rounds of issues in flight before first starts, then queue order, then the oldest refusal.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Waiter {
+    first: bool,
+    pos: usize,
+    since: u64,
+    pub fleet: String,
+    pub n: u64,
+    hosts: Vec<String>,
+}
+
+impl Waiter {
+    fn on(&self, h: &str) -> bool {
+        self.hosts.is_empty() || self.hosts.iter().any(|x| x == h)
+    }
+}
+
+fn pos(ev: &[Event], fleet: &str, n: u64) -> usize {
+    let q = queue::replay(ev, fleet);
+    q.iter().position(|i| i.issue == n).unwrap_or(usize::MAX)
+}
+
+/// Every start an unpaused fleet's last pass (within `stall_minutes`) left refused for room and not spawned since, first in line first.
+pub fn line(cfg: &Config, ev: &[Event], now: u64) -> Vec<Waiter> {
+    let mut out = vec![];
+    for (fleet, _) in cfg.fleet.iter().filter(|f| !f.1.paused) {
+        let full =
+            |e: &&Event| e.kind == "drive-pass" && e.fleet == *fleet && e.data.get("kick").is_none_or(Value::is_null);
+        let Some(pass) = ev
+            .iter()
+            .rfind(full)
+            .filter(|p| now < p.ts + cfg.limits.stall_minutes * 60)
+        else {
+            continue;
+        };
+        let acts = pass.data.get("actions").and_then(Value::as_array).into_iter().flatten();
+        for a in acts.filter(|a| a["code"].as_str().is_some_and(|c| ROOM.contains(&c))) {
+            let Some(n) = a["issue"].as_u64() else { continue };
+            let mine = crate::events::of_issue(ev, fleet, n);
+            let from = mine.iter().rposition(|e| e.kind == "spawn");
+            if from.and_then(|i| mine.get(i)).is_some_and(|s| s.seq > pass.seq) {
+                continue;
+            }
+            let tail = mine.get(from.map_or(0, |i| i + 1)..).unwrap_or_default();
+            let room = |e: &&&Event| e.kind == "driven" && e.str("code").is_some_and(|c| ROOM.contains(&c));
+            let hosts = a["hosts"].as_array().into_iter().flatten();
+            out.push(Waiter {
+                first: a["step"] == "start",
+                pos: pos(ev, fleet, n),
+                since: tail.iter().find(room).map_or(pass.ts, |e| e.ts),
+                fleet: fleet.clone(),
+                n,
+                hosts: hosts.filter_map(Value::as_str).map(String::from).collect(),
+            });
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The first start waiting ahead of `fleet` #`n` for host `h`, one already starting (`starting`) left out.
+pub fn ahead(
+    cfg: &Config,
+    ev: &[Event],
+    now: u64,
+    (fleet, n): (&str, u64),
+    h: &str,
+    starting: &[Event],
+) -> Option<Waiter> {
+    let all = line(cfg, ev, now);
+    let me = |w: &Waiter| w.fleet == fleet && w.n == n;
+    let first = queue::startable(ev, fleet).contains(&n.to_string());
+    let mine = all.iter().find(|w| me(w)).cloned().unwrap_or_else(|| Waiter {
+        first,
+        pos: pos(ev, fleet, n),
+        since: now,
+        fleet: fleet.into(),
+        n,
+        hosts: vec![],
+    });
+    let going = |w: &Waiter| starting.iter().any(|p| p.fleet == w.fleet && p.issue == Some(w.n));
+    all.into_iter().find(|w| *w < mine && !me(w) && w.on(h) && !going(w))
+}
+
+/// `fleet` #`n`'s place in `line`'s `all` among the starts waiting for room on its host, and `line K on <host>`.
+pub fn place(all: &[Waiter], (fleet, n): (&str, u64)) -> Option<(usize, String)> {
+    let me = all.iter().find(|w| w.fleet == fleet && w.n == n)?;
+    let h = me.hosts.first().map_or("every host", String::as_str);
+    let k = all
+        .iter()
+        .filter(|w| *w <= me && (me.hosts.is_empty() || me.hosts.iter().any(|x| w.on(x))))
+        .count();
+    Some((k, format!("line {k} on {h}")))
+}

@@ -234,8 +234,6 @@ fn reviewers_are_read_only() {
         None
     );
     assert_eq!(call("rev", "Write", &json!({"file_path": "verdict.md"})), None);
-    let patch = json!({"command": "*** Begin Patch\n*** Update File: src/a.rs\n"});
-    assert!(call("rev", "apply_patch", &patch).unwrap().contains("read-only"));
 }
 
 #[test]
@@ -320,31 +318,6 @@ fn a_orchestrator_may_spawn_design_lanes() {
             "{cmd}"
         );
     }
-}
-
-#[test]
-fn only_a_orchestrator_runs_lesson() {
-    let run = |lane: &str, cmd: &str| {
-        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-        hook_in(Some(lane), "impl", &input)
-    };
-    assert_eq!(
-        run("tangelo:-:orchestrator", "drover lesson tangelo"),
-        "",
-        "an orchestrator may"
-    );
-    for lane in ["tangelo:12:impl", "tangelo:12:rev", "tangelo:-:orch"] {
-        assert!(
-            run(lane, "drover lesson tangelo").contains("REFUSED ORCHESTRATOR_ONLY"),
-            "{lane}"
-        );
-        assert_eq!(
-            run(lane, "drover lesson digest tangelo --days 7"),
-            "",
-            "{lane} reads the digest"
-        );
-    }
-    assert_eq!(run("tangelo:12:lesson", "drover lesson apply tangelo"), "");
 }
 
 #[test]
@@ -901,7 +874,7 @@ fn parity_r8_broad_kills_are_denied_and_pid_kills_allowed() {
     }
     let cfg = format!(
         "{CONFIG}\n[fleet.other]\nrepo = \"o/r\"\nlocal = \"/tmp/x\"\nintegration = \"staging\"\ndeny_commands = []\n\
-         [hosts.cloud1]\nmachine = \"cloud1\"\ncloud = \"boat\"\nallow_commands = [\"pkill\"]"
+         [hosts.cloud1]\nmachine = \"cloud1\"\nallow_commands = [\"pkill\"]"
     );
     let input = json!({"tool_name": "Bash", "cwd": "/", "tool_input": {"command": "pkill node"}});
     let vars = [("DROVER_LANE", Some("other:7:impl")), ("DROVER_HOST", Some("cloud1"))];
@@ -942,27 +915,20 @@ fn host_stress_is_refused_and_test_runs_allowed() {
 }
 
 #[test]
-fn docker_is_allowed_on_a_cloud_host_and_denied_on_a_mac() {
+fn docker_is_denied_on_a_mac() {
     let run = |hosts: &str, host: &str, cmd: &str| {
-        let cfg = format!("{CONFIG}\n[hosts.mini]\n\n[hosts.cloud1]\nmachine = \"cloud1\"\ncloud = \"boat\"\n{hosts}");
+        let cfg = format!("{CONFIG}\n[hosts.mini]\n{hosts}");
         let input = json!({"tool_name": "Bash", "cwd": "/", "tool_input": {"command": cmd}});
         let vars = [("DROVER_LANE", Some("sendmeter:7:impl")), ("DROVER_HOST", Some(host))];
         hook_cfg(&cfg, &vars, "impl", &input).0
     };
     let denied = |o: String| o.contains("NO_CONTAINERS") || o.contains("NO_COMMAND");
     for cmd in ["docker ps", "docker compose up -d db", "supabase start"] {
-        assert!(run("", "cloud1", cmd).is_empty(), "{cmd} allowed on the cloud host");
         assert!(denied(run("", "mini", cmd)), "{cmd} denied on the Mac");
         assert!(denied(run("", "", cmd)), "{cmd} denied with no host");
     }
-    assert!(denied(run("", "cloud1", "podman run x")), "the rest of the ban stays");
-    assert!(
-        denied(run("allow_commands = []", "cloud1", "docker ps")),
-        "a cloud host can keep the ban"
-    );
     let add = "deny_commands_add = [\"terraform apply\"]";
-    assert!(denied(run(add, "cloud1", "terraform apply")));
-    assert_eq!(run(add, "cloud1", "docker ps"), "");
+    assert!(denied(run(add, "mini", "terraform apply")));
     let mac = "\n[hosts.mini2]\nallow_commands = [\"docker\"]";
     assert!(run(mac, "mini2", "docker ps").is_empty(), "a Mac may opt in");
 }
@@ -1041,7 +1007,7 @@ fn a_orchestrator_command_is_logged_for_its_thread() {
         cmds(&lane, "drover thread reply t1 \"done\"").1.is_empty(),
         "the reply is the message"
     );
-    assert_eq!(cmds(&lane, "ls -la").1, [] as [serde_json::Value; 0]);
+    assert_eq!(cmds(&lane, "ls -la").1, <[serde_json::Value; 0]>::default());
     assert!(
         cmds(&lane, "gh pr merge 5").1.is_empty(),
         "a denied call is not a tool row"
@@ -1418,47 +1384,28 @@ fn a_lanes_git_notes_write_or_notes_push_is_refused() {
 }
 
 #[test]
-fn impl_lane_never_edits_the_cap_file() {
+fn an_impl_lane_may_edit_the_old_cap_files() {
     let d = tmpdir("hook-cap");
     std::fs::write(d.join("fleet.toml"), config()).unwrap();
-    let lane = |n: &str| [("DROVER_LANE", Some(format!("sendmeter:{n}:impl")))];
-    let call = |n: &str, tool: &str, ti: Value| {
+    let vars = [("DROVER_LANE", Some("sendmeter:24:impl"))];
+    let call = |tool: &str, ti: Value| {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": "/w", "tool_input": ti});
-        let vars = lane(n);
-        let vars: Vec<(&str, Option<&str>)> = vars.iter().map(|(k, v)| (*k, v.as_deref())).collect();
         hook_at(&d, &d, &vars, "impl", &input.to_string())
     };
-    let bash = |n: &str, c: &str| call(n, "Bash", json!({"command": c}));
-    let refused = |out: String| out.contains("REFUSED CAP_FILE");
-    assert!(refused(call("24", "Edit", json!({"file_path": "/w/ci/cap.toml"}))));
-    assert!(refused(call("24", "Write", json!({"file_path": "ci/cap.toml"}))));
-    assert!(refused(bash("24", "sed -i '' 's/35500/36000/' ci/cap.toml")));
-    assert!(refused(bash("24", "printf x > ci/cap.toml")));
-    assert!(refused(call(
-        "24",
-        "Write",
-        json!({"file_path": "/w/ci/cap.d/2026-11-14-50000.toml"})
-    )));
-    assert!(refused(bash("24", "printf 'line_cap = 50000' > ci/cap.d/x.toml")));
-    assert!(refused(bash("24", "cp up.toml ci/cap.d/x.toml")));
-    for ok in [
-        "cat ci/cap.toml",
-        "ls ci/cap.d/",
-        "drover cap-check --config ci/cap.toml > cap.log 2>&1",
-    ] {
-        assert_eq!(bash("24", ok), "", "{ok}");
-    }
-    assert_eq!(call("24", "Edit", json!({"file_path": "/w/src/a.rs"})), "");
-    let cache = d.join("state/cache");
-    std::fs::create_dir_all(&cache).unwrap();
-    let spec = json!({"title": "cap: raise the src/ line cap to 36,000", "body": ""});
-    std::fs::write(cache.join("issue-sendmeter-25.json"), spec.to_string()).unwrap();
-    assert_eq!(call("25", "Edit", json!({"file_path": "/w/ci/cap.toml"})), "");
-    assert_eq!(bash("25", "sed -i '' 's/35500/36000/' ci/cap.toml"), "");
+    let bash = |c: &str| call("Bash", json!({"command": c}));
+    assert_eq!(call("Edit", json!({"file_path": "/w/ci/cap.toml"})), "");
     assert_eq!(
-        call("25", "Write", json!({"file_path": "/w/ci/cap.d/2026-11-14-36000.toml"})),
+        call("Write", json!({"file_path": "/w/ci/cap.d/2026-11-14-50000.toml"})),
         ""
     );
+    for cmd in [
+        "sed -i '' 's/35500/36000/' ci/cap.toml",
+        "printf x > ci/cap.toml",
+        "git rm -r ci/cap.toml ci/cap.d",
+        "rm -r ci/cap.d",
+    ] {
+        assert_eq!(bash(cmd), "", "{cmd}");
+    }
 }
 
 #[test]
@@ -1467,7 +1414,8 @@ fn the_stop_hook_asks_for_the_turn_only_in_impl_lanes() {
     for lane in [None, Some("sendmeter:-:orchestrator"), Some("sendmeter:-:conductor")] {
         assert_eq!(stop(lane, "orchestrator"), "", "{lane:?} ends its turn freely");
     }
-    let out = stop(Some("sendmeter:24:impl"), "impl");
+    let lane = [("DROVER_LANE", Some("sendmeter:24:impl")), ("DROVER_OUTBOX", Some("1"))];
+    let out = hook_env(&lane, "impl", &json!({"hook_event_name": "Stop"}));
     let v: Value = serde_json::from_str(out.trim()).unwrap();
     assert_eq!(
         (&v["decision"], &v["reason"]),
@@ -1493,14 +1441,6 @@ fn a_design_lane_writes_only_its_issues_design_paths() {
             json!({"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": "/w", "tool_input": ti}),
         )
     };
-    let patch = |lane: &str, f: &str| {
-        let p = format!("*** Begin Patch\n*** Update File: {f}\n@@\n-a\n+b\n*** End Patch\n");
-        let ti = json!({"command": p});
-        hook(
-            lane,
-            json!({"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "cwd": "/w", "tool_input": ti}),
-        )
-    };
     let design = "sendmeter:30:design";
     for f in [
         "/w/apple/design/x/NativeSurfaces.swift",
@@ -1520,8 +1460,6 @@ fn a_design_lane_writes_only_its_issues_design_paths() {
     ] {
         assert!(refused(edit(design, "Write", f)), "{f}");
     }
-    assert!(refused(patch(design, "apple/Sources/CooeeAPI/Client.swift")));
-    assert_eq!(patch(design, "apple/design/x/A.swift"), "");
     assert!(refused(edit(
         "sendmeter:31:design",
         "Write",

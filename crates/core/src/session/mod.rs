@@ -2,6 +2,7 @@ pub mod list;
 pub mod pulse;
 pub mod stamp;
 pub mod transcript;
+pub mod turn;
 
 pub use list::{get, live_on, on};
 pub use pulse::Pulse;
@@ -152,13 +153,16 @@ impl Session {
     pub fn lane(&self) -> bool {
         self.labels.contains_key("fleet")
     }
-    /// shed says its agent is signed out: `error` with an `auth:` note that is no [`Session::key_refused`].
+    /// shed says its agent is signed out: `error` with an `auth:` note.
     pub fn signed_out(&self) -> bool {
-        self.auth().is_some_and(|n| !n.contains("lane key"))
+        self.auth().is_some()
     }
-    /// The token proxy refused this lane's own key (`401 lane key <id> revoked`): the lane's fault, not the host's login.
-    pub fn key_refused(&self) -> bool {
-        self.auth().is_some_and(|n| n.contains("lane key"))
+    pub(crate) fn limit_hit(&self) -> bool {
+        let last = match self.life {
+            Life::Running(s) => s,
+            Life::Exited { last, .. } => last,
+        };
+        limit_note(last, self.note.as_deref())
     }
     fn auth(&self) -> Option<&str> {
         let n = self.note.as_deref().filter(|n| n.starts_with("auth:"));
@@ -170,21 +174,30 @@ impl Session {
     }
 }
 
+pub(crate) fn limit_text(note: &str) -> bool {
+    let n = note.to_lowercase();
+    n.contains("limit") && n.contains("resets ")
+}
+
+pub(crate) fn limit_note(last: Status, note: Option<&str>) -> bool {
+    matches!(last, Status::Failed | Status::Done) && note.is_some_and(limit_text)
+}
+
 /// Why a lane's session ended, from shed's exit code and last status.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cause {
     Limit,
     Crash,
-    Refused,
     Killed,
     Ended,
 }
 
 impl Cause {
-    /// An exit with `code` after shed last reported `last`.
-    pub fn of(code: Option<i32>, last: Status) -> Cause {
+    /// An exit with `code` after shed last reported `last` with `note`.
+    pub fn of(code: Option<i32>, last: Status, note: Option<&str>) -> Cause {
         match last {
             Status::Limited => Cause::Limit,
+            _ if limit_note(last, note) => Cause::Limit,
             Status::Working | Status::Running | Status::Failed => Cause::Crash,
             _ if code != Some(0) => Cause::Crash,
             _ => Cause::Ended,
@@ -195,20 +208,19 @@ impl Cause {
         match self {
             Cause::Limit => "usage limit",
             Cause::Crash => "adapter crash",
-            Cause::Refused => "ECONNREFUSED: proxy tunnel down",
             Cause::Killed => "killed",
             Cause::Ended => "ended normally",
         }
     }
     /// The cause a logged word names (old rows too).
     pub fn parse(w: &str) -> Option<Cause> {
-        [Cause::Limit, Cause::Crash, Cause::Refused, Cause::Killed, Cause::Ended]
+        [Cause::Limit, Cause::Crash, Cause::Killed, Cause::Ended]
             .into_iter()
             .find(|c| c.word() == w)
     }
     /// Drover resumes the lane in its worktree.
     pub fn resumable(self) -> bool {
-        matches!(self, Cause::Limit | Cause::Crash | Cause::Refused)
+        matches!(self, Cause::Limit | Cause::Crash)
     }
 }
 

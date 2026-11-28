@@ -81,13 +81,10 @@ fn parity_83_each_kind_has_its_glyph_colour_and_weight() {
             true,
         ),
         (
-            ev(
-                "driven",
-                json!({"code": "ROUND_LIMIT", "result": "REFUSED ROUND_LIMIT: 4 rounds > 3"}),
-            ),
+            ev("driven", json!({"code": "STUCK", "result": "REFUSED STUCK: stuck"})),
             "!",
             "r",
-            "needs you · #7: 4 rounds > 3 · your call on its card",
+            "needs you · #7: stuck · your call on its card",
             true,
         ),
         (

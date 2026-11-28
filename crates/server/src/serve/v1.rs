@@ -28,6 +28,7 @@ const V1_PAIRED: &[&str] = &[
     "config-check",
     "config-edit",
     "timings",
+    "handoff-move",
 ];
 
 const PHONE: &[&str] = &["tap", "sheet", "tab", "send", "answer", "delta"];
@@ -52,6 +53,18 @@ fn reply(status: &'static str, code: &str, message: impl Into<String>) -> Res {
     )
 }
 
+fn client(x: &str) -> bool {
+    x == "manifest" || super::rows::is(x)
+}
+
+fn client_read(ctx: &Ctx, head: &str, x: &str, f: &BTreeMap<String, String>) -> Res {
+    if x != "manifest" {
+        return out("200 OK", &super::rows::get(ctx, x, f));
+    }
+    let host = super::header(head, "host").unwrap_or("127.0.0.1:7777");
+    out("200 OK", &crate::manifest::manifest(&format!("http://{host}")))
+}
+
 impl Server<'_> {
     pub(super) fn api(
         &self,
@@ -68,6 +81,16 @@ impl Server<'_> {
         let paired_op = |op: &str| PAIRED_OPS.contains(&op) || LANE_OPS.contains(&op) || V1_PAIRED.contains(&op);
         match (method, p.strip_prefix("/api/v1/")) {
             ("POST", _) if self.addr.is_none() => reply("405 Method Not Allowed", "READ_ONLY", "GET only"),
+            ("GET", Some(x)) if client(x) && (Self::plugin(ctx, head) || paired && self.allowed(ctx, head)) => {
+                client_read(ctx, head, x, &f)
+            }
+            ("GET", Some(x)) if client(x) => reply("401 Unauthorized", "UNPAIRED", "pair this device first"),
+            ("POST", Some(x)) if x.starts_with("thread/") && x.ends_with("/said") => {
+                if !Self::plugin(ctx, head) {
+                    return reply("401 Unauthorized", "UNPAIRED", "the plugin token");
+                }
+                said(ctx, x, body)
+            }
             _ if !self.allowed(ctx, head) => reply("403 Forbidden", "FORBIDDEN", "foreign Host or Origin"),
             (_, Some(x))
                 if busy(auth)
@@ -120,7 +143,8 @@ impl Server<'_> {
                     x[8..].strip_suffix("/digest").unwrap_or_default(),
                     f.get("days").and_then(|d| d.parse().ok()).unwrap_or(7),
                 );
-                let text = Config::kept(ctx).and_then(|c| crate::lesson::digest(ctx, &c, &self.r, fleet, days));
+                let text =
+                    Config::kept(ctx).and_then(|c| crate::lesson::digest(ctx, &c, &self.r, fleet, days).map(|d| d.0));
                 text.map_or_else(
                     |e| reply("404 Not Found", "NOT_FOUND", format!("{e:#}")),
                     |text| {
@@ -139,7 +163,7 @@ impl Server<'_> {
             ("GET", Some("lanes")) => out("200 OK", &self.unsaved(ctx, self.lanes_tab(ctx, paired))),
             ("GET", Some("chat")) => {
                 let (mut c, ev) = (
-                    self.chat_tab(ctx, paired && self.addr.is_some()),
+                    self.chat_tab(ctx, paired && self.addr.is_some(), &f),
                     working(&ctx.state).unwrap_or_default(),
                 );
                 c.get_mut("threads")
@@ -300,9 +324,13 @@ impl Server<'_> {
     fn lesson(&self, ctx: &Ctx, f: &BTreeMap<String, String>, by: &str) -> Result<String> {
         let (cfg, mut out) = (Config::kept(ctx)?, vec![]);
         let fleet = f.get("fleet").map_or("", String::as_str);
-        let confirmed = crate::lesson::run(ctx, &cfg, &self.r, &mut out, fleet, Some(by))?;
+        let how = crate::jobs::Trigger::Hand { by: Some(by) };
+        let (confirmed, why) = match crate::jobs::run(ctx, &cfg, &self.r, &mut out, (fleet, "lesson"), how)? {
+            crate::jobs::Ran::Filed { confirmed, .. } => (confirmed, String::new()),
+            crate::jobs::Ran::Nothing(why) => (true, format!("{fleet} lesson: {why}")),
+        };
         let out = String::from_utf8_lossy(&out);
-        let filed = out.lines().next().unwrap_or_default();
+        let filed = out.lines().next().unwrap_or(&why);
         Ok(format!(
             "{filed}{}",
             if confirmed { "" } else { " (lane prompt not confirmed)" }
@@ -772,7 +800,8 @@ fn lessons(ctx: &Ctx) -> Lessons {
     );
     let st = ev.states.clone();
     let fleet = |(name, fc): (&String, &crate::config::Fleet)| {
-        let off = fc.lessons.as_deref() == Some("off");
+        let every = fc.jobs.get("lesson").map_or(0, |j| j.every);
+        let off = every == 0;
         let spawn = |e: &&Event| e.kind == "spawn" && e.fleet == *name && e.str("role") == Some("lesson");
         let last = ev.iter().rfind(spawn).and_then(|e| {
             let n = e.issue?;
@@ -787,7 +816,7 @@ fn lessons(ctx: &Ctx) -> Lessons {
             fleet: name.clone(),
             lessons: if off { "off" } else { "weekly" }.into(),
             last,
-            next: (!off).then(|| crate::lesson::last(ctx, name).map_or(ctx.now, |t| t + 7 * 86400)),
+            next: (!off).then(|| crate::jobs::last(ctx, "lesson", name).map_or(ctx.now, |t| t + every)),
         }
     };
     Lessons {
@@ -809,6 +838,18 @@ fn fields(body: &str) -> BTreeMap<String, String> {
         |_| form(body.trim()),
         |m| m.into_iter().map(|(k, v)| (k, flat(v))).collect(),
     )
+}
+
+fn said(ctx: &Ctx, x: &str, body: &str) -> Res {
+    let id = x
+        .strip_prefix("thread/")
+        .and_then(|t| t.strip_suffix("/said"))
+        .unwrap_or_default();
+    let s = serde_json::from_str::<crate::api::Said>(body).context("the body is no `Said`");
+    done(s.and_then(|s| {
+        let cfg = Config::kept(ctx)?;
+        crate::orchestrator::said(ctx, &cfg, id, (&s.id, &s.from, &s.text))
+    }))
 }
 
 fn done(r: Result<String>) -> Res {
@@ -1061,6 +1102,11 @@ pub(super) fn handoff(events: &[Event], o: &Event, folded: bool) -> Handoff {
         (Some(_), None) => "delivered",
         (None, None) => "pending",
     };
+    let state = if !card && crate::orchestrator::moved(events, o.seq).is_some() {
+        "forwarded"
+    } else {
+        state
+    };
     let opts = o.data.get("options").and_then(Value::as_array).into_iter().flatten();
     let rows = opts.zip(h["targets"].as_array().into_iter().flatten()).zip(1..);
     let choices = rows.filter(|_| state == "pending").map(|((t, to), n)| HandoffChoice {
@@ -1157,7 +1203,7 @@ pub(super) fn acp_numbered(events: &[crate::shed::proto::Logged]) -> Vec<(u64, B
     };
     for e in events {
         match &e.kind {
-            E::Turn { prompt } => out.push(Block::Prompt { text: prompt.clone() }),
+            E::Turn { prompt, .. } => out.push(Block::Prompt { text: prompt.clone() }),
             E::Text { text } => match out.last_mut() {
                 Some(Block::Reply { markdown }) => markdown.push_str(text),
                 _ => out.push(Block::Reply { markdown: text.clone() }),
@@ -1170,6 +1216,7 @@ pub(super) fn acp_numbered(events: &[crate::shed::proto::Logged]) -> Vec<(u64, B
                 title,
                 status,
                 kind,
+                ..
             } => {
                 let was = out
                     .iter_mut()
@@ -1201,7 +1248,7 @@ pub(super) fn acp_numbered(events: &[crate::shed::proto::Logged]) -> Vec<(u64, B
                     None => out.push(p),
                 }
             }
-            E::ApprovalRequest { tool, options } => out.push(Block::Approval {
+            E::ApprovalRequest { tool, options, .. } => out.push(Block::Approval {
                 tool: tool.clone(),
                 options: options
                     .iter()
@@ -1213,7 +1260,7 @@ pub(super) fn acp_numbered(events: &[crate::shed::proto::Logged]) -> Vec<(u64, B
                     .collect(),
                 answered: None,
             }),
-            E::Approved { option } => {
+            E::Approved { option, .. } => {
                 let open = out.iter_mut().rev().find_map(|b| match b {
                     Block::Approval { answered: a @ None, .. } => Some(a),
                     _ => None,

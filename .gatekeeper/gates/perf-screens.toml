@@ -1,0 +1,10 @@
+about = "perf in release (#1313: the screens on a live-shaped gh cache); the numbers go to the job summary"
+fix = "make the case fit its budget; a budget is raised only in its own issue"
+budget_secs = 900
+leg = "release"
+setup = ["rust", "node"]
+needs = ["quiet-host"]
+paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "assets/**", "demo/**", "web/dist/**"]
+run = '''
+cargo test --release --locked --test perf -- screens_on_a_live_shaped_fixture --nocapture --test-threads=1
+'''

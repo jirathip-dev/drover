@@ -18,7 +18,7 @@ fn setup(name: &str) -> (drover::Ctx, String) {
     let rev = tmpdir(&format!("{name}-rev")).display().to_string();
     let base = CONFIG
         .replace("harness  =  \"claude\"", "harness = \"claude\"")
-        .replace("review_rounds = 3", "review_rounds = 3\nssh_sessions = 64");
+        .replace("stall_minutes = 30", "stall_minutes = 30\nssh_sessions = 64");
     let c = ctx(
         &tmpdir(name),
         &format!("{base}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n"),
@@ -150,7 +150,7 @@ fn a_verdict_md_in_the_hosts_report_is_recorded_in_the_same_pass() {
     let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
     bazzite.lane(LANE, "idle", &rev);
     let verdict = format!(
-        "FAIL\n\nReviewed head: {}\n- blocking [code] a.rs:1: x\n  Proof: spec\n  > AC 1\n",
+        "FAIL\n\nReviewed head: {}\n- blocking [ac] a.rs:1: x\n  Proof: spec\n  > AC 1\n",
         head()
     );
     let f = boat(&rev, Ok(&verdict));

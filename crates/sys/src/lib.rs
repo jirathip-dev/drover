@@ -13,7 +13,6 @@ extern "C" {
     fn setsid() -> i32;
     fn kill(pid: i32, sig: i32) -> i32;
     fn getrusage(who: i32, usage: *mut [i64; 18]) -> i32;
-    fn getloadavg(loadavg: *mut [f64; 1], nelem: i32) -> i32;
 }
 
 /// macOS's memory pressure level (`kern.memorystatus_vm_pressure_level`: 1 normal, 2 warn, 4 critical), read with no process.
@@ -42,11 +41,33 @@ pub fn pressure_level() -> Option<i32> {
     None
 }
 
-/// The host's one-minute load average, read with `getloadavg(3)`: no process is started.
-pub fn loadavg() -> Option<f64> {
-    let mut l = [0f64; 1];
-    // SAFETY: getloadavg writes at most `nelem` (1) doubles into the one-double buffer.
-    (unsafe { getloadavg(&raw mut l, 1) } == 1).then_some(l).map(|[x]| x)
+/// The host's CPU ticks since boot, `(idle, total)` over all CPUs, from `host_statistics`: no process is started.
+#[cfg(target_os = "macos")]
+pub fn cpu_ticks() -> Option<(u64, u64)> {
+    extern "C" {
+        fn mach_host_self() -> u32;
+        fn host_statistics(host: u32, flavor: i32, info: *mut [u32; 4], count: *mut u32) -> i32;
+    }
+    let (mut t, mut n) = ([0u32; 4], 4u32);
+    // SAFETY: HOST_CPU_LOAD_INFO (3) writes at most `count` (4) ints, the buffer's size.
+    let rc = unsafe { host_statistics(mach_host_self(), 3, &raw mut t, &raw mut n) };
+    let [user, system, idle, nice] = t.map(u64::from);
+    (rc == 0).then_some((idle, user + system + idle + nice))
+}
+
+/// The host's CPU ticks since boot, `(idle, total)`, from `/proc/stat`'s `cpu` line (iowait counts as idle).
+#[cfg(not(target_os = "macos"))]
+pub fn cpu_ticks() -> Option<(u64, u64)> {
+    let stat = std::fs::read_to_string("/proc/stat").ok()?;
+    let t: Vec<u64> = stat
+        .lines()
+        .next()?
+        .split_whitespace()
+        .skip(1)
+        .filter_map(|w| w.parse().ok())
+        .collect();
+    let idle = t.get(3)? + t.get(4).unwrap_or(&0);
+    Some((idle, t.iter().sum()))
 }
 
 /// `c` keeps the listeners `fds` open across its exec.

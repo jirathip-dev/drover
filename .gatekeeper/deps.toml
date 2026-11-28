@@ -1,0 +1,21 @@
+growth = 10
+
+[cargo]
+aes-gcm = "web push payload encryption, pure-Rust RustCrypto: crypto is never written in-house"
+anyhow = "error context across the CLI and core"
+base64 = "web push keys and payloads, pure-Rust RustCrypto set"
+blocks = "the shed runtime's theme rules (#1339), pinned to a commit"
+clap = "the CLI's argument parser: a parser of input from outside"
+flate2 = "serve's gzip (#1314, owner-approved)"
+hkdf = "web push key derivation, pure-Rust RustCrypto: crypto is never written in-house"
+p256 = "web push VAPID signatures, pure-Rust RustCrypto: crypto is never written in-house"
+ratatui = "the terminal chat in crates/chat only, with its crossterm backend (#1352, owner-approved, q2151)"
+rusqlite = "the state database, bundled SQLite (#344)"
+serde = "derive the parsing of config, event and API files"
+serde_json = "the event log, the API and every JSON file read from outside"
+sha2 = "web push and checksums, pure-Rust RustCrypto: a hash is never written in-house"
+shed-proto = "shed's serde wire types for the shed runtime, no I/O"
+swag = "the built-in colour schemes (#1339), pinned to a commit"
+tokio = "crates/service (#345) and serve's connections in crates/server (#1318)"
+toml = "parse fleet.toml, arch.toml and every TOML file from outside"
+ts-rs = "the board's TS types behind the `ts` feature (#375), never in the release build"

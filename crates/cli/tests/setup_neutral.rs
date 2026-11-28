@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 const WORDS: [&str; 4] = ["jirathip", "sendmeter", "claude-accounts", "tail8c3301"];
 
-const EXCEPTIONS: [(&str, &str, &str); 9] = [
+const EXCEPTIONS: [(&str, &str, &str); 10] = [
     (
         "assets/swag/farm/sprites.svg",
         "(c) 2026 jirathip-dev, MIT",
@@ -12,6 +12,11 @@ const EXCEPTIONS: [(&str, &str, &str); 9] = [
         "docs/design/hosts-menu/themes/farm/sprites.svg",
         "(c) 2026 jirathip-dev, MIT",
         "#1091: the design's copy of the farm sprites, same MIT notice",
+    ),
+    (
+        "docs/design/new-issue/themes/farm/sprites.svg",
+        "(c) 2026 jirathip-dev, MIT",
+        "#1783: the design's copy of the farm sprites, same MIT notice",
     ),
     (
         "assets/swag/SOURCE",
