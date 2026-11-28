@@ -1,0 +1,13 @@
+{
+  "guard": 3,
+  "known": [
+    {
+      "rule": "lint/destructive-unconfirmed",
+      "at": "sheet#lane-docs-impl-9/button#act-clean"
+    },
+    {
+      "rule": "lint/destructive-unconfirmed",
+      "at": "sheet#lane-docs-impl-9/button#act-kill"
+    }
+  ]
+}

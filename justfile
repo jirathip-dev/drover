@@ -73,3 +73,12 @@ sim *args:
     mkdir -p "$out" && out=$(cd "$out" && pwd)
     DROVER_SIM_N="$n" DROVER_SIM_OUT="$out" cargo test --release --locked -p drover --test sim metrics_batch -- --ignored >&2
     cat "$out/metrics.$ext"
+
+# #1750: blocks check on fixtures/screens (.blocks/guard.json); INTEGRATION: only what changed since origin/$INTEGRATION, GUARD_OUT: the JSON outcome there (turn done's UI check).
+guard:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=(check)
+    if [ -n "${INTEGRATION:-}" ]; then args+=(--base "origin/$INTEGRATION"); fi
+    if [ -n "${GUARD_OUT:-}" ]; then args+=(--format json --out "$GUARD_OUT"); fi
+    exec cargo run -q --locked -p drover-blocks -- "${args[@]}"

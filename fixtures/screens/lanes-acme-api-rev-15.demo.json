@@ -1,0 +1,120 @@
+{
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "id": "facts-list",
+          "rows": [
+            {
+              "id": "f-issue",
+              "title": "issue",
+              "type": "row",
+              "value": "acme-api #15"
+            },
+            {
+              "id": "f-role",
+              "title": "role",
+              "type": "row",
+              "value": "rev"
+            },
+            {
+              "id": "f-state",
+              "title": "state",
+              "type": "row",
+              "value": "done"
+            },
+            {
+              "id": "f-host",
+              "title": "host",
+              "type": "row",
+              "value": "local"
+            },
+            {
+              "id": "f-pr",
+              "tap": {
+                "url": "https://github.com/acme-example/acme-api/pull/33"
+              },
+              "title": "PR",
+              "type": "row",
+              "value": "#33"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "lane",
+      "id": "facts",
+      "type": "section"
+    },
+    {
+      "action": "stop",
+      "confirm": {
+        "ok": "Stop",
+        "title": "Stop acme-api-rev-15?"
+      },
+      "id": "act-stop",
+      "label": "Stop",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "acme-api-rev-15"
+      }
+    },
+    {
+      "action": "kill",
+      "id": "act-kill",
+      "label": "Kill",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "acme-api-rev-15"
+      }
+    },
+    {
+      "action": "clean",
+      "id": "act-clean",
+      "label": "Clean",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "acme-api-rev-15"
+      }
+    },
+    {
+      "fields": [
+        {
+          "label": "Say",
+          "name": "text",
+          "placeholder": "a line to the lane",
+          "type": "text",
+          "value": ""
+        }
+      ],
+      "id": "say",
+      "type": "form"
+    },
+    {
+      "blocks": [
+        {
+          "id": "t1-1",
+          "markdown": "```\n❯ Review #15: cursor pagination for /v1/orders\n⏺ Read(src/routes/orders.rs)\n  ⎿ Read 212 lines\n⏺ Bash(cargo test orders)\n  ⎿ test result: ok. 14 passed; 0 failed\n⏺ PASS. The cursor is opaque and stable; one nit noted in verdict.md.\n```",
+          "type": "text"
+        }
+      ],
+      "header": "transcript",
+      "id": "transcript",
+      "type": "section"
+    }
+  ],
+  "cancel": "Close",
+  "done": {
+    "action": "send",
+    "label": "Send",
+    "values": {
+      "agent": "acme-api-rev-15"
+    }
+  },
+  "id": "lane-acme-api-rev-15",
+  "title": "acme-api-rev-15",
+  "type": "sheet"
+}

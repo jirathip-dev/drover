@@ -1,0 +1,42 @@
+{
+  "blocks": [
+    {
+      "id": "l-archived",
+      "rows": [
+        {
+          "figure": {
+            "state": "idle"
+          },
+          "id": "t1",
+          "subtitle": {
+            "text": "all repos · you: good, send it Fridays",
+            "tone": ""
+          },
+          "swipe": [
+            {
+              "action": "thread-restore",
+              "label": "restore",
+              "values": {
+                "thread": "t1"
+              }
+            }
+          ],
+          "tap": {
+            "open": "/screens/threads/t1"
+          },
+          "title": "Weekly ship notes",
+          "type": "row",
+          "value": {
+            "label": "{}",
+            "since": "2026-10-29T19:01:40Z"
+          }
+        }
+      ],
+      "type": "list"
+    }
+  ],
+  "id": "threads-archived",
+  "stream": "/screens/threads/archived/stream",
+  "title": "Archived",
+  "type": "screen"
+}

@@ -1,0 +1,18 @@
+[package]
+name = "drover-blocks"
+description = "#1750: `just guard`'s `blocks check`, blocks-cli at the workspace's blocks pin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "blocks"
+path = "src/main.rs"
+
+[dependencies]
+blocks-cli = { git = "https://github.com/jirathip-dev/blocks", rev = "e823e0b1987b59059a77e56266d06749ba4d860d" }
+
+[lints]
+workspace = true

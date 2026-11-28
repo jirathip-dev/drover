@@ -1,0 +1,117 @@
+{
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "id": "facts-list",
+          "rows": [
+            {
+              "id": "f-issue",
+              "title": "issue",
+              "type": "row",
+              "value": "acme-web #48"
+            },
+            {
+              "id": "f-role",
+              "title": "role",
+              "type": "row",
+              "value": "impl"
+            },
+            {
+              "id": "f-state",
+              "title": "state",
+              "type": "row",
+              "value": "working"
+            },
+            {
+              "id": "f-host",
+              "title": "host",
+              "type": "row",
+              "value": "local"
+            },
+            {
+              "id": "f-branch",
+              "title": "branch",
+              "type": "row",
+              "value": "issue-48"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "lane",
+      "id": "facts",
+      "type": "section"
+    },
+    {
+      "action": "stop",
+      "confirm": {
+        "ok": "Stop",
+        "title": "Stop acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx?"
+      },
+      "id": "act-stop",
+      "label": "Stop",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx"
+      }
+    },
+    {
+      "action": "kill",
+      "id": "act-kill",
+      "label": "Kill",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx"
+      }
+    },
+    {
+      "action": "clean",
+      "id": "act-clean",
+      "label": "Clean",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx"
+      }
+    },
+    {
+      "fields": [
+        {
+          "label": "Say",
+          "name": "text",
+          "placeholder": "a line to the lane",
+          "type": "text",
+          "value": ""
+        }
+      ],
+      "id": "say",
+      "type": "form"
+    },
+    {
+      "blocks": [
+        {
+          "id": "t1-1",
+          "markdown": "```\n❯ Implement #48: contrast audit\n⏺ Read(/srv/acme/worktrees/acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx/src/theme/tokens.ts)\n  ⎿ Read 212 lines\n⏺ The disabled-control grey fails AA on the dark theme; raising it one step.\n```",
+          "type": "text"
+        }
+      ],
+      "header": "transcript",
+      "id": "transcript",
+      "type": "section"
+    }
+  ],
+  "cancel": "Close",
+  "done": {
+    "action": "send",
+    "label": "Send",
+    "values": {
+      "agent": "acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx"
+    }
+  },
+  "id": "lane-acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx",
+  "title": "acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx",
+  "type": "sheet"
+}

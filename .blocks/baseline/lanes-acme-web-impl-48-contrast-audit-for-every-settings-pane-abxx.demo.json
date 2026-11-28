@@ -1,0 +1,13 @@
+{
+  "guard": 3,
+  "known": [
+    {
+      "rule": "lint/destructive-unconfirmed",
+      "at": "sheet#lane-acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx/button#act-clean"
+    },
+    {
+      "rule": "lint/destructive-unconfirmed",
+      "at": "sheet#lane-acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx/button#act-kill"
+    }
+  ]
+}

@@ -1,0 +1,116 @@
+{
+  "actions": [
+    {
+      "action": "thread-archive",
+      "label": "archive",
+      "values": {
+        "thread": "t3"
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "figure": {
+        "state": "idle"
+      },
+      "id": "who",
+      "sticky": true,
+      "subtitle": {
+        "text": "all · claude · opus · asleep",
+        "tone": ""
+      },
+      "title": "Pipeline: land mode and premerge checks · t3",
+      "type": "row"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-78-t",
+          "markdown": "Should both fleets land fast-first?",
+          "type": "text"
+        }
+      ],
+      "id": "m-78",
+      "kind": "you",
+      "meta": {
+        "label": "✓ {}",
+        "since": "2026-10-31T01:27:40Z"
+      },
+      "title": "you",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-80-t",
+          "markdown": "Both fleets on fast-first; staging gate stays required.",
+          "type": "text"
+        }
+      ],
+      "id": "m-80",
+      "kind": "orch",
+      "meta": {
+        "label": "{}",
+        "since": "2026-10-31T01:36:40Z"
+      },
+      "title": "orchestrator",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-81-t",
+          "markdown": "the orchestrator went to sleep",
+          "type": "text"
+        }
+      ],
+      "id": "m-81",
+      "kind": "sys",
+      "type": "card"
+    },
+    {
+      "action": "thread-say",
+      "acts": {
+        "model": "thread-model",
+        "queue": "thread-queue",
+        "steer": "thread-steer",
+        "stop": "thread-stop",
+        "unqueue": "thread-unqueue"
+      },
+      "chips": [
+        {
+          "all": [
+            "opus",
+            "sonnet"
+          ],
+          "cur": "opus",
+          "name": "model"
+        },
+        {
+          "all": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "cur": null,
+          "name": "effort"
+        }
+      ],
+      "id": "say",
+      "label": "send",
+      "placeholder": "message the orchestrator",
+      "queued": [],
+      "type": "composer",
+      "values": {
+        "thread": "t3"
+      }
+    }
+  ],
+  "focus": true,
+  "id": "thread-t3",
+  "stream": "/screens/threads/t3/stream",
+  "title": "Pipeline: land mode and premerge checks",
+  "type": "screen"
+}

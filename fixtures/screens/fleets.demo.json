@@ -1,0 +1,390 @@
+{
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "fields": [
+            {
+              "label": "Drive",
+              "name": "acme-api.drive",
+              "type": "toggle",
+              "value": true
+            },
+            {
+              "label": "Branch",
+              "name": "acme-api.integration",
+              "placeholder": "integration branch",
+              "type": "text",
+              "value": "staging"
+            },
+            {
+              "label": "Impl",
+              "name": "acme-api.impl",
+              "options": [
+                "opus",
+                "sonnet"
+              ],
+              "type": "picker",
+              "value": ""
+            },
+            {
+              "label": "Impl effort",
+              "name": "acme-api.impl.effort",
+              "options": [
+                "none",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ],
+              "type": "picker",
+              "value": ""
+            },
+            {
+              "label": "Review",
+              "name": "acme-api.rev",
+              "options": [
+                "opus",
+                "sonnet"
+              ],
+              "type": "picker",
+              "value": "opus"
+            },
+            {
+              "label": "Review effort",
+              "name": "acme-api.rev.effort",
+              "options": [
+                "none",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ],
+              "type": "picker",
+              "value": ""
+            },
+            {
+              "label": "orchestrator",
+              "name": "acme-api.orchestrator",
+              "options": [
+                "opus",
+                "sonnet"
+              ],
+              "type": "picker",
+              "value": "opus"
+            },
+            {
+              "label": "orchestrator effort",
+              "name": "acme-api.orchestrator.effort",
+              "options": [
+                "none",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ],
+              "type": "picker",
+              "value": ""
+            },
+            {
+              "label": "sec",
+              "name": "acme-api.sec",
+              "options": [
+                "opus",
+                "sonnet"
+              ],
+              "type": "picker",
+              "value": "opus"
+            },
+            {
+              "label": "sec effort",
+              "name": "acme-api.sec.effort",
+              "options": [
+                "none",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ],
+              "type": "picker",
+              "value": ""
+            }
+          ],
+          "id": "f-acme-api",
+          "type": "form"
+        }
+      ],
+      "footer": "Pause stops new lanes; live ones finish.",
+      "header": "acme-api",
+      "id": "fleet-acme-api",
+      "type": "section"
+    },
+    {
+      "blocks": [
+        {
+          "fields": [
+            {
+              "label": "Drive",
+              "name": "acme-ios.drive",
+              "type": "toggle",
+              "value": false
+            },
+            {
+              "label": "Branch",
+              "name": "acme-ios.integration",
+              "placeholder": "integration branch",
+              "type": "text",
+              "value": "staging"
+            },
+            {
+              "label": "Impl",
+              "name": "acme-ios.impl",
+              "options": [
+                "opus",
+                "sonnet"
+              ],
+              "type": "picker",
+              "value": "opus"
+            },
+            {
+              "label": "Impl effort",
+              "name": "acme-ios.impl.effort",
+              "options": [
+                "none",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ],
+              "type": "picker",
+              "value": ""
+            }
+          ],
+          "id": "f-acme-ios",
+          "type": "form"
+        }
+      ],
+      "footer": "Pause stops new lanes; live ones finish.",
+      "header": "acme-ios",
+      "id": "fleet-acme-ios",
+      "type": "section"
+    },
+    {
+      "blocks": [
+        {
+          "fields": [
+            {
+              "label": "Drive",
+              "name": "acme-web.drive",
+              "type": "toggle",
+              "value": true
+            },
+            {
+              "label": "Branch",
+              "name": "acme-web.integration",
+              "placeholder": "integration branch",
+              "type": "text",
+              "value": "staging"
+            },
+            {
+              "label": "Impl",
+              "name": "acme-web.impl",
+              "options": [
+                "opus",
+                "sonnet"
+              ],
+              "type": "picker",
+              "value": "opus"
+            },
+            {
+              "label": "Impl effort",
+              "name": "acme-web.impl.effort",
+              "options": [
+                "none",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ],
+              "type": "picker",
+              "value": "xhigh"
+            },
+            {
+              "label": "Review",
+              "name": "acme-web.rev",
+              "options": [
+                "opus",
+                "sonnet"
+              ],
+              "type": "picker",
+              "value": ""
+            },
+            {
+              "label": "Review effort",
+              "name": "acme-web.rev.effort",
+              "options": [
+                "none",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ],
+              "type": "picker",
+              "value": ""
+            }
+          ],
+          "id": "f-acme-web",
+          "type": "form"
+        }
+      ],
+      "footer": "Pause stops new lanes; live ones finish.",
+      "header": "acme-web",
+      "id": "fleet-acme-web",
+      "type": "section"
+    },
+    {
+      "blocks": [
+        {
+          "fields": [
+            {
+              "label": "Drive",
+              "name": "docs.drive",
+              "type": "toggle",
+              "value": true
+            },
+            {
+              "label": "Branch",
+              "name": "docs.integration",
+              "placeholder": "integration branch",
+              "type": "text",
+              "value": "staging"
+            },
+            {
+              "label": "Impl",
+              "name": "docs.impl",
+              "options": [
+                "opus",
+                "sonnet"
+              ],
+              "type": "picker",
+              "value": "sonnet"
+            },
+            {
+              "label": "Impl effort",
+              "name": "docs.impl.effort",
+              "options": [
+                "none",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ],
+              "type": "picker",
+              "value": "high"
+            }
+          ],
+          "id": "f-docs",
+          "type": "form"
+        }
+      ],
+      "footer": "Pause stops new lanes; live ones finish.",
+      "header": "docs",
+      "id": "fleet-docs",
+      "type": "section"
+    },
+    {
+      "id": "menu-list",
+      "rows": [
+        {
+          "accessory": "chevron",
+          "id": "menu-hosts",
+          "subtitle": "on/off, reap, disk and orphans",
+          "tap": {
+            "sheet": "/screens/hosts"
+          },
+          "title": "Hosts",
+          "type": "row"
+        },
+        {
+          "accessory": "chevron",
+          "id": "menu-notify",
+          "subtitle": "0 notifiers · Telegram off",
+          "tap": {
+            "sheet": "/screens/notify"
+          },
+          "title": "Notifications",
+          "type": "row"
+        }
+      ],
+      "type": "list"
+    },
+    {
+      "action": "remove-fleet",
+      "confirm": {
+        "message": "Only its config section; its queue, lanes and log stay on disk.",
+        "ok": "Remove",
+        "title": "Remove acme-api?"
+      },
+      "id": "rm-acme-api",
+      "label": "Remove acme-api…",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "fleet": "acme-api"
+      }
+    },
+    {
+      "action": "remove-fleet",
+      "confirm": {
+        "message": "Only its config section; its queue, lanes and log stay on disk.",
+        "ok": "Remove",
+        "title": "Remove acme-ios?"
+      },
+      "id": "rm-acme-ios",
+      "label": "Remove acme-ios…",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "fleet": "acme-ios"
+      }
+    },
+    {
+      "action": "remove-fleet",
+      "confirm": {
+        "message": "Only its config section; its queue, lanes and log stay on disk.",
+        "ok": "Remove",
+        "title": "Remove acme-web?"
+      },
+      "id": "rm-acme-web",
+      "label": "Remove acme-web…",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "fleet": "acme-web"
+      }
+    },
+    {
+      "action": "remove-fleet",
+      "confirm": {
+        "message": "Only its config section; its queue, lanes and log stay on disk.",
+        "ok": "Remove",
+        "title": "Remove docs?"
+      },
+      "id": "rm-docs",
+      "label": "Remove docs…",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "fleet": "docs"
+      }
+    }
+  ],
+  "cancel": "Cancel",
+  "done": {
+    "action": "save-fleets",
+    "label": "Save"
+  },
+  "id": "fleets",
+  "title": "Fleets",
+  "type": "sheet"
+}

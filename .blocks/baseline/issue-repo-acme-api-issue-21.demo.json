@@ -1,0 +1,9 @@
+{
+  "guard": 3,
+  "known": [
+    {
+      "rule": "lint/title-long",
+      "at": "sheet#issue-acme-api-21/section#asks"
+    }
+  ]
+}

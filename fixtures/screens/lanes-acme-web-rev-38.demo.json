@@ -1,0 +1,120 @@
+{
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "id": "facts-list",
+          "rows": [
+            {
+              "id": "f-issue",
+              "title": "issue",
+              "type": "row",
+              "value": "acme-web #38"
+            },
+            {
+              "id": "f-role",
+              "title": "role",
+              "type": "row",
+              "value": "rev"
+            },
+            {
+              "id": "f-state",
+              "title": "state",
+              "type": "row",
+              "value": "working"
+            },
+            {
+              "id": "f-host",
+              "title": "host",
+              "type": "row",
+              "value": "local"
+            },
+            {
+              "id": "f-pr",
+              "tap": {
+                "url": "https://github.com/acme-example/acme-web/pull/54"
+              },
+              "title": "PR",
+              "type": "row",
+              "value": "#54"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "lane",
+      "id": "facts",
+      "type": "section"
+    },
+    {
+      "action": "stop",
+      "confirm": {
+        "ok": "Stop",
+        "title": "Stop acme-web-rev-38?"
+      },
+      "id": "act-stop",
+      "label": "Stop",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "acme-web-rev-38"
+      }
+    },
+    {
+      "action": "kill",
+      "id": "act-kill",
+      "label": "Kill",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "acme-web-rev-38"
+      }
+    },
+    {
+      "action": "clean",
+      "id": "act-clean",
+      "label": "Clean",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "acme-web-rev-38"
+      }
+    },
+    {
+      "fields": [
+        {
+          "label": "Say",
+          "name": "text",
+          "placeholder": "a line to the lane",
+          "type": "text",
+          "value": ""
+        }
+      ],
+      "id": "say",
+      "type": "form"
+    },
+    {
+      "blocks": [
+        {
+          "id": "t1-1",
+          "markdown": "```\nReview #38 (round 2): search page debounce\n┊ 💻 git diff staging...issue-38 --stat\n┊   src/search/Box.tsx | 18 +++++++++++-------\n┊ 💻 pnpm test search\n┊   ✓ 9 passed\nRound 1 asked for a 250 ms debounce and a cancelled in-flight request; both are in.\nChecking the e2e failure from round 1 next.\n```",
+          "type": "text"
+        }
+      ],
+      "header": "transcript",
+      "id": "transcript",
+      "type": "section"
+    }
+  ],
+  "cancel": "Close",
+  "done": {
+    "action": "send",
+    "label": "Send",
+    "values": {
+      "agent": "acme-web-rev-38"
+    }
+  },
+  "id": "lane-acme-web-rev-38",
+  "title": "acme-web-rev-38",
+  "type": "sheet"
+}

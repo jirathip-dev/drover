@@ -163,6 +163,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "blocks-cli"
+version = "0.1.0"
+source = "git+https://github.com/jirathip-dev/blocks?rev=e823e0b1987b59059a77e56266d06749ba4d860d#e823e0b1987b59059a77e56266d06749ba4d860d"
+dependencies = [
+ "blocks",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "by_address"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -503,6 +513,13 @@ dependencies = [
  "serde_json",
  "sha2",
  "toml",
+]
+
+[[package]]
+name = "drover-blocks"
+version = "0.1.0"
+dependencies = [
+ "blocks-cli",
 ]
 
 [[package]]

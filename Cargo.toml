@@ -1,7 +1,7 @@
 # #264: core (state, gates, commands) <- server (the phone page) <- service (#345) <- cli (the `drover` binary);
 # docs/architecture.md.
 [workspace]
-members = ["crates/sys", "crates/core", "crates/server", "crates/service", "crates/chat", "crates/cli"]
+members = ["crates/sys", "crates/core", "crates/server", "crates/service", "crates/chat", "crates/cli", "tools/blocks"]
 resolver = "2"
 
 [workspace.package]

@@ -1,0 +1,9 @@
+{
+  "guard": 3,
+  "known": [
+    {
+      "rule": "lint/empty-state",
+      "at": "sheet#drive-health/list#health-rows"
+    }
+  ]
+}

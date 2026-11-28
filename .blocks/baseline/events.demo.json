@@ -1,0 +1,33 @@
+{
+  "guard": 3,
+  "known": [
+    {
+      "rule": "lint/fault",
+      "at": ""
+    },
+    {
+      "rule": "lint/title-long",
+      "at": "screen#events/section#ev-hour/list#ev-hour-list/row#e-103"
+    },
+    {
+      "rule": "lint/title-long",
+      "at": "screen#events/section#ev-hour/list#ev-hour-list/row#e-33"
+    },
+    {
+      "rule": "lint/title-long",
+      "at": "screen#events/section#ev-hour/list#ev-hour-list/row#e-34"
+    },
+    {
+      "rule": "lint/title-long",
+      "at": "screen#events/section#ev-hour/list#ev-hour-list/row#e-39"
+    },
+    {
+      "rule": "lint/title-long",
+      "at": "screen#events/section#ev-hour/list#ev-hour-list/row#e-48"
+    },
+    {
+      "rule": "lint/title-long",
+      "at": "screen#events/section#ev-today/list#ev-today-list/row#e-85"
+    }
+  ]
+}

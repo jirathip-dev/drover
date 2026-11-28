@@ -1,0 +1,87 @@
+{
+  "actions": [
+    {
+      "action": "thread-archive",
+      "label": "archive",
+      "values": {
+        "thread": "t8"
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "figure": {
+        "state": "idle"
+      },
+      "id": "who",
+      "sticky": true,
+      "subtitle": {
+        "text": "no orchestrator yet · acme-api · claude · opus",
+        "tone": ""
+      },
+      "title": "Health check endpoint · t8",
+      "type": "row"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-62-t",
+          "markdown": "/healthz answers 200 once the db is up.",
+          "type": "text"
+        }
+      ],
+      "id": "m-62",
+      "kind": "orch",
+      "meta": {
+        "label": "{}",
+        "since": "2026-10-28T20:41:00Z"
+      },
+      "title": "orchestrator",
+      "type": "card"
+    },
+    {
+      "action": "thread-say",
+      "acts": {
+        "model": "thread-model",
+        "queue": "thread-queue",
+        "steer": "thread-steer",
+        "stop": "thread-stop",
+        "unqueue": "thread-unqueue"
+      },
+      "chips": [
+        {
+          "all": [
+            "opus",
+            "sonnet"
+          ],
+          "cur": "opus",
+          "name": "model"
+        },
+        {
+          "all": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "cur": null,
+          "name": "effort"
+        }
+      ],
+      "id": "say",
+      "label": "send",
+      "placeholder": "message the orchestrator",
+      "queued": [],
+      "type": "composer",
+      "values": {
+        "thread": "t8"
+      }
+    }
+  ],
+  "focus": true,
+  "id": "thread-t8",
+  "stream": "/screens/threads/t8/stream",
+  "title": "Health check endpoint",
+  "type": "screen"
+}
