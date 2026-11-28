@@ -10,19 +10,17 @@ use std::io::Write;
 /// The head of a folded issue's `<details>` block, which holds its text before the fold.
 pub const FOLDED: &str = "<details><summary>Earlier text";
 
-/// `drover triage [<fleet> | close|fold|label|docs …]`.
+/// `drover triage close|fold|label|docs …`, a triage lane's verbs.
 #[derive(clap::Args)]
-#[command(args_conflicts_with_subcommands = true)]
 pub struct Args {
     #[command(subcommand)]
-    cmd: Option<Verb>,
-    fleet: Option<String>,
+    cmd: Verb,
 }
 
 #[derive(clap::Subcommand)]
 enum Verb {
     #[command(
-        about = "Close an issue that is done, a duplicate or superseded, with one comment linking the evidence (a triage lane; never a queued, laned, asked or `keep` one)"
+        about = "Close an issue that is done, a duplicate or superseded, with one comment linking the evidence (a triage lane; never one with a live lane, open PR, open ask or `keep`; a queued one leaves the queue)"
     )]
     Close {
         fleet: String,
@@ -66,47 +64,20 @@ enum Verb {
     },
 }
 
-/// Run `drover triage`: exit 4 when the lane's prompt was not confirmed.
+/// Run a triage lane's verb.
 pub fn cli(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, a: Args) -> Result<i32> {
     match a.cmd {
-        Some(Verb::Close {
+        Verb::Close {
             fleet,
             issue,
             why,
             evidence,
-        }) => close(ctx, cfg, r, out, (&fleet, issue), (&why, &evidence))?,
-        Some(Verb::Fold { fleet, issue, spec }) => fold_spec(ctx, cfg, r, out, (&fleet, issue), &spec)?,
-        Some(Verb::Label { fleet, issue, labels }) => label(ctx, cfg, r, out, (&fleet, issue), &labels)?,
-        Some(Verb::Docs { fleet, findings, root }) => docs(ctx, cfg, r, out, &fleet, (&findings, &root))?,
-        None => {
-            let fleet = a
-                .fleet
-                .context("usage: drover triage <FLEET> | drover triage close|fold|label|docs …")?;
-            return Ok(if run(ctx, cfg, r, out, &fleet)? { 0 } else { 4 });
-        }
+        } => close(ctx, cfg, r, out, (&fleet, issue), (&why, &evidence))?,
+        Verb::Fold { fleet, issue, spec } => fold_spec(ctx, cfg, r, out, (&fleet, issue), &spec)?,
+        Verb::Label { fleet, issue, labels } => label(ctx, cfg, r, out, (&fleet, issue), &labels)?,
+        Verb::Docs { fleet, findings, root } => docs(ctx, cfg, r, out, &fleet, (&findings, &root))?,
     }
     Ok(0)
-}
-
-/// `drover triage <fleet>`: file this week's triage issue, queue it on top and spawn its `triage` lane; false when the lane's prompt was not confirmed (exit 4).
-pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<bool> {
-    let title = format!("triage: {fleet} week of {}", crate::lesson::ymd(ctx.now / 86400));
-    let body = include_str!("../roles/triage-issue.md").replace("{fleet}", fleet);
-    crate::lesson::file(ctx, cfg, r, out, (fleet, "triage", None), (&title, &body))
-}
-
-/// `tick`'s triage run, once per 7 days for each fleet with `triage = "weekly"` (a paused fleet waits).
-pub fn weekly(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let on = |f: &crate::config::Fleet| f.triage.as_deref() == Some("weekly") && !f.paused;
-    for name in cfg.fleet.iter().filter(|(_, f)| on(f)).map(|x| x.0) {
-        if !crate::timer::due(ctx, &format!("triage-{name}"), 7 * 86400)? {
-            continue;
-        }
-        if let Err(e) = run(ctx, cfg, r, out, name) {
-            writeln!(out, "{name} triage: {e:#}")?;
-        }
-    }
-    Ok(())
 }
 
 /// `body` without its folded block: the text a later amendment or fold reads.
@@ -117,12 +88,24 @@ pub fn live(body: &str) -> String {
     }
 }
 
+/// Why `fleet`#`n` has work in flight of its own (a live lane, an open PR), if it has.
+pub fn busy(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64)) -> Result<Option<&'static str>> {
+    let st = fold(&working(&ctx.state)?).remove(&(fleet.to_string(), n));
+    let live = crate::check::live_lanes(ctx, cfg, r)?;
+    if st
+        .as_ref()
+        .is_some_and(|s| !s.done() && s.lanes.values().any(|a| live.contains(a)))
+    {
+        return Ok(Some("has a live lane"));
+    }
+    let branch = crate::gate::branch_of(st.as_ref(), n);
+    let pr = crate::gh::pr(ctx, r, cfg.fleet(fleet)?, (fleet, n), &branch, ctx.now)?;
+    Ok((pr.at("state") == "OPEN").then_some("has an open PR"))
+}
+
 fn unprotected(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64)) -> Result<Value> {
-    let events = working(&ctx.state)?;
-    let st = fold(&events);
-    let queued = crate::queue::view(&events, &st, fleet).iter().any(|i| i.issue == n);
-    let laned = st.get(&(fleet.to_string(), n)).is_some_and(|s| !s.done());
-    let asked = open_asks(&events)
+    let busy = busy(ctx, cfg, r, (fleet, n))?;
+    let asked = open_asks(&working(&ctx.state)?)
         .iter()
         .any(|a| a.fleet == fleet && a.issue == Some(n));
     let repo = &cfg.fleet(fleet)?.repo;
@@ -132,14 +115,9 @@ fn unprotected(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64))
         &["issue", "view", &n.to_string(), "-R", repo, "--json", "body,labels"],
     )?;
     let keep = (issue.at("labels").as_array().into_iter().flatten()).any(|l| l.at("name") == "keep");
-    let why = [
-        (queued, "is queued"),
-        (laned, "has a lane"),
-        (asked, "waits on an open ask"),
-        (keep, "is labeled keep"),
-    ];
-    match why.iter().find(|w| w.0) {
-        Some((_, w)) => refused("PROTECTED", format!("{fleet}#{n} {w}: triage never touches it")),
+    let asked = asked.then_some("waits on an open ask");
+    match busy.or(asked).or(keep.then_some("is labeled keep")) {
+        Some(w) => refused("PROTECTED", format!("{fleet}#{n} {w}: triage never touches it")),
         None => Ok(issue),
     }
 }
@@ -205,11 +183,17 @@ pub fn close(
         &text,
     ];
     ok(r, "gh", &a)?;
+    let events = working(&ctx.state)?;
+    let queued = (crate::queue::view(&events, &fold(&events), fleet).iter()).any(|i| i.issue == n);
+    if queued {
+        let rm = crate::queue::op("rm", &[n], false, None, None, None);
+        writeln!(out, "{}", crate::queue_change(ctx, cfg, fleet, rm, Some("triage"))?)?;
+    }
     log(
         ctx,
         fleet,
         "triage-closed",
-        json!({"target": n, "why": why, "evidence": url, "undo": undo}),
+        json!({"target": n, "why": why, "evidence": url, "undo": undo, "dequeued": queued}),
     )?;
     Ok(writeln!(out, "closed {fleet}#{n}: {why}: {url}")?)
 }
@@ -266,6 +250,18 @@ pub fn label(
     (fleet, n): (&str, u64),
     labels: &[String],
 ) -> Result<()> {
+    labeled(ctx, cfg, r, out, (fleet, n), labels, json!({}))
+}
+
+fn labeled(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (fleet, n): (&str, u64),
+    labels: &[String],
+    mut d: Value,
+) -> Result<()> {
     unprotected(ctx, cfg, r, (fleet, n))?;
     let (repo, l) = (&cfg.fleet(fleet)?.repo, labels.join(","));
     ok(
@@ -274,55 +270,63 @@ pub fn label(
         &["issue", "edit", &n.to_string(), "-R", repo, "--add-label", &l],
     )?;
     let undo = format!("gh issue edit {n} -R {repo} --remove-label {l}");
-    log(
-        ctx,
-        fleet,
-        "triage-labeled",
-        json!({"target": n, "labels": labels, "undo": undo}),
-    )?;
+    d.put("target", json!(n))
+        .put("labels", json!(labels))
+        .put("undo", json!(undo));
+    log(ctx, fleet, "triage-labeled", d)?;
     Ok(writeln!(out, "labeled {fleet}#{n}: {l}")?)
 }
 
-/// A triage lane's `done --no-change <note>`: the summary of what it closed, folded and flagged (each with its undo) goes to the fleet's orchestrator thread, and closes its issue.
-pub fn done(
+fn orphans(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<(u64, u64)>> {
+    let f = cfg.fleet(fleet)?;
+    let a = [
+        "issue",
+        "list",
+        "-R",
+        &f.repo,
+        "--state",
+        "open",
+        "--limit",
+        "1000",
+        "--json",
+        "number,body,labels",
+    ];
+    let open = json(r, "gh", &a)?;
+    let stale = |i: &Value| (i.at("labels").as_array().into_iter().flatten()).any(|l| l.at("name") == "stale?");
+    let rooted: Vec<(u64, u64)> = (open.as_array().into_iter().flatten().filter(|i| !stale(i)))
+        .filter_map(|i| {
+            let body = i.at("body").as_str()?.replace('*', "");
+            let root = body.split_once("Root cause: #")?.1;
+            let digits: String = root.chars().take_while(char::is_ascii_digit).collect();
+            Some((i.at("number").as_u64()?, digits.parse().ok()?))
+        })
+        .collect();
+    let mut roots: Vec<u64> = rooted.iter().map(|x| x.1).collect();
+    roots.sort_unstable();
+    roots.dedup();
+    let closed = crate::gh::closed(ctx, r, f, fleet, &roots, ctx.now)?;
+    let shut = |n: &u64| closed.iter().any(|(c, pr)| c == n && !pr);
+    Ok(rooted.into_iter().filter(|(_, root)| shut(root)).collect())
+}
+
+/// A triage job's lane's `done`: `stale?` on each open issue whose `Root cause` is closed.
+pub fn flag_orphans(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
     out: &mut dyn Write,
     (fleet, n): (&str, u64),
-    note: &str,
 ) -> Result<()> {
-    let events = working(&ctx.state)?;
-    let mine: Vec<&Event> = (events.iter())
-        .filter(|e| e.fleet == fleet && e.issue == Some(n) && e.kind.starts_with("triage-"))
-        .collect();
-    let count = |k: &str| mine.iter().filter(|e| e.kind == k).count();
-    let mut s = format!(
-        "triage {fleet}#{n}: {} closed, {} folded, {} flagged\n",
-        count("triage-closed"),
-        count("triage-folded"),
-        count("triage-labeled")
-    );
-    for e in &mine {
-        let what = match e.kind.as_str() {
-            "triage-closed" => format!(
-                "closed ({}: {})",
-                e.str("why").unwrap_or_default(),
-                e.str("evidence").unwrap_or_default()
-            ),
-            "triage-folded" => format!("folded ({} amendments)", e.val("amendments")),
-            "triage-docs" => format!("docs issue ({} findings)", e.val("findings")),
-            _ => format!("labeled {}", e.val("labels")),
-        };
-        let undo = e.str("undo").unwrap_or_default();
-        s += &format!("- #{} {what} · undo: `{undo}`\n", e.val("target"));
+    if crate::jobs::of(&working(&ctx.state)?, fleet, n) != Some("triage") {
+        return Ok(());
     }
-    s += &format!("note: {note}");
-    match crate::orchestrator::route(cfg, &events, fleet) {
-        Some(id) => crate::orchestrator::reply(ctx, cfg, id, &s, &[])?,
-        None => writeln!(out, "{fleet}: no orchestrator thread; the summary is on #{n}")?,
+    for (o, root) in orphans(ctx, cfg, r, fleet)? {
+        let flag = labeled(ctx, cfg, r, out, (fleet, o), &["stale?".into()], json!({"root": root}));
+        if let Err(e) = flag {
+            writeln!(out, "{fleet}#{o}: root #{root} closed, not flagged: {e:#}")?;
+        }
     }
-    crate::lesson::close(ctx, cfg, r, out, (fleet, n), &s)
+    Ok(())
 }
 
 /// `drover triage docs`: file the run's one `docs:` issue from the `findings` file (one per line); no finding, no issue; a README with no non-goals goes first.

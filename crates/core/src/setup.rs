@@ -24,7 +24,7 @@ pub fn all(cfg: &Config) -> Vec<(String, String)> {
     let logins = crate::providers::lanes()
         .filter_map(login)
         .chain([("gh", "gh auth login")]);
-    for (n, c) in logins.chain(crate::providers::acp_only().filter_map(login)) {
+    for (n, c) in logins {
         if !v.iter().any(|x| x.0 == n) {
             v.push((n.into(), c.into()));
         }
@@ -98,7 +98,13 @@ pub fn vendors(cfg: &Config) -> Vec<(String, String)> {
 /// Start setup `name` on `host` in a new shed terminal there; logs `setup` (no command line, no input); its name.
 pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, via: &str) -> Result<String> {
     let boot = ("gh-token".to_string(), GH_TOKEN.to_string());
-    let Some((_, line)) = all(cfg).into_iter().chain([boot]).find(|s| s.0 == name) else {
+    let found = all(cfg).into_iter().chain([boot]).find(|s| s.0 == name);
+    let word = |w: &str| !w.is_empty() && w.chars().all(|c| c.is_ascii_alphanumeric() || "-_".contains(c));
+    let acct = name.split_once('/').filter(|(p, a)| word(p) && word(a));
+    if let (None, Some((provider, account))) = (&found, acct) {
+        return login(ctx, cfg, r, (provider, account), via);
+    }
+    let Some((_, line)) = found else {
         return refused("NO_SUCH_SETUP", format!("no setup `{name}`"));
     };
     let h = cfg.hosts.get(host);
@@ -116,6 +122,20 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, vi
     let d = json!({"host": host, "name": name, "pane": pane, "machine": on.machine, "via": via});
     append(&ctx.state, &Event::new(ctx.now, "", None, "setup", d))?;
     Ok(pane.into())
+}
+
+fn login(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (provider, account): (&str, &str), via: &str) -> Result<String> {
+    let w = r.shed().or_else(|| cfg.shed()).context("no shed runtime")?.wire;
+    let p = crate::shed::proto::AccountLogin {
+        provider: provider.into(),
+        name: account.into(),
+        token: false,
+    };
+    let v = crate::shed::call(r, &w, crate::shed::proto::Method::AccountLogin, json!(p))?;
+    let pane = serde_json::from_value::<crate::shed::proto::Login>(v)?.terminal;
+    let d = json!({"host": "main", "name": format!("{provider}/{account}"), "pane": pane, "machine": null, "via": via});
+    append(&ctx.state, &Event::new(ctx.now, "", None, "setup", d))?;
+    Ok(pane)
 }
 
 /// The open `setup` event of `pane` (no `setup-closed` after it).

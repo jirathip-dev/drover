@@ -78,7 +78,7 @@ fn each_shed_state_reaches_api_v1_and_the_plugin_unchanged() {
 fn a_lane_ending_its_turn_on_an_ask_waits_on_the_owner_until_it_is_answered() {
     let (c, b, f, wt, _) = acp_lane("acp-waiting-owner");
     let cli = Push(b.cli(&f), wt.clone());
-    let (code, out) = run(&later(&c, 30), &cli, &["ask", "sendmeter", "12", "Which way?"]);
+    let (code, out) = run(&later(&c, 30), &cli, &["ask", "sendmeter", "12", "Which way to main?"]);
     assert_eq!(code, 0, "{out}");
     session(&b, &[turn()]);
     drive_at(&c, &cli, 60);

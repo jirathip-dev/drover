@@ -1034,7 +1034,7 @@ fn issue_1238_a_respawned_review_is_one_round_and_the_sheet_shows_ci_and_each_st
     let last = find(&sheet, "v-rev");
     assert_eq!(
         (&last["badge"], &last["value"]),
-        (&json!({"text": "PASS", "tone": "ok"}), &json!("2/3"))
+        (&json!({"text": "PASS", "tone": "ok"}), &json!("2"))
     );
     assert_eq!(find(&sheet, "pr")["subtitle"], "count rounds once");
     assert_eq!(
@@ -1305,7 +1305,8 @@ fn parity_68_later_hides_a_card_on_every_client_logs_it_and_folds_into_one_n_lat
     let restarted = Server::new(&c, &r, Some(ADDR.into()));
     for (s, ck) in [(&s, ""), (&s, ck.as_str()), (&restarted, "")] {
         let cards = req(s, T, "GET", "/screens/cards", "", ck).1;
-        assert_eq!(top_of(&cards), ["nhc-sendmeter-5", "later"]);
+        let new = if ck.is_empty() { &[][..] } else { &["new-issue"][..] };
+        assert_eq!(top_of(&cards), [&["nhc-sendmeter-5", "later"][..], new].concat());
         assert_eq!(later_of(&cards), ["run-r1", "ask-q7"]);
         let line = find(&cards, "later");
         assert_eq!(
@@ -1351,7 +1352,7 @@ fn a_hidden_card_returns_on_a_new_reason_state_or_head_sha_and_not_otherwise() {
                 );
             }
             "state" => {
-                let d = json!({"code": "ROUND_LIMIT", "reason": "out"});
+                let d = json!({"code": "STUCK", "reason": "out"});
                 append(&c.state, &Event::new(T, "sendmeter", Some(17), "needs-human", d)).unwrap();
             }
             _ => head(&c, 17, "b"),
@@ -1419,4 +1420,21 @@ fn a_review_queue_wait_alone_never_makes_a_stuck_row() {
     let card = find(&cards(), "stuck-sendmeter").clone();
     let md = card["blocks"][0]["markdown"].as_str().unwrap().to_string();
     assert!(md.contains("#20") && !md.contains("#17"), "{md}");
+}
+
+#[test]
+fn the_queue_with_an_epic_draws_with_the_fixtures_block_keys_only() {
+    let (c, r) = recorded("cooee-epic");
+    let d = json!({"op": "add", "parent": 24, "issues": [9, 17, 30], "title": "Payments API v2"});
+    append(&c.state, &Event::new(T - 100, "sendmeter", None, "epic", d)).unwrap();
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let (status, q) = req(&s, T, "GET", "/screens/queue", "", "");
+    assert_eq!(status, 200, "{q}");
+    like(&q, "queue", false);
+    assert_eq!(find(&q, "epics-sendmeter")["header"], "epics (1)");
+    assert_eq!(find(&q, "epic-sendmeter-24")["badge"]["text"], "1/3 merged");
+    assert_eq!(find(&q, "ep-sendmeter-17")["indent"], 1);
+    let (_, folded) = req(&s, T, "GET", "/screens/queue?fold=sendmeter-24", "", "");
+    like(&folded, "queue", false);
+    assert_eq!(find(&folded, "epic-fold-sendmeter-24")["title"], "▸ 3 children of #24");
 }

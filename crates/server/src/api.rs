@@ -275,7 +275,7 @@ pub struct LaneNow {
     pub t: Option<String>,
 }
 
-/// API v1's `chat`, the [chat] tab: a card per repo (`all` first) with its threads, then every thread's view (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
+/// API v1's `chat`, the [chat] tab: a card per repo (`all` first) with its open threads' rows (`?archived=1`: the archived ones too), and `?thread=<t>`'s view alone (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
 pub struct ChatTab {
     pub now: u64,
     pub rw: bool,
@@ -414,6 +414,22 @@ pub struct HandoffChoice {
     pub op: String,
     pub fleet: String,
     pub id: String,
+}
+
+/// API v1's `rows` and `thread/<id>/rows` (docs/rows.md): `seq` the newest row's; `more`: ask again from the last row's seq.
+pub struct Rows {
+    pub seq: u64,
+    pub more: bool,
+    pub rows: Vec<RowView>,
+}
+
+/// A row as cooee reads it: the row, what every surface draws (`block`), a handoff row's item and a landed epic's `epic`.
+pub struct RowView {
+    #[serde(flatten)]
+    pub row: drover_core::thread::Row,
+    pub block: Value,
+    pub handoff: Option<Handoff>,
+    pub epic: Option<drover_core::epic::Landed>,
 }
 
 /// API v1's `repo/<fleet>/threads`: the repo's conductor threads, newest-active first.
@@ -719,7 +735,7 @@ pub struct QueueTab {
     pub fleets: Vec<QueueCard>,
 }
 
-/// A fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done`: today's `merged` events, newest first (`done_n` of them), the backlog and the [config] sheet.
+/// A fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done`: today's `merged` events, newest first (`done_n` of them), the backlog, the [config] sheet and its open `epics`.
 pub struct QueueCard {
     pub name: String,
     pub k: String,
@@ -735,6 +751,7 @@ pub struct QueueCard {
     pub backlog: Option<Backlog>,
     pub config: ConfigSheet,
     pub marks: BTreeMap<String, Marks>,
+    pub epics: Vec<drover_core::epic::Epic>,
 }
 
 /// A queued row's marks by its issue (`QueueCard.marks`): `design`, `verify` (`on`, `off`, none: by `ui_paths`), `repro`, its serial groups and `needs` tags, and the stage `note` its row shows (`verify(n)`, `verify skipped: …`).
@@ -853,13 +870,10 @@ pub struct ConfigSheet {
     pub env: Vec<String>,
     pub node_modules: bool,
     pub builtin: bool,
-    pub review_rounds: u32,
-    pub update_rounds: u32,
     pub stall_minutes: u64,
     pub ask_minutes: u64,
     pub max_impl: Option<usize>,
     pub max_rev: Option<usize>,
-    pub line_cap: Option<i64>,
     pub serial: Vec<String>,
     pub deny: Vec<String>,
     pub required: Vec<String>,
@@ -1107,6 +1121,59 @@ pub struct AttachEnv {
     pub thread: String,
     #[serde(rename = "DROVER_PORT")]
     pub port: String,
+}
+
+/// `POST /api/v1/thread/<id>/said`: one owner line of an attached chat, copied for `answer --typed`.
+pub struct Said {
+    /// The client's item id: posting it twice logs it once.
+    pub id: String,
+    pub ts: u64,
+    /// `owner`; the agent's own lines stay in the client.
+    pub from: String,
+    pub text: String,
+}
+
+/// `GET /api/v1/manifest`: what a client needs to attach a plugin, with no path of its own.
+pub struct Manifest {
+    pub name: String,
+    pub version: String,
+    /// The base URL the client calls; every path below is relative to it.
+    pub api: String,
+    /// The places: header strips, the cards place, the menu row, each with its screen path.
+    pub screens: Vec<Place>,
+    /// Every action name `POST /action` takes, and which of them are destructive.
+    pub actions: Vec<String>,
+    pub destructive: Vec<String>,
+    /// Where a client reads profiles, and attaches, follows and writes a chat.
+    pub threads: Threads,
+}
+
+/// One place a client draws: `type` header-strip, chat-cards or menu-row.
+pub struct Place {
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub persona: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub screen: Option<String>,
+}
+
+/// The manifest's chat paths; `<id>` stands for a thread id.
+pub struct Threads {
+    pub profiles: String,
+    pub started: String,
+    pub attach: String,
+    pub detach: String,
+    pub rows: String,
+    pub stream: String,
+    pub thread: String,
+    pub said: String,
 }
 
 }

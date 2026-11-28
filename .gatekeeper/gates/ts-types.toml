@@ -1,0 +1,13 @@
+about = "serde's JSON type-checks against assets/types/api.d.ts with tsc --strict (#375), and no board TS under assets/ declares its own copy of a generated type"
+fix = "fix the Rust type or the payload tsc names; import a generated type from assets/types/api, never copy it"
+budget_secs = 600
+setup = ["rust", "node"]
+paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "assets/**", "web/package.json", "web/package-lock.json"]
+run = '''
+set -eu
+npm --prefix web ci --no-audit --no-fund
+PATH="$PWD/web/node_modules/.bin:$PATH" cargo test --locked -p drover-server --features ts serde_json_fits_the_types
+names=$(grep -oE '^export type [A-Za-z]+' assets/types/api.d.ts | cut -d' ' -f3 | paste -sd'|' -)
+bad=$(grep -rnE --include='*.ts' "\b(type|interface|class) ($names)\b" assets | grep -v '^assets/types/' || true)
+if [ -n "$bad" ]; then echo "hand-written copy of a generated type (import it from assets/types/api): $bad"; exit 1; fi
+'''

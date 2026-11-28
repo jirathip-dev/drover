@@ -81,7 +81,7 @@ The decision fails closed. Any error (an API failure, no artifact, an expired on
 ```toml
 [fleet.app]
 required_checks = ["ci"]          # drover's gates read only the aggregate
-merge_label = "merge-ready"       # drover adds it on a PASS at the head: the full run
+# merge_label = "off"             # unset = "merge-ready": drover adds it on a PASS at the head, the full run
 ```
 
 `drover setup` creates the label in the repo if it is missing. `drover doctor` shows ✗ with the

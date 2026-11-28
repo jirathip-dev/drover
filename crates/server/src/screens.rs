@@ -14,6 +14,8 @@ use k::{Act, Confirm, Figure, Label, Shown, Tap, Tile, Time, Tone, Toned};
 use serde_json::Value;
 use std::sync::atomic::Ordering::Relaxed;
 
+#[path = "screens_epics.rs"]
+mod epics;
 #[path = "screens_lanes.rs"]
 mod lanes;
 #[path = "later.rs"]
@@ -25,7 +27,6 @@ pub(super) mod pages;
 pub(super) use lanes::said;
 use lanes::{lanes_screen, scene_screen};
 
-const MANIFEST: &str = include_str!("../../../cooee-plugin.toml");
 pub(super) type Res = (&'static str, &'static str, Vec<u8>);
 type Q = BTreeMap<String, String>;
 
@@ -66,17 +67,11 @@ pub(super) fn line(status: &'static str, l: &str) -> Res {
     out(status, &Value::Object(fields([("line", l.into())])))
 }
 
-/// Whether `cooee-plugin.toml`'s `[permissions]` lists `action`.
-pub fn permitted(action: &str) -> bool {
-    let m: toml::Value = toml::from_str(MANIFEST).unwrap_or(toml::Value::Integer(0));
-    let list = m.get("permissions").and_then(|p| p.get("actions")?.as_array().cloned());
-    list.unwrap_or_default().iter().any(|a| a.as_str() == Some(action))
-}
+pub use crate::manifest::permitted;
 
-/// `cooee-plugin.toml`'s `[[places]]` as JSON: the tabs, menu rows and cards the phone page draws.
+/// The manifest's places as JSON: the tabs, menu rows and cards the phone page draws.
 pub fn places() -> Value {
-    let m: toml::Value = toml::from_str(MANIFEST).unwrap_or(toml::Value::Integer(0));
-    serde_json::to_value(m.get("places")).unwrap_or_default()
+    serde_json::to_value(crate::manifest::manifest("").screens).unwrap_or_default()
 }
 
 /// The standalone page's places: the manifest's, then the Threads tab and the Hosts row (never the plugin's).
@@ -102,6 +97,8 @@ pub fn page_places() -> Value {
 mod fleets;
 #[path = "screens_hosts.rs"]
 mod hosts;
+#[path = "screens_scope.rs"]
+mod scope;
 
 const THREAD_ACTIONS: [&str; 11] = [
     "thread-new",
@@ -549,11 +546,12 @@ fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q, lanes: &[Lane], lat
         )
         .block(),
     ];
-    let blocks = vec![
+    let mut blocks = epics::epics(ctx, ev, c, q, lanes);
+    blocks.extend([
         section("inprogress", "in progress", busy),
         section("queued", "queued", rows("queued", tree(&queued))),
         rows_list(&format!("done-{f}"), end),
-    ];
+    ]);
     let mut v = k::Card::new()
         .id(format!("fleet-{f}"))
         .tone(tone)
@@ -686,12 +684,7 @@ fn rows_list(id: &str, rows: Vec<k::Block>) -> k::Block {
     k::List::new(rows).id(id).block()
 }
 
-fn check_rows(
-    st: Option<&crate::events::IssueState>,
-    hist: &[Round],
-    fl: Option<&crate::config::Fleet>,
-    r: &QueueRow,
-) -> Vec<k::Row> {
+fn check_rows(hist: &[Round], r: &QueueRow) -> Vec<k::Row> {
     let toned_row = |id: &str, title: &str, text: &str, t: Tone| titled(id, title).subtitle(toned(text, t));
     let mut rows = vec![];
     if r.dead {
@@ -724,13 +717,11 @@ fn check_rows(
             continue;
         }
         seen.push(h.key);
-        let lim = fl.map(|fl| crate::gate::limit(fl, v.str("loop").unwrap_or(h.key), st));
-        let lim = lim.filter(|l| l.0 != u32::MAX).map(|l| l.1).unwrap_or_default();
         let round = v
             .data
             .get("round")
             .and_then(Value::as_u64)
-            .map_or(String::new(), |k| format!("{k}{lim}"));
+            .map_or(String::new(), |k| k.to_string());
         let mut row = titled(format!("v-{}", h.key), h.key)
             .badge(verdict_badge(v))
             .value(round);
@@ -765,13 +756,7 @@ fn history_rows(now: u64, f: &str, n: u64, hist: &[Round], live: bool) -> Vec<k:
     hist.iter().enumerate().rev().map(row).collect()
 }
 
-fn issue_sheet(
-    ctx: &Ctx,
-    ev: &crate::events::Log,
-    fl: Option<&crate::config::Fleet>,
-    c: &QueueCard,
-    r: &QueueRow,
-) -> k::Block {
+fn issue_sheet(ctx: &Ctx, ev: &crate::events::Log, c: &QueueCard, r: &QueueRow) -> k::Block {
     let (f, n) = (c.name.as_str(), r.issue);
     let hist = history(ev, f, n);
     let mut status = vec![];
@@ -792,7 +777,7 @@ fn issue_sheet(
         let at = [r.place.as_str(), r.host.as_str()].into_iter().find(|s| !s.is_empty());
         rows.push(l.subtitle(plain(at.unwrap_or(if r.live { "live" } else { "gone" }))));
     }
-    rows.extend(check_rows(ev.states.get(&(f.to_string(), n)), &hist, fl, r));
+    rows.extend(check_rows(&hist, r));
     rows.extend(r.notes.iter().enumerate().map(|(i, x)| titled(format!("note-{i}"), x)));
     status.push(rows_list("status-list", rows.into_iter().map(Kind::block).collect()));
     let mut blocks = vec![section("status", "status", status)];
@@ -951,8 +936,8 @@ fn stats(ctx: &Ctx, ev: &[Event], states: &crate::events::States, only: Option<&
     let fleets = Config::kept(ctx).into_iter().flat_map(|c| c.fleet);
     let flights = fleets
         .filter(|f| only.is_none_or(|o| o == f.0))
-        .filter_map(|(f, fc)| crate::queue::flight(ctx, states, &fc, &f))
-        .map(|(v, cap)| (v.len(), cap))
+        .filter_map(|(f, fc)| crate::queue::flight(ctx, ev, states, &fc, &f))
+        .map(|(v, s, cap)| (v.len() + s.len(), cap))
         .reduce(|a, b| (a.0 + b.0, a.1 + b.1));
     items.extend(flights.map(|(v, cap)| tile("in flight", format!("{v}/{cap}"))));
     k::Stat::new().id("stats").items(items).block()
@@ -1500,9 +1485,7 @@ impl Server<'_> {
             })?,
             "/screens/issue" => {
                 let ev = working(&ctx.state).ok()?;
-                let cfg = Config::kept(ctx).ok();
-                let fl = |c: &QueueCard| cfg.as_ref().and_then(|x| x.fleet.get(&c.name));
-                self.on_row(ctx, q, |c, r| issue_sheet(ctx, &ev, fl(c), c, r))?
+                self.on_row(ctx, q, |c, r| issue_sheet(ctx, &ev, c, r))?
             }
             "/screens/verdict" => verdict_sheet(&working(&ctx.state).ok()?, q)?,
             "/screens/backlog" => {
@@ -1518,7 +1501,6 @@ impl Server<'_> {
             ),
             "/screens/ask" => ask_sheet(ctx, q)?,
             "/screens/hosts" => return self.hosts_sheet(ctx),
-            "/screens/proxy-token" => return Self::proxy_how(ctx),
             p if p == "/screens/threads" || p.starts_with("/screens/threads/") => {
                 return self.threads_screen(ctx, &p[16..], q.get("before"), paired)
             }

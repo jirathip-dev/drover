@@ -49,12 +49,7 @@ fn low() -> Vec<String> {
 
 fn claude(model: &[&str]) -> Vec<String> {
     let env = ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1"];
-    let unset = ["&&", "unset", "CLAUDE_CODE_OAUTH_TOKEN"];
-    [&env[..], model, &unset[..]]
-        .concat()
-        .into_iter()
-        .map(String::from)
-        .collect()
+    [&env[..], model].concat().into_iter().map(String::from).collect()
 }
 
 fn exports(p: &Value) -> String {
@@ -114,7 +109,7 @@ fn claude_role_dry_run_uses_synced_profile() {
     );
     assert_eq!(
         *r.calls.borrow(),
-        ["which shed", "shed help run", "shed agents --json"],
+        ["which shed", "shed agents --json", "shed help run"],
         "a dry run only reads"
     );
     assert!(sh.methods().is_empty(), "dry-run calls nothing");
@@ -185,21 +180,22 @@ fn rev_role_flags_new_commit_trailers_only() {
 }
 
 #[test]
-fn cap_asks_only_when_your_own_pr_crosses() {
+fn briefs_ask_for_src_net_and_name_no_line_cap() {
     let d = tmpdir("help-429");
+    let (code, out) = run(&ctx(&d, CONFIG), &Fake::default(), &["cap", "sendmeter"]);
+    assert_ne!(code, 0, "{out}");
     let (_, help) = run(&ctx(&d, CONFIG), &Fake::default(), &["help", "--agent"]);
     let impl_ = drover::spawn::role_prompt("impl").replace("\n  ", " ");
+    let orch = drover::spawn::role_prompt("orchestrator");
     for t in [impl_.as_str(), help.as_str()] {
-        for w in [
-            "The cap in `ci/cap.toml` is a total for the repo",
-            "ask only when your own PR, merged onto current integration, would put the total over `line_cap`; trim first, then ask `--kind owner`.",
-            "Being near the cap, or another PR's growth, is never a reason to ask.",
-            "A `STAGING_WOULD_BREAK` from the cap after another merge is a fix round: trim, or ask under the same rule.",
-            "Never edit `ci/cap.toml` or add a raise in `ci/cap.d/` (the hook refuses both",
-            "`drover cap <fleet>`'s queue-wide view",
-            "in one orchestrator-filed issue (recommended), or trim.",
-        ] {
-            assert!(t.contains(w), "{w}");
+        assert!(
+            t.contains("The PR body states `src/ net +N (budget +M)` with one line on why; the budget is a guide, never a gate."),
+            "{t}"
+        );
+    }
+    for t in [impl_.as_str(), help.as_str(), orch] {
+        for w in ["line_cap", "CAP.toml", "drover cap", "cap ask"] {
+            assert!(!t.contains(w), "{w}");
         }
     }
 }
@@ -721,7 +717,7 @@ fn each_roles_effort_is_its_own_or_the_fleet_default() {
             "harness  =  \"claude\"    # toggled in tests",
             "harness = \"claude\"\neffort = \"high\"",
         )
-        .replace("review_rounds = 3", "review_rounds = 3\neffort = \"xhigh\"");
+        .replace("stall_minutes = 30", "stall_minutes = 30\neffort = \"xhigh\"");
     let c = ctx(&d, &cfg);
     let _sh = on_shed(&c);
     assert_eq!(plan(&c, &shed_fake(), "impl")["effort"], "high");
@@ -751,7 +747,7 @@ fn invalid_effort_is_refused_at_config_load() {
             "fleet.sendmeter.role.rev: effort \"max\" must be one of",
         ),
         (
-            CONFIG.replace("review_rounds = 3", "review_rounds = 3\neffort = \"ultra\""),
+            CONFIG.replace("stall_minutes = 30", "stall_minutes = 30\neffort = \"ultra\""),
             "limits.effort: \"ultra\" must be one of",
         ),
     ] {

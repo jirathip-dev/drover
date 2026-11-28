@@ -1,0 +1,14 @@
+{
+  "brief": "# Orchestrator brief: thread chat-1\n\n# ROLE: ORCHESTRATOR\n…",
+  "code": "OK",
+  "env": {
+    "DROVER_LANE": "sendmeter:-:orchestrator",
+    "DROVER_PORT": "41712",
+    "DROVER_THREAD": "chat-1"
+  },
+  "guarded": true,
+  "message": "chat-1 is sendmeter's orchestrator thread",
+  "ok": true,
+  "settings": "<config>/claude/lane-orchestrator/settings.json",
+  "why": ""
+}

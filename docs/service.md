@@ -14,9 +14,8 @@ dependency, `tokio`, in its own crate (`crates/service`); every other crate stay
   With no service listening, every command goes on in today's direct mode: nothing is ever stuck on it.
 - **A loop per fleet** runs `drover drive <fleet>` as its own process every `fast_secs`, and at once on a wake (a
   `{"wake": <fleet>}` line, or a kick for one of its issues); a wake while its pass runs is one more pass after it.
-- **GitHub** is polled by the fast job (`drive`) every 15 s inside the service; the `dev.drover.fast` job
-  is no longer needed while it runs (`timer` doesn't reinstall it, `doctor` shows it "by the service"). The slow
-  `tick` stays as the safety net. #530: each fleet's open PRs, check rollups and labels come in one GraphQL query; a
+- **GitHub** is polled by the fast job (`drive`) every 15 s inside the service, which replaced the `dev.drover.fast`
+  job (#1802). The slow `tick` stays as the safety net: it skips a fleet the live service drove within `slow_secs`. #530: each fleet's open PRs, check rollups and labels come in one GraphQL query; a
   fast step first sends three conditional REST reads (open PRs latest-updated first, Actions runs, integration's
   branch) with their last ETags, and when all three answer 304 (free of rate limit) it keeps the last query's
   result. It queries anyway 5 min after the last query, or while a PR's mergeability is still UNKNOWN.
@@ -60,20 +59,11 @@ next service starts over the dead one's socket, the next pass sweeps the marker 
 
 ## Install
 
-`drover service --install [--api <addr>] [--board <addr>]` writes the unit (`dev.drover.service`) and prints the
-commands that swap it in; it loads nothing itself. The API listens on `127.0.0.1:7778` by default. On macOS, for example:
-
-```
-launchctl bootout gui/$(id -u)/dev.drover.fast
-launchctl bootout gui/$(id -u)/dev.drover.serve      # with --board only
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.drover.service.plist
-```
-
-To go back to direct mode, boot the service out and run `drover timer install`.
-
-## Line cap
-
-The service's budget is the planned +3,000, inside the 31,500 cap the owner set in q391 (#514).
+`drover timer install` writes and loads `dev.drover.service` (`drover service --api 127.0.0.1:7779`, off the
+board's 7777 and the webhooks' 7778, #1867) beside the tick, then unloads and removes the old `dev.drover.fast` job
+(#1802). `drover doctor` shows `✗ service — not running` while the job is missing or its socket is dead (naming the
+job or pid that holds the API port, with its fix), and `✗ fast job — replaced by the service` while both are
+installed.
 
 ## Deferred (q409)
 

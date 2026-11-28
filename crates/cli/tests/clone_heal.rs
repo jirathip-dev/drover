@@ -123,7 +123,7 @@ fn merger(local: &Path, head: &str) -> Mixed {
     let f = Fake::default()
         .reply("gh pr view issue-3 ", &pr.to_string())
         .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", head)
-        .reply("sh -c", "src lines (formatted): 10 / cap 14700\n")
+        .reply("sh -c", "ok\n")
         .reply("gh pr merge", "")
         .reply("gh pr view 13", &json!({"mergeCommit": {"oid": "m3rg3"}}).to_string())
         .reply("gh issue", "");
@@ -139,16 +139,20 @@ fn events(c: &drover::Ctx, kind: &str) -> Vec<Event> {
         .collect()
 }
 
-fn premerge(local: &Path) {
-    std::fs::create_dir_all(local.join("ci")).unwrap();
-    std::fs::write(local.join("ci/cap.toml"), "[fleet.sendmeter]\nline_cap = 14700\n").unwrap();
+fn premerge(c: &drover::Ctx) {
+    let cfg = std::fs::read_to_string(&c.config).unwrap();
+    let cfg = cfg.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\npremerge = [\"make lint\"]",
+    );
+    std::fs::write(&c.config, cfg).unwrap();
 }
 
 #[test]
 fn a_pass_heals_a_clone_missing_objects_and_merges() {
     let r = repos("heal-merge");
     let _sh = FakeShed::attached(&r.c);
-    premerge(&r.local);
+    premerge(&r.c);
     ready(&r.c, &r.head);
     let (tree, _) = break_clone(&r);
     let m = merger(&r.local, &r.head);
@@ -222,8 +226,14 @@ fn an_unhealable_clone_alerts_once_and_the_other_steps_still_run() {
 #[test]
 fn every_fetch_of_a_clone_runs_under_its_lock() {
     let r = repos("heal-lock");
+    let conf = std::fs::read_to_string(&r.c.config).unwrap();
+    std::fs::write(
+        &r.c.config,
+        conf.replace("[limits]\n", "[limits]\nfetch_fresh_secs = 0\n"),
+    )
+    .unwrap();
     let _sh = FakeShed::attached(&r.c);
-    premerge(&r.local);
+    premerge(&r.c);
     ready(&r.c, &r.head);
     let m = merger(&r.local, &r.head);
     let (code, out) = run(&r.c, &m, &["drive", "sendmeter"]);
@@ -303,7 +313,6 @@ fn a_remote_hosts_clone_gets_the_same_heal() {
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let _sh = FakeShed::attached(&c);
-    remote::proxied(&c);
     let git = format!("{SSH}'git' '--no-replace-objects' '-C' ");
     let gone = "4f50d959cad0891493b08636928fbfd2db083ea0";
     let bad = "fatal: bad object refs/remotes/origin/issue-9\nerror: did not send all necessary objects";
@@ -401,7 +410,6 @@ fn a_remote_fetch_racing_another_on_staging_is_retried_and_the_spawn_starts() {
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let _sh = FakeShed::attached(&c);
-    remote::proxied(&c);
     let fetch =
         format!("{SSH}'git' '--no-replace-objects' '-C' '/tmp/does-not-matter/sendmeter' 'fetch' 'origin' '+refs/heads/staging:refs/remotes/origin/staging'");
     let race = "error: fetching ref refs/remotes/origin/staging failed: incorrect old value provided";
@@ -438,4 +446,34 @@ fn a_remote_fetch_racing_another_on_staging_is_retried_and_the_spawn_starts() {
         .is_some_and(|e| e.contains("incorrect old value provided")));
     assert_eq!(retried[0].str("clone"), Some("/tmp/does-not-matter/sendmeter"));
     assert!(ev.iter().any(|e| e.kind == "spawn"), "{ev:#?}");
+}
+
+#[test]
+fn premerge_twice_in_one_fleet_reuses_its_worktree() {
+    let r = repos("premerge-reuse");
+    let _sh = FakeShed::attached(&r.c);
+    premerge(&r.c);
+    ready(&r.c, &r.head);
+    let mut first = merger(&r.local, &r.head);
+    first.0 = std::mem::take(&mut first.0).once("sh -c", 1, "lint failed\n");
+    let (code, out) = run(&r.c, &first, &["merge", "sendmeter", "3"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("STAGING_WOULD_BREAK"), "{out}");
+    let wt = r.c.state.with_file_name("premerge-sendmeter");
+    let add = format!("git -C {} worktree add -f --detach {}", r.local.display(), wt.display());
+    assert_eq!(first.0.count(&add), 1, "{:#?}", first.0.calls.borrow());
+    let v = json!({"verdict": "PASS", "sha": r.head, "round": 2});
+    append(&r.c.state, &Event::new(40, "sendmeter", Some(3), "verdict", v)).unwrap();
+    let second = merger(&r.local, &r.head);
+    let (code, out) = run(&r.c, &second, &["merge", "sendmeter", "3"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(second.0.count("sh -c"), 1, "{:#?}", second.0.calls.borrow());
+    assert!(!second.0.called(&add), "{:#?}", second.0.calls.borrow());
+    let merged = git(&wt, &["log", "-1", "--format=%P"]);
+    assert!(
+        merged.ends_with(&r.head),
+        "the reused worktree holds the second merge: {merged}"
+    );
+    let list = git(&r.local, &["worktree", "list"]);
+    assert_eq!(list.matches("premerge-sendmeter").count(), 1, "{list}");
 }

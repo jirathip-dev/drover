@@ -11,12 +11,12 @@ use std::path::Path;
 pub const OPTIONS: [&str; 3] = ["approve", "revise", "reject"];
 
 /// A design lane's hook scope: its worktree top (from the hook input's `cwd`) and its issue's design paths.
-pub fn scope(ctx: &Ctx, r: &dyn Runner, input: &Value, fleet: &str, n: Option<u64>) -> crate::hook::Design {
+pub fn scope(ctx: &Ctx, r: &dyn Runner, cwd: Option<&str>, fleet: &str, n: Option<u64>) -> crate::hook::Design {
     let here = std::env::current_dir()
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned();
-    let cwd = input["cwd"].as_str().unwrap_or(&here);
+    let cwd = cwd.unwrap_or(&here);
     let top = ok(r, "git", &["-C", cwd, "rev-parse", "--show-toplevel"]);
     let spec = n
         .and_then(|n| crate::gh::cached_spec(ctx, fleet, n))
@@ -136,7 +136,7 @@ fn pre<'a>(ev: &'a [Event], f: &str, n: u64, role: &str) -> Option<&'a str> {
         .find_map(|e| e.str("sha").filter(|s| !s.is_empty()))
 }
 
-/// A design lane that ended its turn (not working) on a head that carries its stage's files and was never handed off: `design-review`, then one ask that the board card and the conductor thread which queued it (if any) both answer.
+/// A design lane that ended its turn (not working) on a head that carries its stage's files and was never handed off: `design-review`, then one ask that the board card and the conductor thread which queued it (if any) both answer; the git error when its worktree could not be read.
 pub fn handoff(
     ctx: &Ctx,
     cfg: &Config,
@@ -144,7 +144,7 @@ pub fn handoff(
     out: &mut dyn Write,
     agents: &[crate::session::Session],
     s: &IssueState,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let ev = working(&ctx.state)?;
     let Some(sp) = s
         .lane
@@ -152,26 +152,29 @@ pub fn handoff(
         .filter(|_| s.state == "design")
         .and_then(|l| last_spawn(&ev, l))
     else {
-        return Ok(());
+        return Ok(None);
     };
     let busy = agents
         .iter()
         .any(|a| sp.str("agent") == Some(a.name.as_str()) && a.busy());
     let Some(wt) = sp.str("worktree").filter(|_| !busy) else {
-        return Ok(());
+        return Ok(None);
     };
-    let log = ok(r, "git", &["-C", wt, "log", "-1", "--format=%H"]).unwrap_or_default();
+    let log = match ok(r, "git", &["-C", wt, "log", "-1", "--format=%H"]) {
+        Ok(l) => l,
+        Err(e) => return Ok(Some(format!("{e:#}"))),
+    };
     let head = log.trim();
     let (f, n) = (s.fleet.as_str(), s.issue);
     let handed = ev
         .iter()
         .any(|e| e.is("design-review", f, n) && e.str("sha") == Some(head));
     if head.is_empty() || crate::spawn::dirty(r, Path::new(wt)).is_some() {
-        return Ok(());
+        return Ok(None);
     }
     let role = sp.str("role").unwrap_or("design");
     if handed {
-        return Ok(());
+        return Ok(None);
     }
     let pre = pre(&ev, f, n, role).unwrap_or(head);
     let dirs = if role == "architect" {
@@ -186,7 +189,10 @@ pub fn handoff(
     );
     let mut args = vec!["-C", wt, "log", "--format=", "--name-only", &range, &int, "--"];
     args.extend(dirs.iter().map(String::as_str));
-    let log = ok(r, "git", &args).unwrap_or_default();
+    let log = match ok(r, "git", &args) {
+        Ok(l) => l,
+        Err(e) => return Ok(Some(format!("{e:#}"))),
+    };
     let mut names: Vec<&str> = vec![];
     for l in log.lines().filter(|l| !l.is_empty()) {
         if !names.contains(&l) {
@@ -194,7 +200,7 @@ pub fn handoff(
         }
     }
     let Some(&first) = names.first() else {
-        return Ok(());
+        return Ok(None);
     };
     let dir = folder(first, &dirs);
     let adr = (role == "architect").then(|| dir.clone());
@@ -238,7 +244,7 @@ pub fn handoff(
     if !events::ask(&ctx.state, cfg, vec![review, ask], Some(&once))?.is_empty() {
         writeln!(out, "{f} #{n} design-review: {head:.7}")?;
     }
-    Ok(())
+    Ok(None)
 }
 
 fn folder(name: &str, dirs: &[String]) -> String {

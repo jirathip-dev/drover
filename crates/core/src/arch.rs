@@ -27,6 +27,8 @@ struct Arch {
     generate: Option<String>,
     #[serde(default)]
     shared: Vec<String>,
+    #[serde(default)]
+    append_only: Vec<String>,
 }
 
 impl Arch {
@@ -36,10 +38,12 @@ impl Arch {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct Frozen {
     #[serde(default)]
     frozen: Vec<String>,
+    #[serde(default)]
+    append_only: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -174,7 +178,7 @@ pub fn check(
     let trimmed = base_text.lines().map(str::trim);
     let crossings: BTreeSet<&str> = trimmed.filter(|l| l.contains(" -> ")).collect();
     let base = sizes(&base_text);
-    let (mut diff, mut frozen, mut was) = (vec![], vec![], BTreeMap::new());
+    let (mut diff, mut frozen, mut was) = (vec![], Frozen::default(), BTreeMap::new());
     if let Some(b) = since {
         let o = r.run("git", &argv(&["diff", "-U0", "--no-color", "--no-ext-diff", b]))?;
         anyhow::ensure!(o.code == 0, "git diff {b}: {}", o.stderr.trim());
@@ -182,7 +186,7 @@ pub fn check(
         let o = r.run("git", &argv(&["show", &format!("{b}:./{}", config.display())]))?;
         if o.code == 0 {
             let f: Frozen = toml::from_str(&o.stdout).with_context(|| format!("parsing {b}:{}", config.display()))?;
-            frozen = f.frozen;
+            frozen = f;
         }
         was = sizes(&r.run("git", &argv(&["show", &format!("{b}:./{base_path}")]))?.stdout);
     }
@@ -325,7 +329,17 @@ fn unsized_shared(a: &Arch, config: &Path) -> Vec<String> {
         .collect()
 }
 
-fn frozen_adds(a: &Arch, frozen: &[String], diff: &[Change]) -> Vec<String> {
+fn unappended(kept: &[String], diff: &[Change]) -> Vec<String> {
+    let gone = diff.iter().filter(|c| !c.added && any(kept, &c.file));
+    gone.map(|c| {
+        let (f, n, t) = (&c.file, c.line, c.text.trim());
+        format!("{f}:{n}: `{t}` removed or changed in an append-only file: a breaking change is /api/v2")
+    })
+    .collect()
+}
+
+fn frozen_adds(a: &Arch, base: &Frozen, diff: &[Change]) -> Vec<String> {
+    let frozen = &base.frozen;
     let folders: Vec<String> = a.collect.iter().map(|c| format!("`{}`", c.entries())).collect();
     let instead = if folders.is_empty() {
         "a `[[collect]]` folder".to_string()
@@ -350,6 +364,7 @@ fn frozen_adds(a: &Arch, frozen: &[String], diff: &[Change]) -> Vec<String> {
         let (f, n, t) = (&c.file, c.line, c.text.trim());
         format!("{f}:{n}: `{t}` added to a frozen list: add one file per entry in {instead} instead")
     })
+    .chain(unappended(&[&a.append_only[..], &base.append_only[..]].concat(), diff))
     .collect()
 }
 

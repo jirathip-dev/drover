@@ -7,6 +7,8 @@ brief names where you sit, the fleet your asks go on and your own instructions.
 
 - Run routine drover verbs yourself: file issues (`gh issue create`), `queue` and its reordering, `spawn`,
   and the other routine verbs.
+- #1865: `spawn --supersede` on a live lane that progressed inside `stall_minutes` is `REFUSED LANE_PROGRESSING`:
+  let it work, or pass `--why "<text>"` (logged) when replacing it is right.
 - #817: design and architect reviews and needs-human's [one more round] on your repo: when the spec clearly settles
   it, decide yourself with `drover answer <fleet> <id> … --basis "<verbatim spec words>"` or
   `drover extend <fleet> <issue> --basis …`; the FYI line's [change] re-answers a review, and on an extend it parks
@@ -25,20 +27,15 @@ brief names where you sit, the fleet your asks go on and your own instructions.
 - #574: an owner decision that names an amendment to an issue's spec (a scope note): run
   `drover amend <fleet> <issue> --basis q<id> "<text>"` right away. It appends a dated line under the body's
   `## Amendments` (never a comment) and re-runs the open PR's failed spec checks; `--basis` must be an ask on that
-  issue the owner answered (or a routine default), else `REFUSED NO_DECISION`. The id stays in the event log.
+  issue the owner answered (or an old routine ask's default), else `REFUSED NO_DECISION`. The id stays in the event log.
 - #1377: no ask ids (`q<id>`) in issue, PR or comment text: a reader on GitHub cannot open them. Write the decision
   as a plain line.
 - Queue a bug report with `drover queue <fleet> add <n> --repro`: impl's first commit is the failing test, and rev's
   PASS must show it failing on the base and passing at the head (`NO_REPRO` otherwise).
 - #417: a fleet with a `verify` role needs the repo's `.drover/verify.md`: file one recipe issue per repo whose body
   is `roles/verify-recipe.md`'s brief, and queue it. Until it merges, verify logs `verify-no-recipe` and passes on.
-- #668: a lane's cap ask answered "raise": file the raise once as its own issue titled `cap: raise … to <N>`
-  (#973: one new `ci/cap.d/<date>-<N>.toml` with `line_cap`, its commit carrying `Cap: <old> → <new> (#issue, q<N>)`,
-  which cap-check requires; only that issue's lane may write there), sized by
-  `drover cap <fleet>` (projected total plus margin) for the whole queue, and queue it on top. Answer every lane
-  that asked with a `DECISION` to wait for it (`queue block --on <raise>`); drive rechecks them once it merges.
-- When the owner says "correct", run `drover lesson <fleet>`: it files this week's lessons issue and spawns its
-  `lesson` lane, which turns the fleet's repeated mistakes into checks (only orchestrators and the owner may).
+- When the owner says "correct", run `drover job <fleet> lesson`: it files this week's lessons issue and spawns
+  its `lesson` lane, which turns the fleet's repeated mistakes into checks (only orchestrators and the owner may).
 - When `drover doctor` reports `✗ timer — … outdated` (or missing), run `drover timer install` yourself (logged
   `timer-install`); it is the one host verb you may run.
 - Never edit fleet.toml or harness config (roles, models, gates, land mode, serial groups, hosts, accounts)
@@ -48,6 +45,4 @@ brief names where you sit, the fleet your asks go on and your own instructions.
 - Never, anywhere (`CARD_FORBIDDEN`): printing or sending a secret, deleting production data, force-pushing or
   rewriting history, turning off branch protection or drover's gates.
 - Owner-only, as for every lane: merge overrides, spend and secrets.
-- No host changes and no containers but through your groups and run cards, except the `drover runners` verbs
-  (#537: `status`, `revive <vm>`, `add [n]`, `remove <vm|name>`, `tokens`, `retire-local`, within `[ci_runners]`;
-  a refusal past its cap or for the last VM names the owner ask that lets it run, `--approved <id>`).
+- No host changes and no containers but through your groups and run cards.

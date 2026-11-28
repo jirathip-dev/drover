@@ -259,7 +259,7 @@ fn next(cfg: &Config, events: &[Event], head: &str) -> (Option<String>, Result<(
         f,
         None,
     );
-    (w.next_cmd, gate(f, &pr, Some(s), false).map(drop).map_err(|r| r.code))
+    (w.next_cmd, gate(f, &pr, Some(s)).map(drop).map_err(|r| r.code))
 }
 
 #[test]
@@ -327,7 +327,7 @@ fn a_verify_pass_at_an_older_sha_does_not_let_the_new_head_merge() {
 }
 
 #[test]
-fn verify_fails_count_in_revs_rounds_and_the_third_fail_parks() {
+fn verify_fails_count_in_revs_rounds_with_no_limit() {
     let d = tmpdir("verify-rounds");
     let c = ctx(&d, &config());
     let (a, b, h) = (sha("a"), sha("b"), sha("c"));
@@ -353,27 +353,25 @@ fn verify_fails_count_in_revs_rounds_and_the_third_fail_parks() {
     let shot = "FAIL\n\n- non-blocking: the badge is gone, see shots/home-390.png\n";
     spawn(1, "impl");
     spawn(2, "rev");
-    assert!(verdict("FAIL", &a, fail).contains("(round 1/3)"));
+    assert!(verdict("FAIL", &a, fail).contains("(round 1)"));
     spawn(3, "impl");
     spawn(4, "rev");
-    assert!(verdict("PASS", &b, "PASS\n").contains("(round 2/3)"));
+    assert!(verdict("PASS", &b, "PASS\n").contains("(round 2)"));
     spawn(5, "verify");
     let out = verdict("FAIL", &b, shot);
-    assert!(out.contains("(round 2/3)") && !out.contains("needs-human"), "{out}");
+    assert!(out.contains("(round 2)") && !out.contains("needs-human"), "{out}");
     spawn(6, "impl");
     spawn(7, "rev");
-    assert!(verdict("PASS", &h, "PASS\n").contains("(round 3/3)"));
+    assert!(verdict("PASS", &h, "PASS\n").contains("(round 3)"));
     spawn(8, "verify");
     let out = verdict("FAIL", &h, shot);
-    assert!(
-        out.contains("(round 3/3)") && out.contains("round limit reached → needs-human"),
-        "{out}"
-    );
+    assert!(out.contains("(round 3)") && !out.contains("needs-human"), "{out}");
     let s = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
-    assert_eq!((s.state.as_str(), s.stage_rounds["rev"]), ("needs-human", 3));
+    assert_eq!((s.state.as_str(), s.stage_rounds["rev"]), ("fix(3)", 3));
     let v = kinds(&c, "verdict").pop().unwrap();
     assert_eq!(v.str("stage"), Some("verify"));
     assert_eq!(v.val("files")[0]["name"], "shots/home-390.png");
+    ev(&c, 9, "needs-human", json!({"code": "STUCK", "reason": "stuck"}));
     let none = Fake::default();
     let s = Server::new(&c, &none, Some(ADDR.into()));
     let get = |p: &str| {
@@ -456,7 +454,7 @@ fn parity_70_shots_are_only_a_verify_verdicts_files_inside_its_lane_folder() {
     ev(&c, 3, "verdict", old);
     assert_eq!(
         drover::verify::served(&read(&c.state).unwrap(), ("sendmeter", 12), None),
-        [] as [(std::string::String, std::path::PathBuf); 0]
+        <[(std::string::String, std::path::PathBuf); 0]>::default()
     );
     assert!(get("/shot/sendmeter/12/0").starts_with("HTTP/1.1 404"));
 }

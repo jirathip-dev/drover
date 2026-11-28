@@ -1,0 +1,5 @@
+about = "no ts.net hostname, chat ID or /Users/ path in docs/ or demo/ (the export's own leak check is local/demo-leak)"
+fix = "replace the hostname, chat ID or home path with a placeholder"
+budget_secs = 5
+paths = ["docs/**", "demo/**"]
+run = "if grep -rnE '[A-Za-z0-9-]\\.ts\\.net|telegram:-?[0-9]|/Users/' docs/ demo/; then exit 1; fi"

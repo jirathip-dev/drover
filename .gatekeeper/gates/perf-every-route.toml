@@ -1,0 +1,10 @@
+about = "perf in release (#1622: every route on the live fleet's size, a remote host offline); the numbers go to the job summary"
+fix = "make the case fit its budget; a budget is raised only in its own issue"
+budget_secs = 900
+leg = "release"
+setup = ["rust", "node"]
+needs = ["quiet-host"]
+paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "assets/**", "demo/**", "web/dist/**"]
+run = '''
+cargo test --release --locked --test perf -- every_route_on_the_live_fleets_size --nocapture --test-threads=1
+'''

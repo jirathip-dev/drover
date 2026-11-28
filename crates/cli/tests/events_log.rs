@@ -64,7 +64,7 @@ fn kill9_mid_append_never_corrupts() {
         assert_eq!(after.last().unwrap().ts, 999_000 + round);
     }
     let seqs: Vec<u64> = read(&p).unwrap().iter().map(|e| e.seq).collect();
-    assert_eq!(seqs, (1..=seqs.len() as u64).collect::<Vec<_>>());
+    assert_eq!(seqs, (1..=u64::try_from(seqs.len()).unwrap()).collect::<Vec<_>>());
 }
 
 #[test]

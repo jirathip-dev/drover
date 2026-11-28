@@ -1,0 +1,19 @@
+[].block: object
+[].epic: null
+[].fleet: string
+[].handoff: null
+[].issue: number
+[].key: string
+[].kind = "ask"
+[].open: boolean
+[].prompt: null
+[].push.body: string
+[].push.tag: string
+[].push.title: string
+[].seq: number
+[].text: string
+[].to.id: string
+[].to.k = "desk"
+[].to.k = "thread"
+[].to.repo: string
+[].ts: number

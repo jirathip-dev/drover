@@ -36,26 +36,6 @@ Generated from `crates/core/flow/` (#1649) by `just gen`; CI fails when this fil
 | `asker-gone` | exited, gone | wait | owner | `ask_expire_hours` | expire | owner |  | the asking lane is gone |
 | `waiting` | none, running, limited, asleep, done | wait | owner | `ask_waiting_minutes` | remind | owner | answered | with the owner |
 
-## Flow `cap`
-
-### `asked` (file `asked`) · reads nothing
-
-| id | do | owner | timeout | then | esc | to | say |
-|---|---|---|---|---|---|---|---|
-| `settle` | tell-orchestrator | orchestrator | `escalate_minutes` | to-owner |  |  | a cap ask: raise or trim |
-
-### `near` (file `near`) · reads nothing
-
-| id | do | owner | timeout | then | esc | to | say |
-|---|---|---|---|---|---|---|---|
-| `propose` | tell-orchestrator | orchestrator | `escalate_minutes` | to-owner |  |  | near the line cap: propose a raise |
-
-### `raising` (file `raising`) · reads nothing
-
-| id | do | owner | timeout | then | esc | to | say |
-|---|---|---|---|---|---|---|---|
-| `release` | release | drive | `act_minutes` |  |  |  | the raise merged: release the asking issue |
-
 ## Flow `card`
 
 ### `approved` (file `approved`) · reads nothing
@@ -71,12 +51,6 @@ Generated from `crates/core/flow/` (#1649) by `just gen`; CI fails when this fil
 | `waiting` | wait | owner | `card_ttl_minutes` | expire | owner |  | the run card waits on the owner |
 
 ## Flow `handoff`
-
-### `pick` (file `pick`) · reads nothing
-
-| id | do | owner | timeout | then | esc | to | say |
-|---|---|---|---|---|---|---|---|
-| `waiting` | wait | owner | `ask_waiting_minutes` | remind | owner |  | the owner picks a thread |
 
 ### `picked` (file `picked`) · reads nothing
 
@@ -188,8 +162,8 @@ Generated from `crates/core/flow/` (#1649) by `just gen`; CI fails when this fil
 | `merge` | green | PASS | none | merge | drive | `gate_check_minutes` |  |  | merged, fix | PASS and CI green: merge |
 | `ci-running` | pending | PASS | none | wait | drive | `ci_stuck_minutes` | unstick-ci |  |  | CI is running |
 | `ci-not-started` | open | PASS | none | wait | drive | `ci_start_minutes` | unstick-ci, ci-fail |  |  | CI has not started |
-| `ci-red` | red | PASS | none | ci-fail | drive | `act_minutes` |  |  | fix | CI is red: a fix round |
-| `conflict` | conflicting | PASS | none | update | drive | `act_minutes` |  |  | fix | the PR conflicts: update it |
+| `ci-red` | red | PASS | none | ci-fail | drive | `act_minutes` |  |  | fix, needs-human | CI is red: a fix round |
+| `conflict` | conflicting | PASS | none | update | drive | `act_minutes` |  |  | fix, needs-human | the PR conflicts: update it |
 | `no-pr` | none | PASS | none | reconcile | drive | `act_minutes` |  | orch |  | PASS with no PR: reconcile |
 
 ### `review` (file `review`) · reads lane, host, pr, verdict, ask · in flight
@@ -198,7 +172,7 @@ Generated from `crates/core/flow/` (#1649) by `just gen`; CI fails when this fil
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `merged-outside` | | | merged | | | record-merge | drive | `act_minutes` |  |  | merged | merged outside drover: record it |
 | `pr-closed` | | | closed | | | raise-card | drive | `act_minutes` |  | orch | needs-human | PR closed outside drover: a card |
-| `record` | | | none, open, pending, red, green, conflicting | written | | record | drive | `act_minutes` |  |  | ready, fix | record the written verdict |
+| `record` | | | none, open, pending, red, green, conflicting | written | | record | drive | `act_minutes` |  |  | ready, fix, needs-human | record the written verdict |
 | `ask-open` | | | | | open | wait | owner | `ask_waiting_minutes` | remind | owner |  | waiting on the owner's answer |
 | `decided` | | | | | answered | deliver | drive | `act_minutes` |  |  |  | apply the answer |
 | `recorded-here` | | | | PASS, FAIL | none | reconcile | drive | `act_minutes` |  | orch |  | a recorded verdict at review: reconcile |

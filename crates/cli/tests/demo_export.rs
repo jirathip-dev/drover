@@ -70,7 +70,7 @@ fn demo_export_writes_the_file_set_without_running_anything() {
         .iter()
         .map(|c| c["id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, ["ask-q2", "ask-q3", "ask-q33", "nhc-acme-api-22"]);
+    assert_eq!(ids, ["ask-q2", "ask-q3", "ask-q33", "nhc-acme-api-22", "new-issue"]);
     let lanes = screen(&site, "screens/lanes").to_string();
     let mut sheets: Vec<String> = std::fs::read_dir(site.join("screens/lanes"))
         .unwrap()

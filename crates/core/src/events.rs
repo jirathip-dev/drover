@@ -275,6 +275,21 @@ pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     notify(state, cfg, &ev)
 }
 
+pub(crate) fn emit_once(state: &Path, cfg: &Config, id: &str, ev: &Event) -> Result<bool> {
+    let done = Event::new(
+        ev.ts,
+        &ev.fleet,
+        None,
+        "done",
+        serde_json::json!({"action_id": id, "step": "once"}),
+    );
+    let (_, took) = crate::db::claim(state, &[done, ev.clone()], id, &|l| l.is_none())?;
+    if took {
+        notify(state, cfg, ev)?;
+    }
+    Ok(took)
+}
+
 /// `db::ask`, then notify each event logged: they, the asks numbered, or none when `once` is logged already.
 pub fn ask(state: &Path, cfg: &Config, evs: Vec<Event>, once: Option<&str>) -> Result<Vec<Event>> {
     let evs = crate::db::ask(state, evs, once)?.unwrap_or_default();
@@ -339,6 +354,15 @@ pub fn plain(ev: &Event) -> String {
         "merged" => {
             let sha: String = s("merge_sha").chars().take(7).collect();
             format!("{who} merged → {} {sha} (PR #{})", s("into"), s("pr"))
+        }
+        "epic-landed" => {
+            let n = |k: &str| ev.val(k).as_array().map_or(0, Vec::len);
+            let d = if n("dropped") > 0 {
+                format!(" · {} dropped", n("dropped"))
+            } else {
+                String::new()
+            };
+            format!("{who} {} landed: {} issues{d}", s("title"), n("merged"))
         }
         "blocked" => format!("{who} blocked {}: {}", s("code"), s("reason")),
         "needs-decision" | "ask-owner" => {
@@ -416,14 +440,9 @@ pub struct IssueState {
     /// The latest lane's reasoning effort, as spawned.
     pub effort: Option<String>,
     pub rounds: u32,
-    /// Extra rounds the owner allowed (`round-extended`); the latest grants the round after any stage's.
-    pub extra: u32,
-    pub granted: u32,
     /// Passed `--update` rounds, apart from `rounds`; `updating` while one is open (state `fix(n)+uk`).
     pub updates: u32,
     pub updating: bool,
-    /// Update rounds the owner allowed past `update_rounds` (`round-extended` on an `UPDATE_LIMIT` card).
-    pub update_extra: u32,
     pub last_ts: u64,
     pub last_event: String,
     /// Latest agent per role (impl, rev).
@@ -439,6 +458,8 @@ pub struct IssueState {
     pub form: u32,
     /// Worktrees its lanes were spawned in (an agent: a spawn naming none) and not cleaned since.
     pub worktrees: std::collections::BTreeSet<String>,
+    /// The PR its `merged` event names: kept past the 14-day archive of its events.
+    pub pr: Option<u64>,
 }
 
 /// Per-issue state, keyed by (fleet, issue).
@@ -715,7 +736,7 @@ const WORKING: &str = concat!(
     " OR (fleet, issue) IN (SELECT fleet, issue FROM events WHERE seq > ?1 - 10000) OR type GLOB 'ask-*' OR type IN (",
     "'needs-decision', 'decision', 'queue', 'merged', 'closed', 'closed-other', 'why', ",
     "'premerge-failed', 'landed', 'revert-opened', ",
-    "'revert-failed', 'reverted', 'land-fix', 'land-bisect', 'lesson-skipped', 'compacted', 'compact-undone'",
+    "'revert-failed', 'reverted', 'land-fix', 'land-bisect', 'job-filed', 'compacted', 'compact-undone'",
     ")))"
 );
 
@@ -966,7 +987,9 @@ pub fn with_states<T>(events: &[Event], f: impl FnOnce(&States) -> T) -> T {
 
 pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
     for e in events {
-        let Some(n) = e.issue else { continue };
+        let Some(n) = e.issue.filter(|n| *n != crate::scope::LANE) else {
+            continue;
+        };
         let new = || IssueState {
             fleet: e.fleet.clone(),
             issue: n,
@@ -975,7 +998,7 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
         };
         let s = m.entry((e.fleet.clone(), n)).or_insert_with(new);
         match (e.kind.as_str(), e.str("worktree")) {
-            ("clean", Some(w)) => drop(s.worktrees.remove(w)),
+            ("clean" | "clean-settled", Some(w)) => drop(s.worktrees.remove(w)),
             ("spawn", w) => s.worktrees.extend(w.or(e.str("agent")).map(String::from)),
             (k, Some(w)) if k.starts_with("spawn") => drop(s.worktrees.insert(w.into())),
             _ => {}
@@ -1055,7 +1078,11 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
                 let (sha, stage) = (e.str("sha").unwrap_or_default(), e.str("stage").unwrap_or("verify"));
                 s.verdicts.push((sha.into(), "PASS".into(), stage.into()));
             }
-            "merged" | "closed" | "blocked" | "needs-human" | "parked" => s.state.clone_from(&e.kind),
+            "merged" | "epic-landed" => {
+                s.state = "merged".into();
+                s.pr = e.val("pr").as_u64().or_else(|| e.str("pr")?.parse().ok());
+            }
+            "closed" | "blocked" | "needs-human" | "parked" => s.state.clone_from(&e.kind),
             "closed-other" => s.state = "closed".into(),
             "design-review" => s.state = "design-review".into(),
             "design-approved" | "design-revise" => (s.state, s.lane) = ("queued".into(), None),
@@ -1070,11 +1097,6 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
             "round-extended" if s.state == "needs-human" && s.card() == "start lane" => s.state = "queued".into(),
             "round-extended" => {
                 let on = |k: &str| e.data.get(k) == Some(&Value::Bool(true));
-                if on("update") {
-                    s.update_extra += 1;
-                } else {
-                    (s.extra, s.granted) = (s.extra + 1, s.stage_rounds.values().max().unwrap_or(&0) + 1);
-                }
                 if s.state == "needs-human" && on("update") && on("spawn") {
                     s.state = "ready".into();
                 } else if s.state == "needs-human" && on("queued") {
@@ -1148,7 +1170,7 @@ pub const STATES: &[(&str, &[(&str, &str)])] = &[
         &[
             ("ready", "PASS at head"),
             ("fix(n)", "FAIL at head"),
-            ("needs-human", "ROUND_LIMIT after review_rounds"),
+            ("needs-human", "STUCK: the same blocking finding in 3 FAILs in a row"),
         ],
     ),
     (
@@ -1165,15 +1187,16 @@ pub const STATES: &[(&str, &[(&str, &str)])] = &[
         "ready",
         &[
             ("review(n)", "verify stage at head for ui_paths, a verify or repro mark"),
-            (
-                "fix(n)",
-                "update round +uN when behind or conflicting, UPDATE_LIMIT after update_rounds",
-            ),
+            ("fix(n)", "update round +uN when behind or conflicting"),
             (
                 "merged",
                 "squash-merge into one commit, with PASS at head and CI green, no STAGING_WOULD_BREAK",
             ),
             ("blocked", "merge refused, or PR closed outside drover"),
+            (
+                "needs-human",
+                "STUCK: CI red at the same check for 2 fix rounds, or still conflicting after 2 update rounds",
+            ),
         ],
     ),
     (

@@ -9,7 +9,6 @@ use serde_json::{json, Value};
 
 pub const REVIEW: &str = "drover/review";
 pub const VERIFY: &str = "drover/verify";
-pub const OVERRIDE: &str = "drover/override";
 
 /// A commit status drover posts itself: never a CI check.
 pub fn ours(name: &str) -> bool {

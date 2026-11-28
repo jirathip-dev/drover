@@ -42,9 +42,8 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
 - #1091: `GET /screens/hosts`, the page's Hosts sheet (a [⚙] row, not cooee's): one row per host, main first, then
   A→Z, with its kind, on/off and live lane count; a remote host's [Off]/[On] runs `host` (`host-off`/`host-on`) and
   the main host's [Reap N], shown while leftovers exist, runs `reap`, each confirmed; #1378: a fleet disk section shows
-  the worktree total (drive's last walk) against `worktree_budget_gb` and the orphan folders, [Remove N] running `orphans`. No gauges or charts (Beacon's). #1131: with a `shed-acp` host, a Token
-  proxy section under it holds doctor's proxy facts and [How to set], `GET /screens/proxy-token`, the token's steps.
-  #1313: the leftover count and the proxy facts are read off the request (the host sampler, `refresh`; never by a host action);
+  the worktree total (drive's last walk) against `worktree_budget_gb` and the orphan folders, [Remove N] running `orphans`. No gauges or charts (Beacon's).
+  #1313: the leftover count is read off the request (the host sampler, `refresh`; never by a host action);
 - #1305: `GET /screens/scene` (and its `/stream`), the page's Scene (page-only; the header's `[scene]` swaps the whole
   page between the screens and Scene, kept per phone; cooee draws its own scene): one `scene` block with `weather`
   (`sky` clear, windy, fog or storm from host load, memory pressure and the spawn gate; `wind`, `fog` 0–2, `storm`,
@@ -55,6 +54,14 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   dir>/themes/<name>/scene.svg` overriding it; farm, with none, gets the drawn ranch), the farm sprites from the pinned
   swag pack, one page per repo ([‹] [›], the dots, ←/→, a wheel or a drag), the repo's needs-you cards from
   `/screens/cards`, and `[A]`/`[☀]`/`[☾]` in the header (Auto: night before 07:00 and from 19:00, phone clock);
+- #1783: the last card of `/screens/cards` (paired only, so the page, the board and cooee's cards place all draw it) is
+  `new-issue`: a repo chip, a line and [+] for a screenshot. Its `new-issue` action logs a `scope-request` (once per
+  `req`) and starts that repo's one `scope` lane (`drover spawn <fleet> 0 scope`, on the main host) once the reply is
+  sent; a second request waits. Each open request is a row, `scoping` or `waits`, whose [Drop] (`scope-drop`, behind
+  its confirm) files nothing and closes a running lane. The lane is read-only (no edit, commit, spawn or merge); it asks
+  through `drover ask <fleet> -` (never `IN_SCOPE`: scoping is the owner's call) and posts its draft with `drover draft`, an ask whose `approve` makes drover file
+  exactly that title and body and queue it with the draft's `--mark`s, `drop` files nothing, and a typed note goes to
+  the lane as a revise; approve and drop close the lane and the next waiting request starts;
 - `GET /screens/<x>` answers from the hub (#1372, `serve/hub.rs`): each screen is built once per change for every
   reader, and only when a signal it depends on moved (the log, the snapshot, a background read, the config, the gh
   cache folder, a 30 s clock); a read of a stale screen nobody is building builds it, others wait for that build. It
@@ -64,6 +71,9 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   one publisher thread rebuilds the screens open streams hold (each second, at once after a write but at most once a second a screen, asleep while none
   is held) and hands each stream the diff; no server-wide stream cap, 16 a device;
 - `POST /action` `{screen, block, action, values}`: an action not in the manifest's `[permissions]` actions is 403;
-  each other runs the board's own op (a refusal is 409 with its line).
+  each other runs the board's own op (a refusal is 409 with its line);
+- `GET /api/v1/manifest` (#1774): the plugin's name, version, `api` URL, `actions` and `destructive`, the `[threads]`
+  paths, and its `screens`, one place each: `type` (header-strip, chat-cards or menu-row, `kind` in Rust), `id`,
+  `persona`, `label`, `subtitle` and `screen`; `cooee-plugin.toml` is `just gen`'s rendering of it.
 
 Tests: `crates/cli/tests/cooee_screens.rs` against cooee's fixtures in `crates/cli/tests/golden/cooee/`.

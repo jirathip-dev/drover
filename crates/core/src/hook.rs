@@ -22,8 +22,6 @@ pub struct Policy {
     pub groups: Vec<String>,
     /// The lane's `DROVER_SCRATCH_TARGET` (`<build_root>/.scratch/<agent>`): Cargo and Swift build only under its `build_root`.
     pub scratch: Option<String>,
-    /// An impl lane: `ci/cap.toml` is not its to write (but for the orchestrator-filed raise).
-    pub cap: bool,
     /// A design lane: its edits land only under its issue's design paths.
     pub design: Option<Design>,
     /// A public fleet's text check (`PUBLIC_LEAK`); none for a private repo.
@@ -50,9 +48,6 @@ pub struct Rules {
     /// Its fleet's heavy kinds under its host's slot limits (none: no heavy patterns).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub heavy: Option<crate::heavy::Heavy>,
-    /// A `cap:` issue's lane, frozen at spawn from the main host's title cache.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub cap_raise: bool,
     /// A public fleet's text check, resolved where a runner can read the repo's visibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hygiene: Option<crate::hygiene::Check>,
@@ -70,23 +65,16 @@ impl Rules {
         let mut branches: Vec<String> = ["main", "master", "staging"].map(String::from).to_vec();
         branches.extend(cfg.fleet.values().map(|f| f.integration.clone()));
         let family = f.map(|f| f.family(role));
-        let h = cfg.hosts.get(host);
-        let heavy = f.filter(|f| !f.heavy.is_empty()).map(|f| crate::heavy::Heavy {
-            kinds: f.heavy.clone(),
-            max: h.and_then(|h| h.heavy_max).unwrap_or(3),
-            kind_max: h.map(|h| h.heavy_kind_max.clone()).unwrap_or_default(),
-            wait_minutes: h.and_then(|h| h.heavy_wait_minutes).unwrap_or(30),
-            routes: f.remote.clone(),
-            never: f.never_routed(),
-        });
+        let heavy = f
+            .map(|f| Heavy::of(f, cfg.hosts.get(host)))
+            .filter(|h| !h.kinds.is_empty());
         Rules {
             heavy,
             branches,
             deny,
             groups: cfg.orchestrator.groups().into_iter().map(String::from).collect(),
-            reviewer: family == Some("rev") || role == "triage",
-            builds: !matches!(role, "lesson" | "triage") && family == Some("impl"),
-            cap_raise: false,
+            reviewer: family == Some("rev") || matches!(role, "triage" | "scope"),
+            builds: !matches!(role, "lesson" | "triage" | "scope") && family == Some("impl"),
             hygiene: None,
         }
     }
@@ -116,20 +104,60 @@ pub fn lane_rules(ctx: &crate::Ctx, lane: &str) -> Result<Rules, String> {
     })
 }
 
+/// Lane `fleet:issue:role`'s policy and heavy kinds, as both hook entries judge a call in `cwd` (`reviewer`: `--role rev`).
+pub fn policy(
+    ctx: &crate::Ctx,
+    r: &dyn crate::runner::Runner,
+    lane: &str,
+    reviewer: bool,
+    cwd: Option<&str>,
+) -> Result<(Policy, Option<Heavy>), String> {
+    let rules = lane_rules(ctx, lane)?;
+    let mut it = lane.split(':');
+    let (fleet, n) = (it.next().unwrap_or_default(), it.next().and_then(|n| n.parse().ok()));
+    let dir = |p: &PathBuf| p.parent().unwrap_or(p).to_string_lossy().into_owned();
+    let mut paths = vec![
+        dir(&ctx.config),
+        dir(&ctx.state),
+        crate::config::home()
+            .join(".config/fleet-operations")
+            .to_string_lossy()
+            .into(),
+    ];
+    paths.extend(crate::config::env("DROVER_RULES"));
+    let orchestrator = lane.split(':').nth(2).is_some_and(crate::orchestrator::is_role);
+    let thread = crate::config::env("DROVER_THREAD").unwrap_or_default();
+    let cfg = Config::load(&ctx.config)
+        .ok()
+        .filter(|_| orchestrator && !thread.is_empty() && !thread.contains(['/', '.']));
+    let own = cfg.map(|cfg| {
+        crate::orchestrator::dir(ctx, &cfg, &thread)
+            .to_string_lossy()
+            .into_owned()
+    });
+    let policy = Policy {
+        branches: rules.branches,
+        paths,
+        reviewer: reviewer || rules.reviewer,
+        deny: rules.deny,
+        orchestrator,
+        own,
+        groups: rules.groups,
+        scratch: crate::config::env("DROVER_SCRATCH_TARGET").filter(|s| !s.is_empty()),
+        design: (lane.split(':').nth(2) == Some("design")).then(|| crate::design::scope(ctx, r, cwd, fleet, n)),
+        hygiene: rules.hygiene,
+    };
+    Ok((policy, rules.heavy))
+}
+
 /// Lane spawn `sp` froze rules (a remote lane's) that fleet.toml now resolves otherwise: a respawn takes them.
 pub fn rules_stale(cfg: &Config, fleet: &str, sp: &crate::events::Event) -> bool {
     let (role, host) = (sp.str("role").unwrap_or_default(), sp.str("host").unwrap_or_default());
-    let cap_raise = sp
-        .data
-        .get("rules")
-        .and_then(|r| r.get("cap_raise"))
-        .and_then(serde_json::Value::as_bool);
     let hygiene = sp
         .data
         .get("rules")
         .and_then(|r| serde_json::from_value(r.get("hygiene")?.clone()).ok());
     let now = Rules {
-        cap_raise: cap_raise.unwrap_or_default(),
         hygiene,
         ..Rules::resolve(cfg, fleet, role, host)
     };
@@ -150,16 +178,6 @@ const GIT_WRITES: &[&str] = &[
 const WRITERS: &[&str] = &[
     "rm", "mv", "cp", "tee", "truncate", "chmod", "ln", "install", "dd", "sips",
 ];
-
-/// The repo's line cap file and its folder of raises; one orchestrator-filed issue raises it for the queue.
-pub const CAP_PATHS: &[&str; 2] = &["ci/cap.toml", "ci/cap.d/"];
-pub const NO_CAP_EDIT: &str =
-    "REFUSED CAP_FILE: a lane never edits ci/cap.toml or ci/cap.d/; when your PR would cross \
-                               the cap, run `drover cap <fleet>` and ask with its view (#668)";
-
-fn cap_path(w: &str) -> bool {
-    w.ends_with(CAP_PATHS[0]) || w.contains(CAP_PATHS[1])
-}
 
 /// Lanes share one user, so a pattern kill reaches every lane (BSD `pkill x -n` matched them all).
 pub const NO_BROAD_KILL: &str = "REFUSED NO_BROAD_KILL: lanes stop only their own processes: start with \
@@ -210,31 +228,72 @@ pub fn pre_call(input: &Value) -> bool {
     ev.is_empty() || dialects().any(|d| d.pre == ev)
 }
 
-/// Some(reason) denies a shell (`Bash`) or file-writing call; `git` runs git in a dir (its HEAD, its remote).
-pub fn decide(input: &Value, p: &Policy, git: &dyn Fn(&str, &[&str]) -> Option<String>) -> Option<String> {
-    let cur_branch = |d: &str| git(d, &["rev-parse", "--abbrev-ref", "HEAD"]);
-    let origin = |d: &str| git(d, &["remote", "get-url", "origin"]);
+/// One tool call as the rules see it, whoever sent it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Call {
+    Shell { cmd: String, cwd: String },
+    Write { files: Vec<String> },
+    Mode,
+    Free,
+}
+
+/// A lane keeps the permission mode it started in.
+pub const MODE_SWITCH: &str = "REFUSED MODE_SWITCH: a lane keeps the permission mode it started in";
+
+/// The files a write names: a patch text's own file lines, else the one path.
+pub fn patched(file: &str) -> Vec<String> {
+    let names: Vec<String> = (file.lines())
+        .filter_map(|l| l.strip_prefix("*** "))
+        .filter_map(|l| l.split_once(" File: ").map(|(_, f)| f).or(l.strip_prefix("Move to: ")))
+        .map(|f| f.trim().to_string())
+        .collect();
+    if file.starts_with("*** ") && !names.is_empty() {
+        names
+    } else {
+        vec![file.to_string()]
+    }
+}
+
+/// The call a hook-format `input` makes, from its `tool_name` and tool input.
+pub fn call(input: &Value) -> Call {
     let tool = input["tool_name"].as_str().unwrap_or_default();
     let ti = tool_input(input);
     if dialects().any(|d| d.shell == tool) {
-        let cmd = ti["command"].as_str().unwrap_or_default();
-        let cwd = input["cwd"].as_str().unwrap_or(".");
-        let leak = p
-            .hygiene
-            .as_ref()
-            .and_then(|c| crate::hygiene::gh_text(c, cmd, cwd, &origin));
-        return leak.or_else(|| bash(cmd, cwd, p, &cur_branch));
+        let cmd = ti["command"].as_str().unwrap_or_default().into();
+        return Call::Shell {
+            cmd,
+            cwd: input["cwd"].as_str().unwrap_or(".").into(),
+        };
     }
     if !dialects().any(|d| d.edits.contains(&tool)) {
-        return None;
+        return Call::Free;
     }
     let file = ["file_path", "notebook_path", "path", "patch", "command"]
         .iter()
         .find_map(|k| ti[k].as_str())
         .unwrap_or_default();
-    if p.cap && CAP_PATHS.iter().any(|c| file.contains(c)) {
-        return Some(NO_CAP_EDIT.into());
+    Call::Write { files: patched(file) }
+}
+
+/// Some(reason) denies a call; `git` runs git in a dir (its HEAD, its remote).
+pub fn decide(call: &Call, p: &Policy, git: &dyn Fn(&str, &[&str]) -> Option<String>) -> Option<String> {
+    let cur_branch = |d: &str| git(d, &["rev-parse", "--abbrev-ref", "HEAD"]);
+    let origin = |d: &str| git(d, &["remote", "get-url", "origin"]);
+    match call {
+        Call::Shell { cmd, cwd } => {
+            let leak = p
+                .hygiene
+                .as_ref()
+                .and_then(|c| crate::hygiene::gh_text(c, cmd, cwd, &origin));
+            leak.or_else(|| bash(cmd, cwd, p, &cur_branch))
+        }
+        Call::Write { files } => files.iter().find_map(|f| write(f, p)),
+        Call::Mode => Some(MODE_SWITCH.into()),
+        Call::Free => None,
     }
+}
+
+fn write(file: &str, p: &Policy) -> Option<String> {
     if let Some(pp) = protected_path(file, p).filter(|_| !own_file(file, p)) {
         return Some(format!(
             "{file} is protected ({pp}); change it only through `drover` (e.g. `drover set`)"
@@ -249,25 +308,14 @@ pub fn decide(input: &Value, p: &Policy, git: &dyn Fn(&str, &[&str]) -> Option<S
 
 fn design_write(file: &str, p: &Policy) -> Option<String> {
     let d = p.design.as_ref()?;
-    let patched: Vec<&str> = (file.lines())
-        .filter_map(|l| l.strip_prefix("*** "))
-        .filter_map(|l| l.split_once(" File: ").map(|(_, f)| f).or(l.strip_prefix("Move to: ")))
-        .map(str::trim)
-        .collect();
-    let files = if file.starts_with("*** ") { patched } else { vec![file] };
-    let ok = |f: &&str| {
-        let f = resolve(f, &d.root);
-        let rel = Path::new(&f).strip_prefix(&d.root);
-        rel.is_ok_and(|rel| d.allow.iter().any(|a| rel.starts_with(a)))
-    };
-    let bad = files
-        .iter()
-        .find(|f| !ok(f))
-        .copied()
-        .or(files.is_empty().then_some(file))?;
+    let f = resolve(file, &d.root);
+    let rel = Path::new(&f).strip_prefix(&d.root);
+    if rel.is_ok_and(|rel| d.allow.iter().any(|a| rel.starts_with(a))) {
+        return None;
+    }
     let allow = d.allow.iter().map(|a| format!("{a}/")).collect::<Vec<_>>().join(", ");
     Some(format!(
-        "REFUSED DESIGN_PATH: a design lane writes only under {allow}, not {bad} (#868)"
+        "REFUSED DESIGN_PATH: a design lane writes only under {allow}, not {file} (#868)"
     ))
 }
 
@@ -382,10 +430,6 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         let writer = !drover
             && (w.iter().any(|w| WRITERS.contains(w))
                 || (w.iter().any(|w| *w == "sed" || *w == "perl") && w.iter().any(|w| w.starts_with("-i"))));
-        let cap = |w: &String| cap_path(w);
-        if p.cap && (targets.iter().any(cap) || writer && toks.iter().any(cap)) {
-            return Some(NO_CAP_EDIT.into());
-        }
         let paths = |w: &str| -> Vec<String> {
             (w.split(['=', '>']))
                 .flat_map(|w| match w.strip_prefix('-') {
@@ -840,20 +884,26 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     if block && r.iter().enumerate().skip(3).any(other) {
         return Some("REFUSED OWN_ISSUE: a lane may `queue block`/`unblock` only its own issue (#425)".into());
     }
-    if !orchestrator && r.first() == Some(&"lesson") && !matches!(r.get(1), Some(&"digest" | &"apply")) {
-        return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover lesson` (#419)".into());
-    }
-    if !orchestrator && r.first() == Some(&"deps") {
-        return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover deps` (#1488)".into());
+    if !orchestrator && r.first() == Some(&"job") && r.len() > 2 {
+        return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs a job by hand (#1756)".into());
     }
     let triage = lane.split(':').nth(2) == Some("triage");
+    if lane.split(':').nth(2) == Some("scope") && matches!(r.first(), Some(&("spawn" | "merge"))) {
+        return Some(
+            "REFUSED SCOPE_ONLY: a scope lane asks and drafts one issue; it never spawns or merges (#1783)".into(),
+        );
+    }
     let acts = matches!(r.get(1), Some(&("close" | "fold" | "label" | "docs")));
     if !orchestrator && r.first() == Some(&"triage") && !(acts && triage) {
         return Some(
-            "REFUSED ORCHESTRATOR_ONLY: an orchestrator or the owner runs `drover triage <fleet>`; only a triage lane \
-             closes, folds, labels or files docs (#1100)"
+            "REFUSED ORCHESTRATOR_ONLY: only a triage lane, an orchestrator or the owner closes, folds, labels or files \
+             docs (#1100)"
                 .into(),
         );
+    }
+    let epic = r.first() == Some(&"queue") && r.iter().any(|w| w.split('=').next() == Some("--epic"));
+    if !orchestrator && (r.first() == Some(&"epic") || epic) {
+        return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner changes an epic (#1786)".into());
     }
     if !orchestrator && r.first() == Some(&"amend") {
         return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover amend` (#574)".into());
@@ -877,11 +927,6 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     }
     if r.first() == Some(&"setup") {
         return Some("REFUSED OWNER_ONLY: only the owner runs `drover setup`, never a lane (#303)".into());
-    }
-    if r.first() == Some(&"proxy") || r.first() == Some(&"hosts") && r.contains(&"revoke") {
-        return Some(
-            "REFUSED OWNER_ONLY: only the owner runs the token proxy or revokes its keys, never a lane (#637)".into(),
-        );
     }
     if !orchestrator && r.first() == Some(&"spawn") && r.contains(&"--force") {
         return Some(
@@ -1131,7 +1176,7 @@ pub fn heavy(input: &Value, h: &Heavy, exe: &str, git: &dyn Fn(&str, &[&str]) ->
     let mut ti = tool_input(input).clone();
     let cmd = ti.at("command").as_str()?;
     let kind = h.kind(cmd)?;
-    let cwd = input.at("cwd").as_str().filter(|_| h.route(kind, cmd).is_some());
+    let cwd = input.at("cwd").as_str().filter(|_| h.routes.contains_key(kind));
     let dir = cwd
         .and_then(|d| git(d, &["rev-parse", "--show-toplevel"]))
         .filter(|t| !t.is_empty());
