@@ -85,7 +85,7 @@ spec settles them?
 - **Routing.** `home(fleet, issue)` is the attached chat that filed or queued the issue, unless its repo is `none`;
   else `{"k": "desk", "repo": fleet}`, which from D4 names no thread: it is the repo's owner cards, on drover's board,
   TUI and page and in a client's cards place. Rows about a chat itself go to that chat.
-- **The judge lane (#1609).** For each open lane ask and each needs-human card drive spawns one judge lane: role
+- **The judge lane (#1609). Superseded by #1813: no judge is built.** For each open lane ask and each needs-human card drive spawns one judge lane: role
   `judge`, the orchestrator role's harness and model unless `[fleet.<n>.role.judge]` sets one, no worktree, read-only
   on code, its brief the rulebook's judging part plus the ask or card, the issue's spec with its Amendments and the
   issue's past decisions. It answers with `--basis` (or `extend --basis` on a needs-human card) when those settle it,
@@ -126,6 +126,12 @@ spec settles them?
 - The thread uploads folder stays on disk after D4. Deleting it is data deletion: an owner run card, not a slice.
 
 ## The judge lane
+
+**Superseded by #1813: no judge lane, `judge` role, `judge_minutes` / `judge_max` keys, `by: judge` decisions or
+digest is built.** A lane decides every in-scope choice itself and notes it in its PR body under `## Decisions`; a
+lane's `drover ask` names an owner topic (else `REFUSED IN_SCOPE`) and goes straight to the owner as a card; the
+#1809 stuck card goes to the owner as a card, never to a thread. The table below is kept as the record of the
+dropped plan.
 
 | Item | Value |
 |---|---|

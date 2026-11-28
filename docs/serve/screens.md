@@ -59,7 +59,7 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   `req`) and starts that repo's one `scope` lane (`drover spawn <fleet> 0 scope`, on the main host) once the reply is
   sent; a second request waits. Each open request is a row, `scoping` or `waits`, whose [Drop] (`scope-drop`, behind
   its confirm) files nothing and closes a running lane. The lane is read-only (no edit, commit, spawn or merge); it asks
-  through `drover ask <fleet> -` and posts its draft with `drover draft`, an ask whose `approve` makes drover file
+  through `drover ask <fleet> -` (never `IN_SCOPE`: scoping is the owner's call) and posts its draft with `drover draft`, an ask whose `approve` makes drover file
   exactly that title and body and queue it with the draft's `--mark`s, `drop` files nothing, and a typed note goes to
   the lane as a revise; approve and drop close the lane and the next waiting request starts;
 - `GET /screens/<x>` answers from the hub (#1372, `serve/hub.rs`): each screen is built once per change for every

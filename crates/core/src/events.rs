@@ -275,6 +275,22 @@ pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     notify(state, cfg, &ev)
 }
 
+/// `emit` once per action id `id` (#509): the event and its `done` row in one transaction; false when logged already.
+pub fn emit_once(state: &Path, cfg: &Config, id: &str, ev: &Event) -> Result<bool> {
+    let done = Event::new(
+        ev.ts,
+        &ev.fleet,
+        None,
+        "done",
+        serde_json::json!({"action_id": id, "step": "once"}),
+    );
+    let (_, took) = crate::db::claim(state, &[done, ev.clone()], id, &|l| l.is_none())?;
+    if took {
+        notify(state, cfg, ev)?;
+    }
+    Ok(took)
+}
+
 /// `db::ask`, then notify each event logged: they, the asks numbered, or none when `once` is logged already.
 pub fn ask(state: &Path, cfg: &Config, evs: Vec<Event>, once: Option<&str>) -> Result<Vec<Event>> {
     let evs = crate::db::ask(state, evs, once)?.unwrap_or_default();
@@ -339,6 +355,15 @@ pub fn plain(ev: &Event) -> String {
         "merged" => {
             let sha: String = s("merge_sha").chars().take(7).collect();
             format!("{who} merged → {} {sha} (PR #{})", s("into"), s("pr"))
+        }
+        "epic-landed" => {
+            let n = |k: &str| ev.val(k).as_array().map_or(0, Vec::len);
+            let d = if n("dropped") > 0 {
+                format!(" · {} dropped", n("dropped"))
+            } else {
+                String::new()
+            };
+            format!("{who} {} landed: {} issues{d}", s("title"), n("merged"))
         }
         "blocked" => format!("{who} blocked {}: {}", s("code"), s("reason")),
         "needs-decision" | "ask-owner" => {
@@ -434,6 +459,8 @@ pub struct IssueState {
     pub form: u32,
     /// Worktrees its lanes were spawned in (an agent: a spawn naming none) and not cleaned since.
     pub worktrees: std::collections::BTreeSet<String>,
+    /// The PR its `merged` event names: kept past the 14-day archive of its events.
+    pub pr: Option<u64>,
 }
 
 /// Per-issue state, keyed by (fleet, issue).
@@ -1052,7 +1079,11 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
                 let (sha, stage) = (e.str("sha").unwrap_or_default(), e.str("stage").unwrap_or("verify"));
                 s.verdicts.push((sha.into(), "PASS".into(), stage.into()));
             }
-            "merged" | "closed" | "blocked" | "needs-human" | "parked" => s.state.clone_from(&e.kind),
+            "merged" | "epic-landed" => {
+                s.state = "merged".into();
+                s.pr = e.val("pr").as_u64().or_else(|| e.str("pr")?.parse().ok());
+            }
+            "closed" | "blocked" | "needs-human" | "parked" => s.state.clone_from(&e.kind),
             "closed-other" => s.state = "closed".into(),
             "design-review" => s.state = "design-review".into(),
             "design-approved" | "design-revise" => (s.state, s.lane) = ("queued".into(), None),

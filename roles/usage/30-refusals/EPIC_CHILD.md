@@ -1,0 +1,1 @@
+- EPIC_CHILD: epic add, queue add --epic: a child is already in another open epic; it names the `epic … rm` that frees it

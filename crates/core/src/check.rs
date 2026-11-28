@@ -1760,6 +1760,10 @@ pub(crate) fn closed_on_github(
             .map(|s| s.issue)
             .collect();
         open.extend((crate::queue::replay(&ev, name).iter().map(|i| i.issue)).filter(|n| state(*n).is_none()));
+        let watched: Vec<u64> = (crate::epic::watched(&ev, &st, name).into_iter())
+            .filter(|n| !open.contains(n))
+            .collect();
+        open.extend(watched);
         open.retain(|n| gh::cached_pr(ctx, name, *n).at("state") != "MERGED");
         let Ok(closed) = gh::closed(ctx, r, f, name, &open, ctx.now) else {
             continue;

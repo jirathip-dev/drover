@@ -3,6 +3,7 @@ fix = "drop what serve keeps per stream, read or pass; its memory must not grow 
 budget_secs = 900
 leg = "release-hub"
 setup = ["rust", "node"]
+needs = ["quiet-host"]
 paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "assets/**", "demo/**", "web/dist/**"]
 run = '''
 if [ "${GITHUB_EVENT_NAME:-}" != push ] || [ "${GITHUB_REF:-}" != refs/heads/staging ]; then echo "soak: a push to staging runs it"; exit 0; fi

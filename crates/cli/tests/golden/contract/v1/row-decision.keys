@@ -1,4 +1,5 @@
 [].block: object
+[].epic: null
 [].fleet: string
 [].handoff: null
 [].issue: number

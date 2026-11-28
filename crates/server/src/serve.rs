@@ -2058,6 +2058,7 @@ impl<'a> Server<'a> {
                 done_n: done.len(),
                 backlog,
                 config: config_sheet(ctx, cfg, f, fc, st),
+                epics: crate::epic::open(ctx, events, st, f),
                 ..QueueCard::default()
             };
             if fc.paused {

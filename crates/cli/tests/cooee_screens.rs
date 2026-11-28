@@ -1421,3 +1421,20 @@ fn a_review_queue_wait_alone_never_makes_a_stuck_row() {
     let md = card["blocks"][0]["markdown"].as_str().unwrap().to_string();
     assert!(md.contains("#20") && !md.contains("#17"), "{md}");
 }
+
+#[test]
+fn the_queue_with_an_epic_draws_with_the_fixtures_block_keys_only() {
+    let (c, r) = recorded("cooee-epic");
+    let d = json!({"op": "add", "parent": 24, "issues": [9, 17, 30], "title": "Payments API v2"});
+    append(&c.state, &Event::new(T - 100, "sendmeter", None, "epic", d)).unwrap();
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let (status, q) = req(&s, T, "GET", "/screens/queue", "", "");
+    assert_eq!(status, 200, "{q}");
+    like(&q, "queue", false);
+    assert_eq!(find(&q, "epics-sendmeter")["header"], "epics (1)");
+    assert_eq!(find(&q, "epic-sendmeter-24")["badge"]["text"], "1/3 merged");
+    assert_eq!(find(&q, "ep-sendmeter-17")["indent"], 1);
+    let (_, folded) = req(&s, T, "GET", "/screens/queue?fold=sendmeter-24", "", "");
+    like(&folded, "queue", false);
+    assert_eq!(find(&folded, "epic-fold-sendmeter-24")["title"], "▸ 3 children of #24");
+}

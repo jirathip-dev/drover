@@ -1,1 +1,0 @@
-- NO_RECOMMENDATION: ask: `--kind routine` without `--recommend`

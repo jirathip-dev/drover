@@ -152,7 +152,7 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
         .into_iter()
         .rfind(|e| e.kind == "needs-decision")
         .unwrap();
-    assert_eq!(q.str("routed"), Some(COOEE), "{:?}", q.data);
+    assert_eq!(q.str("routed"), None, "a lane ask goes to the owner: {:?}", q.data);
     assert!(
         !r.calls.borrow().iter().any(|c| c.starts_with("shed send")) && !b.methods().iter().any(|m| m == "send"),
         "{:?} {:?}",
@@ -186,7 +186,7 @@ fn bearer() -> String {
 }
 
 #[test]
-fn a_lane_ask_to_an_attached_chat_starts_no_session_and_its_row_carries_the_routing_line() {
+fn a_lane_ask_to_an_attached_chat_starts_no_session_and_goes_to_the_owner() {
     let (c, b, r) = chat("attach-lane-ask");
     let on = b.on(&r);
     let s = Server::new(&c, &on, Some("127.0.0.1:7777".into()));
@@ -210,15 +210,14 @@ fn a_lane_ask_to_an_attached_chat_starts_no_session_and_its_row_carries_the_rout
     );
     let rows = call(&s, &bearer(), ("GET", &format!("/api/v1/thread/{COOEE}/rows")), "");
     let rows = rows["rows"].as_array().unwrap();
-    let row = rows
-        .iter()
-        .find(|r| r["kind"] == "system")
-        .unwrap_or_else(|| panic!("{rows:?}"));
-    let prompt = row["prompt"].as_str().unwrap();
-    assert!(
-        prompt.starts_with("lane ask q1 on #12") && prompt.contains("drover answer sendmeter q1"),
-        "{row}"
-    );
+    assert!(!rows.iter().any(|r| r["kind"] == "system"), "no routing row: {rows:?}");
+    let q = read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .rfind(|e| e.kind == "needs-decision")
+        .unwrap();
+    assert_eq!((q.str("routed"), q.str("thread")), (None, None), "{:?}", q.data);
 }
 
 #[test]

@@ -185,6 +185,32 @@ fn approving_the_draft_files_exactly_its_body_and_queues_it_and_dropping_files_n
     let (code, out) = run(&c, &r, &["draft", "sendmeter", "--title", "t", "--body", "b"]);
     assert!(code == 3 && out.contains("NO_SCOPE"), "{code} {out}");
     running(&c, "new-1");
+    let asked = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
+        .args([
+            "ask",
+            "sendmeter",
+            "-",
+            "Per key or per IP?",
+            "--option",
+            "key",
+            "--option",
+            "ip",
+            "--recommend",
+            "1",
+        ])
+        .env_remove("FLEET_LANE")
+        .env("DROVER_LANE", "sendmeter:0:scope")
+        .env("FLEET_CONFIG", &c.config)
+        .env("FLEET_STATE", &c.state)
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&asked.stdout).into_owned();
+    assert!(
+        asked.status.success() && !said.contains("IN_SCOPE"),
+        "a scope lane's question reaches the owner: {said}"
+    );
+    let q = kinds(&c, "needs-decision").pop().unwrap();
+    assert_eq!((q.str("agent"), q.issue), (Some("sendmeter-scope-0"), None), "{q:?}");
     let id = draft(&c, &r, &["repro"]);
     let ask = kinds(&c, "needs-decision").pop().unwrap();
     assert_eq!(
