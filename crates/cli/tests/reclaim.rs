@@ -230,25 +230,13 @@ fn the_shared_build_folder_is_trimmed_past_its_budget_except_a_building_profile(
     );
 }
 
-#[test]
-fn over_build_budget_an_idle_live_lanes_folder_is_trimmed_but_a_working_or_building_one_stays() {
-    let d = tmpdir("reclaim-idle-live");
-    let root = d.join("worktrees/.build");
-    let cfg = CONFIG.replace("build_root = \"\"", "build_budget_gb = 0");
-    let c = ctx(&d, &cfg);
+fn idle_lane_events(c: &drover::Ctx) {
     let ev = |issue: u64, kind: &str, d: serde_json::Value| {
         append(&c.state, &Event::new(10, "sendmeter", Some(issue), kind, d)).unwrap();
     };
     let spawn = |issue: u64, role: &str| {
         let agent = format!("sendmeter-{role}-{issue}");
         ev(issue, "spawn", json!({"role": role, "agent": agent, "pane": "p1"}));
-    };
-    let profile = |agent: &str| {
-        let dir = root.join(agent).join("debug");
-        std::fs::create_dir_all(dir.join("deps")).unwrap();
-        std::fs::write(dir.join("deps/blob"), vec![0u8; 4096]).unwrap();
-        std::fs::write(dir.join(".cargo-lock"), "").unwrap();
-        dir
     };
     spawn(1, "impl");
     ev(1, "needs-human", json!({"why": "ROUND_LIMIT"}));
@@ -262,6 +250,24 @@ fn over_build_budget_an_idle_live_lanes_folder_is_trimmed_but_a_working_or_build
     spawn(4, "impl");
     spawn(5, "impl");
     ev(5, "needs-human", json!({"why": "ROUND_LIMIT"}));
+}
+
+fn build_profile(root: &Path, agent: &str) -> PathBuf {
+    let dir = root.join(agent).join("debug");
+    std::fs::create_dir_all(dir.join("deps")).unwrap();
+    std::fs::write(dir.join("deps/blob"), vec![0u8; 4096]).unwrap();
+    std::fs::write(dir.join(".cargo-lock"), "").unwrap();
+    dir
+}
+
+#[test]
+fn over_build_budget_an_idle_live_lanes_folder_is_trimmed_but_a_working_or_building_one_stays() {
+    let d = tmpdir("reclaim-idle-live");
+    let root = d.join("worktrees/.build");
+    let cfg = CONFIG.replace("build_root = \"\"", "build_budget_gb = 0");
+    let c = ctx(&d, &cfg);
+    idle_lane_events(&c);
+    let profile = |agent: &str| build_profile(&root, agent);
     let sh = FakeShed::attached(&c);
     let agents = ["impl-1", "impl-2", "impl-3", "impl-4", "impl-5", "rev-3", "rev-6"].map(|a| format!("sendmeter-{a}"));
     for a in &agents {
