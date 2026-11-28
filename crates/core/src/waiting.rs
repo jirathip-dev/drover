@@ -721,8 +721,7 @@ pub fn scan_where(
     let listed = view.as_ref().map(crate::link::view::View::sessions).unwrap_or_default();
     let busy = |l: &str| agents.iter().any(|a| a.name == l && a.busy());
     let hung = crate::roots::hung_now(events);
-    let probed = std::cell::OnceCell::new();
-    let starts = crate::starts::line(cfg, events, ctx.now);
+    let (probed, starts) = (std::cell::OnceCell::new(), crate::starts::line(cfg, events, ctx.now));
     let mine = |st: &crate::events::States| {
         st.values()
             .filter(|s| cfg.fleet.contains_key(&s.fleet) && !s.settled() && keep(s))
@@ -953,8 +952,7 @@ pub fn scan_where(
         {
             (w.who, w.what, w.next_cmd, w.promise) = ("none", t, None, None);
         }
-        let sp = lane_sp;
-        if sp.is_some_and(|e| crate::hook::rules_stale(cfg, &s.fleet, e)) {
+        if lane_sp.is_some_and(|e| crate::hook::rules_stale(cfg, &s.fleet, e)) {
             w.what += " · rules stale";
         }
         let gone = || gh::missing(ctx, live.then_some(r), cfg, (&s.fleet, s.issue), mine, &pr);
