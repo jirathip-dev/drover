@@ -98,36 +98,36 @@ pub fn local(ctx: &Ctx, cfg: &Config) -> Vec<PathBuf> {
 
 /// #1641: the cache variables of a lane starting on this host under `root`, when its `[hosts]` entry sets `cache_size`.
 pub fn cache_env(cfg: &Config, root: &Path) -> Vec<(String, String)> {
+    let at = |n: &str| root.join(CACHE).join(n).display().to_string();
     let size = cfg
         .hosts
         .values()
         .find(|h| h.machine.is_none())
         .and_then(|h| h.cache_size.clone());
-    let d = root.join(CACHE);
-    let at = |n: &str| d.join(n).display().to_string();
-    size.map_or_else(Vec::new, |size| {
-        vec![
-            ("RUSTC_WRAPPER".into(), "sccache".into()),
-            ("SCCACHE_DIR".into(), at("sccache")),
-            ("SCCACHE_CACHE_SIZE".into(), size),
-            ("npm_config_store_dir".into(), at("pnpm")),
+    let vars = size.map(|s| {
+        [
+            ("RUSTC_WRAPPER", "sccache".into()),
+            ("SCCACHE_DIR", at("sccache")),
+            ("SCCACHE_CACHE_SIZE", s),
+            ("npm_config_store_dir", at("pnpm")),
         ]
-    })
+    });
+    vars.into_iter().flatten().map(|(k, v)| (k.into(), v)).collect()
 }
 
-/// #1641: `shared cache <dir>: <GB> (kept)` for each shared cache folder on this host's roots.
-pub fn caches(ctx: &Ctx, cfg: &Config) -> Vec<String> {
+/// #1641: a `shared cache <dir>: <GB> (kept)` line for each shared cache folder on this host's roots.
+pub fn caches(ctx: &Ctx, cfg: &Config) -> String {
     let dirs = local(ctx, cfg)
         .into_iter()
         .flat_map(|r| ["sccache", "pnpm"].map(|n| r.join(CACHE).join(n)));
-    let size = |d: PathBuf| {
+    let line = |d: PathBuf| {
         format!(
-            "shared cache {}: {:.2} GB (kept)",
+            "shared cache {}: {:.2} GB (kept)\n",
             d.display(),
             crate::check::gb(crate::check::du(&d))
         )
     };
-    dirs.filter(|d| d.is_dir()).map(size).collect()
+    dirs.filter(|d| d.is_dir()).map(line).collect()
 }
 
 /// This host's roots whose listing answered this pass.

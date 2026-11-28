@@ -1616,9 +1616,7 @@ pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &m
     total += sweep_off(ctx, cfg, r, o, &disabled(ctx, cfg, r), !yes)?;
     total += sweep::hosts(ctx, cfg, r, o, if yes { Sweep::Apply } else { Sweep::Preview })?;
     let done = if yes { "freed" } else { "reclaimable" };
-    crate::roots::caches(ctx, cfg)
-        .iter()
-        .try_for_each(|l| writeln!(o, "{l}"))?;
+    write!(o, "{}", crate::roots::caches(ctx, cfg))?;
     writeln!(o, "{:.2} GB {done} {NOTE}", gb(total))?;
     if yes {
         return Ok(());

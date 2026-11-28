@@ -42,7 +42,7 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
             rows.extend(sample.iter().flat_map(|s| limit_rows(ctx, &cfg, r, s)));
             rows.extend(just_rows(ctx, &cfg, r));
             rows.extend(crate::status::doctor(ctx, &cfg));
-            rows.extend(crate::roots::caches(ctx, &cfg).iter().map(|l| format!("✓ {l}")));
+            rows.extend(crate::roots::caches(ctx, &cfg).lines().map(|l| format!("✓ {l}")));
         }
         Err(e) => rows.push(format!("✗ config — {e:#} → edit {}", ctx.config.display())),
     }
