@@ -1491,7 +1491,6 @@ impl Fleet {
         n.extend(self.remote_deny.iter().cloned());
         n
     }
-    /// The riders one merge may take: `batch_max − 1`, 0 when batching is off.
     pub(crate) fn riders(&self) -> usize {
         self.batch_max.unwrap_or(1).saturating_sub(1)
     }
