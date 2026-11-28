@@ -256,9 +256,8 @@ pub fn ahead(
     all.into_iter().find(|w| *w < mine && !me(w) && w.on(h) && !going(w))
 }
 
-/// `fleet` #`n`'s place among the starts waiting for room on its host, and `line K on <host>`.
-pub fn place(cfg: &Config, ev: &[Event], now: u64, (fleet, n): (&str, u64)) -> Option<(usize, String)> {
-    let all = line(cfg, ev, now);
+/// `fleet` #`n`'s place in `line`'s `all` among the starts waiting for room on its host, and `line K on <host>`.
+pub fn place(all: &[Waiter], (fleet, n): (&str, u64)) -> Option<(usize, String)> {
     let me = all.iter().find(|w| w.fleet == fleet && w.n == n)?;
     let h = me.hosts.first().map_or("every host", String::as_str);
     let k = all
