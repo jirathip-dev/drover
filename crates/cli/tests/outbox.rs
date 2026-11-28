@@ -42,7 +42,16 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     let (code, out) = run(
         &lane,
         &r,
-        &["ask", "sendmeter", "12", "Which way?", "--option", "a", "--option", "b"],
+        &[
+            "ask",
+            "sendmeter",
+            "12",
+            "Which way to main?",
+            "--option",
+            "a",
+            "--option",
+            "b",
+        ],
     );
     assert_eq!((code, out.as_str()), (0, drover::outbox::QUEUED));
     let sha = "a".repeat(40);
@@ -94,7 +103,7 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     assert_eq!(asks.len(), 1, "{ev:?}");
     assert_eq!(
         (asks[0].issue, asks[0].str("agent"), asks[0].str("question")),
-        (Some(12), Some("sendmeter-impl-12"), Some("Which way?"))
+        (Some(12), Some("sendmeter-impl-12"), Some("Which way to main?"))
     );
     assert!(
         !ev.iter().any(|e| e.kind == "fix-done"),
@@ -140,7 +149,10 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
         "the ask is #12's last event: {board}"
     );
     let (_, asked) = run(&main, &r, &["asks", "sendmeter"]);
-    assert!(asked.contains("q1 #12") && asked.contains("Which way?"), "{asked}");
+    assert!(
+        asked.contains("q1 #12") && asked.contains("Which way to main?"),
+        "{asked}"
+    );
 
     run(&main, &r, &["drive"]);
     let ev = read(&main.state).unwrap();

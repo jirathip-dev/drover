@@ -330,7 +330,7 @@ fn need_input_without_an_ask_says_so() {
     let (w, st) = texts(&c, &r);
     assert!(w.contains("reported need-input (which port) with no open ask"), "{w}");
     assert!(st.contains("reported need-input (which port)"), "{st}");
-    let (code, out) = run(&c, &r, &["ask", "sendmeter", "12", "which port?"]);
+    let (code, out) = run(&c, &r, &["ask", "sendmeter", "12", "which port for prod?"]);
     assert_eq!(code, 0, "{out}");
     let (w, _) = texts(&c, &r);
     assert!(w.contains("waiting on your answer"), "{w}");
@@ -368,7 +368,7 @@ fn need_input_without_an_ask_is_nudged_once_then_a_parkable_owner_card() {
 #[test]
 fn need_input_with_an_open_ask_waits_on_the_owner_unchanged() {
     let (c, r, sh) = lane("turn-input-asked", true, None);
-    let (code, out) = run(&c, &r, &["ask", "sendmeter", "12", "which port?"]);
+    let (code, out) = run(&c, &r, &["ask", "sendmeter", "12", "which port for prod?"]);
     assert_eq!(code, 0, "{out}");
     turn(&c, &r, &["need-input", "--why", "which port"]);
     drive(&c, &r);

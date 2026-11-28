@@ -4,7 +4,7 @@ budget_secs = 5
 leg = "test"
 shards = { hosted = 4, self-hosted = 4 }
 run = '''
-if [ -z "${CI:-}" ]; then echo "CI's test leg runs it"; exit 0; fi
+if [ "${GATEKEEPER_HOST:-}" != ci ]; then echo "CI's test leg runs it"; exit 0; fi
 left=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fleet-test-*')
 if [ -n "$left" ]; then echo "test temp dirs left behind:"; echo "$left"; exit 1; fi
 '''

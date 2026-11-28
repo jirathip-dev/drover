@@ -182,9 +182,6 @@ enum Cmd {
         #[arg(help = "The recommended option's number")]
         #[arg(long, value_name = "N")]
         recommend: Option<usize>,
-        #[arg(help = "routine (defaults to --recommend after [limits].ask_default_minutes) | owner (always waits)")]
-        #[arg(long, default_value = "owner", value_parser = ["routine", "owner"])]
-        kind: String,
         #[arg(help = "Ask in this orchestrator thread: its options become choice rows, the answer goes back into it")]
         #[arg(long, value_name = "ID")]
         thread: Option<String>,
@@ -218,7 +215,7 @@ enum Cmd {
         fleet: String,
         issue: u64,
         text: String,
-        #[arg(help = "The ask the owner answered (or a routine ask's default) on this issue that decided it")]
+        #[arg(help = "The ask the owner answered (or an old routine ask's default) on this issue that decided it")]
         #[arg(long, value_name = "ID")]
         basis: String,
     },
@@ -367,6 +364,10 @@ enum Cmd {
         about = "#1756: the fleet's scheduled jobs (every, last, next, open issue); with a name, run it now (orchestrators and the owner)"
     )]
     Job(crate::jobs::Args),
+    #[command(
+        about = "#1785: the `integration` job's check, in a checkout of the integration head: the premerge gate once per head; green closes the job's open issue, red exits 1"
+    )]
+    Integration { fleet: String },
     #[command(about = "#1648: the nightly soak on `[fleet.<n>.soak]` hosts; an issue per missed target")]
     Soak(crate::soak::Args),
     #[command(about = "Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)")]
@@ -1604,12 +1605,18 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     question: Some(question),
                     options,
                     recommend: n,
-                    kind,
                     thread,
                     ..
                 } => {
-                    let (at, how) = (lane(&issue)?, (n, kind.as_str(), thread.as_deref()));
-                    crate::ask(ctx, &cfg, r, out, (&fleet, at), (&question, &options), how)?;
+                    let at = lane(&issue)?;
+                    crate::ask(
+                        ctx,
+                        &cfg,
+                        out,
+                        (&fleet, at),
+                        (&question, &options),
+                        (n, thread.as_deref()),
+                    )?;
                     at.inspect(|n| kick(&fleet, *n, "ask"));
                 }
                 Cmd::Answer {
@@ -2003,6 +2010,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 }
                 Cmd::Triage(a) => return crate::triage::cli(ctx, &cfg, r, out, a),
                 Cmd::Job(a) => return crate::jobs::cli(ctx, &cfg, r, out, &a),
+                Cmd::Integration { fleet } => return crate::integration::check(ctx, &cfg, r, out, &fleet),
                 Cmd::Soak(a) => return crate::soak::run(ctx, &cfg, r, out, &a.fleet),
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;

@@ -3,8 +3,8 @@ fix = "make the case fit its budget; a budget is raised only in its own issue"
 budget_secs = 600
 leg = "release-hub"
 setup = ["rust", "node"]
+needs = ["quiet-host"]
 paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "assets/**", "demo/**", "web/dist/**"]
 run = '''
-if [ -z "${CI:-}" ]; then echo "CI's release-hub leg runs it"; exit 0; fi
 cargo test --release --locked --test screen_hub -- --nocapture --test-threads=1
 '''
