@@ -929,7 +929,7 @@ pub fn hold_alert(events: &[Event], sp: &Event, what: &str) -> Value {
 }
 
 /// The `usage-limit` holding new lanes off spawn `sp`'s host until the reset its lane's limit `note` names; None without a reset time or once its lane raised one.
-pub fn limit_alert(ctx: &Ctx, r: &dyn Runner, events: &[Event], sp: &Event, note: &str) -> Option<Value> {
+pub(crate) fn limit_alert(ctx: &Ctx, r: &dyn Runner, events: &[Event], sp: &Event, note: &str) -> Option<Value> {
     let raised = |e: &Event| e.kind == "usage-limit" && e.ts >= sp.ts && e.str("agent") == sp.str("agent");
     if events.iter().any(raised) {
         return None;
@@ -951,7 +951,7 @@ pub fn limit_alert(ctx: &Ctx, r: &dyn Runner, events: &[Event], sp: &Event, note
 }
 
 /// Logs `limit_alert`, once per lane.
-pub fn hold_limit(ctx: &Ctx, cfg: &Config, r: &dyn Runner, sp: &Event, note: &str) -> Result<()> {
+pub(crate) fn hold_limit(ctx: &Ctx, cfg: &Config, r: &dyn Runner, sp: &Event, note: &str) -> Result<()> {
     match limit_alert(ctx, r, &working(&ctx.state)?, sp, note) {
         Some(d) => emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "usage-limit", d)),
         None => Ok(()),
