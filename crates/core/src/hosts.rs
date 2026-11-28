@@ -896,15 +896,16 @@ pub fn held_since(events: &[Event], machine: Option<&str>) -> u64 {
     events.iter().rfind(on).map_or(0, |e| e.ts)
 }
 
-/// The alert holding new lanes off the host on `machine`: a lane's usage limit or sign-out since its last `host-on`.
-pub fn login_hold<'a>(events: &'a [Event], machine: Option<&str>) -> Option<&'a str> {
+/// The alert holding new lanes off the host on `machine` at `now`: a lane's usage limit before its reset, or sign-out, since its last `host-on`.
+pub fn login_hold<'a>(events: &'a [Event], machine: Option<&str>, now: u64) -> Option<&'a str> {
     let mine = |e: &Event| e.str("machine") == machine;
     let from = events
         .iter()
         .rposition(|e| e.kind == "host-on" && mine(e))
         .map_or(0, |i| i + 1);
     let lane = |e: &Event| e.data.get("account").is_none();
-    let hold = |e: &&Event| ["usage-limit", "signed-out"].contains(&e.kind.as_str()) && mine(e) && lane(e);
+    let due = |e: &Event| e.data.get("until").and_then(Value::as_u64).is_none_or(|u| now < u);
+    let hold = |e: &&Event| ["usage-limit", "signed-out"].contains(&e.kind.as_str()) && mine(e) && lane(e) && due(e);
     events.iter().skip(from).rfind(hold)?.str("reason")
 }
 
@@ -927,9 +928,39 @@ pub fn hold_alert(events: &[Event], sp: &Event, what: &str) -> Value {
     json!({"key": key, "agent": lane, "host": host, "machine": m, "reason": why})
 }
 
+/// The `usage-limit` holding new lanes off spawn `sp`'s host until the reset its lane's limit `note` names; None without a reset time or once its lane raised one.
+pub fn limit_alert(ctx: &Ctx, r: &dyn Runner, events: &[Event], sp: &Event, note: &str) -> Option<Value> {
+    let raised = |e: &Event| e.kind == "usage-limit" && e.ts >= sp.ts && e.str("agent") == sp.str("agent");
+    if events.iter().any(raised) {
+        return None;
+    }
+    let until = crate::limit::reset_at(r, note, ctx.now)?;
+    let mut d = hold_alert(events, sp, "");
+    let host = d.at("host").as_str().unwrap_or("main").to_string();
+    let when = crate::usage::date(r, until, "+%a %H:%M");
+    let why = format!(
+        "{} lane {} hit its usage limit on {host}; new lanes there wait until {when} or `drover hosts on {host}`",
+        sp.str("role").unwrap_or_default(),
+        sp.str("agent").unwrap_or_default()
+    );
+    let key = format!("{}:{until}", d.at("key").as_str().unwrap_or_default());
+    d.put("key", json!(key))
+        .put("until", json!(until))
+        .put("reason", json!(why));
+    Some(d)
+}
+
+/// Logs `limit_alert`, once per lane.
+pub fn hold_limit(ctx: &Ctx, cfg: &Config, r: &dyn Runner, sp: &Event, note: &str) -> Result<()> {
+    match limit_alert(ctx, r, &working(&ctx.state)?, sp, note) {
+        Some(d) => emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "usage-limit", d)),
+        None => Ok(()),
+    }
+}
+
 /// Admission on one host, in order `LOGIN_NEEDED`, `DISK_LOW`, `MEM_LOW`, `HOST_BUSY`: its sample and the first refusal.
 pub fn gate(ctx: &Ctx, cfg: &Config, on: &On) -> (Host, Option<(&'static str, String)>) {
-    if let Some(why) = login_hold(&working(&ctx.state).unwrap_or_default(), on.machine) {
+    if let Some(why) = login_hold(&working(&ctx.state).unwrap_or_default(), on.machine, ctx.now) {
         return (Host::default(), Some(("LOGIN_NEEDED", why.to_string())));
     }
     if let Some(why) = disk_low(ctx, cfg, on) {
@@ -1406,11 +1437,11 @@ pub fn lanes_on(cfg: &Config, events: &[Event], name: &str) -> Vec<String> {
 }
 
 /// The order that keeps new lanes off host `name` while its lanes finish: the owner's off switch or a sign-in hold.
-pub fn drain(cfg: &Config, events: &[Event], name: &str) -> Option<String> {
+pub fn drain(cfg: &Config, events: &[Event], name: &str, now: u64) -> Option<String> {
     let h = cfg.hosts.get(name);
     let m = h.and_then(|h| h.machine.as_deref());
     let off = h.is_some_and(|h| !h.enabled).then(|| format!("turned off: {name}"));
-    let hold = || login_hold(events, m).map(String::from);
+    let hold = || login_hold(events, m, now).map(String::from);
     off.or_else(hold)
 }
 
@@ -1534,7 +1565,7 @@ pub fn toggle(ctx: &Ctx, out: &mut dyn Write, name: &str, on: bool, by: &str) ->
     let cfg = Config::parse(&text)?;
     let events = working(&ctx.state)?;
     let machine = match cfg.hosts.get(name) {
-        None if on && name == "main" && login_hold(&events, None).is_some() => None,
+        None if on && name == "main" && login_hold(&events, None, ctx.now).is_some() => None,
         None => bail!("no [hosts.{name}] in fleet.toml"),
         Some(h) if !on && h.machine.is_none() => return refused("MAIN_HOST", "main host: edit fleet.toml by hand"),
         Some(h) => {

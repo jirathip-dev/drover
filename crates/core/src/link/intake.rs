@@ -145,7 +145,7 @@ pub fn apply(
         heard: Some(ctx.now),
         build: Some(rep.build),
         sample: rep.sample,
-        drain: crate::hosts::drain(cfg, &events, host),
+        drain: crate::hosts::drain(cfg, &events, host, ctx.now),
     };
     crate::db::view_put(&ctx.state, &h, Some(&rows))?;
     let mut acks = vec![];

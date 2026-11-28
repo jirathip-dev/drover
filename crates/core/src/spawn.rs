@@ -1161,6 +1161,17 @@ fn start(
     let live: Vec<&Session> = agents.iter().filter(|a| a.in_dir(&p.agent, &p.worktree)).collect();
     let names: Vec<&str> = live.iter().map(|a| a.name.as_str()).collect();
     let mut dup = vec![];
+    let ended = !live.is_empty() && live.iter().all(|a| a.status() == Some(Status::Failed));
+    for (sp, a) in live
+        .iter()
+        .filter(|_| ended)
+        .filter_map(|a| Some((last_spawn(&events, &a.name)?, a)))
+    {
+        if let Some(n) = a.note.as_deref().filter(|_| a.limit_hit()) {
+            crate::hosts::hold_limit(ctx, cfg, r, sp, n)?;
+        }
+    }
+    let supersede = o.supersede || ended;
     let stale = live.iter().all(|a| !a.busy()) && orphan(&agents, &events, &p).is_some();
     if stale {
         let last = events
@@ -1219,17 +1230,17 @@ fn start(
             dup.push(("WORKTREE_DIRTY", format!("{wt} is no fleet lane and has {why}")));
         }
     }
-    if let Some(pane) = orphan(&agents, &events, &p).filter(|_| live.len() == 1 && !o.supersede) {
+    if let Some(pane) = orphan(&agents, &events, &p).filter(|_| live.len() == 1 && !supersede) {
         return adopt(ctx, cfg, r, out, (fleet, issue, role), &pane, &json!({})).map(|()| true);
     }
-    if let Some((code, msg)) = dup.first().filter(|_| !o.supersede) {
+    if let Some((code, msg)) = dup.first().filter(|_| !supersede) {
         return refused(
             code,
             format!("{msg}{}", if stale { "" } else { "; `--supersede` replaces it" }),
         );
     }
     let asked = o.by.as_deref().is_some_and(|b| b != "drive") && o.why.is_none();
-    if let Some(age) = (asked && !stale && !live.is_empty())
+    if let Some(age) = (asked && !stale && !ended && !live.is_empty())
         .then(|| {
             progressed(
                 ctx.now,
@@ -1274,7 +1285,7 @@ fn start(
         Some((code, why)) => return refused(code, why),
         None => {}
     }
-    let step = if o.supersede && !dup.is_empty() {
+    let step = if supersede && !dup.is_empty() {
         "supersede"
     } else {
         "spawn"
@@ -1296,7 +1307,7 @@ fn start(
     *intent =
         Some(crate::action::begin(r, &ctx.state, ctx.now, (fleet, issue, step, &key), inputs, secs, &probe)?.act()?);
     let (mut wip, saved) = (None, (cfg, fleet));
-    if o.supersede && !dup.is_empty() {
+    if supersede && !dup.is_empty() {
         let was = last_spawn(&events, &p.agent);
         let old = crate::hosts::On::of(base, was);
         let owt = was.and_then(|e| e.str("worktree")).unwrap_or(&wt);

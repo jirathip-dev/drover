@@ -198,7 +198,6 @@ pub(crate) fn stuck(
         "HOST_FULL",
         "IN_FLIGHT",
         "ALREADY_DONE",
-        "LANE_LIVE",
         "EXIT",
         "ERROR",
         "STUCK",
