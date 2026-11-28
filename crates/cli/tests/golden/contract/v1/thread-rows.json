@@ -25,6 +25,7 @@
         "tone": "",
         "type": "card"
       },
+      "epic": null,
       "fleet": "sendmeter",
       "handoff": null,
       "issue": 12,
@@ -58,6 +59,7 @@
         "kind": "sys",
         "type": "card"
       },
+      "epic": null,
       "fleet": "sendmeter",
       "handoff": null,
       "issue": null,
@@ -102,6 +104,7 @@
         "tone": "",
         "type": "card"
       },
+      "epic": null,
       "fleet": "sendmeter",
       "handoff": null,
       "issue": 12,
@@ -143,6 +146,7 @@
         "tone": "",
         "type": "card"
       },
+      "epic": null,
       "fleet": "sendmeter",
       "handoff": null,
       "issue": null,
@@ -188,6 +192,7 @@
         "tone": "",
         "type": "card"
       },
+      "epic": null,
       "fleet": "sendmeter",
       "handoff": null,
       "issue": null,
@@ -238,6 +243,7 @@
         "tone": "bad",
         "type": "card"
       },
+      "epic": null,
       "fleet": "sendmeter",
       "handoff": null,
       "issue": null,
@@ -313,6 +319,7 @@
         "tone": "warn",
         "type": "card"
       },
+      "epic": null,
       "fleet": "sendmeter",
       "handoff": null,
       "issue": null,
@@ -351,6 +358,7 @@
         "title": "you",
         "type": "card"
       },
+      "epic": null,
       "fleet": "sendmeter",
       "handoff": null,
       "issue": null,
@@ -384,6 +392,7 @@
         "kind": "sys",
         "type": "card"
       },
+      "epic": null,
       "fleet": "sendmeter",
       "handoff": null,
       "issue": 12,
@@ -417,6 +426,7 @@
         "kind": "sys",
         "type": "card"
       },
+      "epic": null,
       "fleet": "sendmeter",
       "handoff": null,
       "issue": 12,
@@ -432,7 +442,54 @@
         "k": "thread"
       },
       "ts": 999014
+    },
+    {
+      "block": {
+        "blocks": [
+          {
+            "id": "m-22-t",
+            "markdown": "sendmeter #50 Payments landed: 2 issues · 1 dropped\nLanded: 2 of 2 issues merged.\n- #51 Refunds: PR #60\n- #52\nDropped (closed unmerged): #53",
+            "type": "text"
+          }
+        ],
+        "id": "m-22",
+        "kind": "sys",
+        "type": "card"
+      },
+      "epic": {
+        "dropped": [
+          53
+        ],
+        "merged": [
+          {
+            "issue": 51,
+            "pr": 60,
+            "title": "Refunds"
+          },
+          {
+            "issue": 52,
+            "pr": null,
+            "title": ""
+          }
+        ],
+        "title": "Payments"
+      },
+      "fleet": "sendmeter",
+      "handoff": null,
+      "issue": 50,
+      "key": "epic-sendmeter-50",
+      "kind": "merged",
+      "open": false,
+      "prompt": null,
+      "push": null,
+      "seq": 22,
+      "text": "sendmeter #50 Payments landed: 2 issues · 1 dropped",
+      "to": {
+        "id": "t1",
+        "k": "thread"
+      },
+      "ts": 999021
     }
   ],
-  "seq": 17
+  "seq": 22
 }

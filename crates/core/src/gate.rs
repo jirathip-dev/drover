@@ -1173,6 +1173,9 @@ fn merged(
     if let Err(e) = crate::check::teardown(ctx, cfg, r, out, fleet, issue) {
         writeln!(out, "teardown: {e:#}")?;
     }
+    if let Err(e) = crate::epic::settle(ctx, cfg, r, out, fleet) {
+        writeln!(out, "epics: {e:#}")?;
+    }
     if !missing.is_empty() {
         bail!("left open: {}", missing.join("; "));
     }

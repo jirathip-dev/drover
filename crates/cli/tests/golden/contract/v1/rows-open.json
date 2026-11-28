@@ -41,6 +41,7 @@
         "tone": "warn",
         "type": "card"
       },
+      "epic": null,
       "fleet": "sendmeter",
       "handoff": null,
       "issue": 30,
@@ -91,6 +92,7 @@
         "tone": "bad",
         "type": "card"
       },
+      "epic": null,
       "fleet": "sendmeter",
       "handoff": null,
       "issue": null,
@@ -162,6 +164,7 @@
         "tone": "warn",
         "type": "card"
       },
+      "epic": null,
       "fleet": "sendmeter",
       "handoff": null,
       "issue": null,
@@ -191,6 +194,7 @@
         "kind": "sys",
         "type": "card"
       },
+      "epic": null,
       "fleet": "sendmeter",
       "handoff": null,
       "issue": 12,
@@ -208,5 +212,5 @@
       "ts": 999014
     }
   ],
-  "seq": 17
+  "seq": 22
 }

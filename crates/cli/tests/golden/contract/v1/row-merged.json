@@ -12,6 +12,7 @@
       "kind": "sys",
       "type": "card"
     },
+    "epic": null,
     "fleet": "sendmeter",
     "handoff": null,
     "issue": 12,
@@ -31,5 +32,124 @@
       "k": "thread"
     },
     "ts": 999013
+  },
+  {
+    "block": {
+      "blocks": [
+        {
+          "id": "m-19-t",
+          "markdown": "sendmeter #51 merged → ? ? (PR #?)",
+          "type": "text"
+        }
+      ],
+      "id": "m-19",
+      "kind": "sys",
+      "type": "card"
+    },
+    "epic": null,
+    "fleet": "sendmeter",
+    "handoff": null,
+    "issue": 51,
+    "key": "merged-19",
+    "kind": "merged",
+    "open": false,
+    "prompt": null,
+    "push": {
+      "body": "sendmeter #51 merged → ? ? (PR #?)",
+      "tag": "merged-19",
+      "title": "sendmeter #51"
+    },
+    "seq": 19,
+    "text": "sendmeter #51 merged → ? ? (PR #?)",
+    "to": {
+      "k": "desk",
+      "repo": "sendmeter"
+    },
+    "ts": 999018
+  },
+  {
+    "block": {
+      "blocks": [
+        {
+          "id": "m-20-t",
+          "markdown": "sendmeter #52 merged → ? ? (PR #?)",
+          "type": "text"
+        }
+      ],
+      "id": "m-20",
+      "kind": "sys",
+      "type": "card"
+    },
+    "epic": null,
+    "fleet": "sendmeter",
+    "handoff": null,
+    "issue": 52,
+    "key": "merged-20",
+    "kind": "merged",
+    "open": false,
+    "prompt": null,
+    "push": {
+      "body": "sendmeter #52 merged → ? ? (PR #?)",
+      "tag": "merged-20",
+      "title": "sendmeter #52"
+    },
+    "seq": 20,
+    "text": "sendmeter #52 merged → ? ? (PR #?)",
+    "to": {
+      "k": "desk",
+      "repo": "sendmeter"
+    },
+    "ts": 999019
+  },
+  {
+    "block": {
+      "blocks": [
+        {
+          "id": "m-22-t",
+          "markdown": "sendmeter #50 Payments landed: 2 issues · 1 dropped\nLanded: 2 of 2 issues merged.\n- #51 Refunds: PR #60\n- #52\nDropped (closed unmerged): #53",
+          "type": "text"
+        }
+      ],
+      "id": "m-22",
+      "kind": "sys",
+      "type": "card"
+    },
+    "epic": {
+      "dropped": [
+        53
+      ],
+      "merged": [
+        {
+          "issue": 51,
+          "pr": 60,
+          "title": "Refunds"
+        },
+        {
+          "issue": 52,
+          "pr": null,
+          "title": ""
+        }
+      ],
+      "title": "Payments"
+    },
+    "fleet": "sendmeter",
+    "handoff": null,
+    "issue": 50,
+    "key": "epic-sendmeter-50",
+    "kind": "merged",
+    "open": false,
+    "prompt": null,
+    "push": {
+      "body": "sendmeter #50 Payments landed: 2 issues · 1 dropped",
+      "tag": "epic-sendmeter-50",
+      "title": "sendmeter #50"
+    },
+    "seq": 22,
+    "text": "sendmeter #50 Payments landed: 2 issues · 1 dropped",
+    "to": {
+      "id": "t1",
+      "k": "thread"
+    },
+    "ts": 999021
   }
 ]

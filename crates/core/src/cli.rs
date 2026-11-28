@@ -360,10 +360,16 @@ enum Cmd {
     Lesson(LessonCmd),
     #[command(about = "#1100: a triage lane's verbs")]
     Triage(crate::triage::Args),
+    #[command(about = "#1786: an epic: a parent issue's children, shown `k/n merged`; closed when the last lands")]
+    Epic(crate::epic::Args),
     #[command(
         about = "#1756: the fleet's scheduled jobs (every, last, next, open issue); with a name, run it now (orchestrators and the owner)"
     )]
     Job(crate::jobs::Args),
+    #[command(
+        about = "#1785: the `integration` job's check, in a checkout of the integration head: the premerge gate once per head; green closes the job's open issue, red exits 1"
+    )]
+    Integration { fleet: String },
     #[command(about = "#1648: the nightly soak on `[fleet.<n>.soak]` hosts; an issue per missed target")]
     Soak(crate::soak::Args),
     #[command(about = "Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)")]
@@ -870,6 +876,9 @@ enum QueueCmd {
         #[arg(help = "Behaviour unchanged: tests only moved or renamed, checked on rev's PASS (`TESTS_CHANGED`)")]
         #[arg(long)]
         refactor: bool,
+        #[arg(help = "Add them to the epic under this parent issue too (`drover epic … add`)")]
+        #[arg(long, value_name = "PARENT")]
+        epic: Option<u64>,
     },
     #[command(about = "Move a queued issue")]
     #[command(group(clap::ArgGroup::new("to").required(true).args(["top", "before", "after"])))]
@@ -1875,6 +1884,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
                     } else {
                         write!(out, "{}", queue::fleets_use(ctx, &events, Some(&cfg), fleet.as_deref()))?;
+                        for f in cfg.fleet.keys().filter(|f| fleet.as_ref().is_none_or(|x| x == *f)) {
+                            let epics = crate::epic::open(ctx, &events, &st, f);
+                            epics.iter().try_for_each(|e| writeln!(out, "{}", e.line()))?;
+                        }
                     }
                     let seen = flow.then(|| crate::flow::facts::Seen::load(ctx, &cfg)).transpose()?;
                     for w in rows.iter().filter(|_| !json) {
@@ -2005,7 +2018,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     crate::lesson::apply(ctx, &cfg, r, out, &fleet, &crate::repo_path(&rules))?;
                 }
                 Cmd::Triage(a) => return crate::triage::cli(ctx, &cfg, r, out, a),
+                Cmd::Epic(a) => writeln!(out, "{}", crate::epic::cli(ctx, &cfg, r, a)?)?,
                 Cmd::Job(a) => return crate::jobs::cli(ctx, &cfg, r, out, &a),
+                Cmd::Integration { fleet } => return crate::integration::check(ctx, &cfg, r, out, &fleet),
                 Cmd::Soak(a) => return crate::soak::run(ctx, &cfg, r, out, &a.fleet),
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
@@ -2062,6 +2077,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     };
                     let groups = &cfg.fleet(&fleet)?.serial;
                     let known = |g: &String| g.is_empty() || groups.iter().any(|x| x.name == *g);
+                    let mut link = None;
                     let mut d = match cmd {
                         QueueCmd::Add {
                             mut issues,
@@ -2075,7 +2091,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             repro,
                             perf,
                             refactor,
+                            epic,
                         } => {
+                            crate::epic::queueable(ctx, &fleet, &issues, epic)?;
+                            link = epic.map(|p| (p, issues.clone()));
                             let g =
                                 serial.map(|g| g.parse().map(|n| issues.insert(0, n)).map_or(g, |()| String::new()));
                             anyhow::ensure!(
@@ -2149,6 +2168,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         d.put("design_thread", json!(t));
                     }
                     writeln!(out, "{}", queue_change(ctx, &cfg, &fleet, d, None)?)?;
+                    if let Some((p, issues)) = link {
+                        let said = crate::epic::change(ctx, &cfg, r, &fleet, p, crate::epic::Op::Add { issues })?;
+                        writeln!(out, "{said}")?;
+                    }
                 }
                 _ => unreachable!(),
             }

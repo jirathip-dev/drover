@@ -12,6 +12,7 @@
       "kind": "sys",
       "type": "card"
     },
+    "epic": null,
     "fleet": "sendmeter",
     "handoff": null,
     "issue": 30,
@@ -45,6 +46,7 @@
       "kind": "sys",
       "type": "card"
     },
+    "epic": null,
     "fleet": "drover",
     "handoff": null,
     "issue": null,

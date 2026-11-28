@@ -1,0 +1,1 @@
+- EPIC_PARENT: epic add: the parent is closed, merged, queued, has had a lane, is an epic's child or is named as its own child, or a child named is an open epic's parent; queue add, spawn: the issue is an open epic's parent (drover never builds it)

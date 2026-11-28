@@ -1,0 +1,14 @@
+every = "off"
+check = "{drover} integration {fleet}"
+title = "integration: {fleet} red at {head}"
+body = """
+The premerge gate failed on `{fleet}`'s `{integration}` head, worked by an `impl` lane (#1785).
+
+```
+{report}
+```
+
+1. Find which of the PRs above broke the gate together (each passed alone).
+2. Fix it in one PR at the root cause; a revert of one PR is fine when the fix is not small.
+3. This issue closes by itself once a later `{integration}` head checks green."""
+role = "impl"

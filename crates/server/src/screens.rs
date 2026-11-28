@@ -14,6 +14,8 @@ use k::{Act, Confirm, Figure, Label, Shown, Tap, Tile, Time, Tone, Toned};
 use serde_json::Value;
 use std::sync::atomic::Ordering::Relaxed;
 
+#[path = "screens_epics.rs"]
+mod epics;
 #[path = "screens_lanes.rs"]
 mod lanes;
 #[path = "later.rs"]
@@ -542,11 +544,12 @@ fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q, lanes: &[Lane], lat
         )
         .block(),
     ];
-    let blocks = vec![
+    let mut blocks = epics::epics(ctx, ev, c, q, lanes);
+    blocks.extend([
         section("inprogress", "in progress", busy),
         section("queued", "queued", rows("queued", tree(&queued))),
         rows_list(&format!("done-{f}"), end),
-    ];
+    ]);
     let mut v = k::Card::new()
         .id(format!("fleet-{f}"))
         .tone(tone)

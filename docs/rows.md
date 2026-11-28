@@ -23,8 +23,10 @@ The cooee plugin token (`Authorization: Bearer …`) or a paired device reads th
 (`{"k": "thread", "id"}`, `{"k": "desk", "repo"}` or `{"k": "owner"}`), `kind` (`ask`, `decision`, `handoff`,
 `run-card`, `config-card`, `secret-card`, `system`, `merged`, `rollout`, `digest`, `alert`, `said`), `fleet`, `issue`,
 `text` (one plain line), `block` (what every surface draws, in the shared blocks schema), `open`, `prompt` (the line
-the thread's agent is told), `push` (`title`, `body`, `tag`; set on every row that notifies, whatever notifiers fleet.toml has) and `handoff` (a
-handoff row's item). A `said` line a client copied has neither `prompt` nor `push`.
+the thread's agent is told), `push` (`title`, `body`, `tag`; set on every row that notifies, whatever notifiers fleet.toml has), `handoff` (a
+handoff row's item) and `epic` (#1786: on a landed epic's `merged` row, keyed `epic-<fleet>-<parent>`, its `title`,
+`merged` children with `issue`, `pr` and `title`, and `dropped` issues; else null). A `said` line a client copied has
+neither `prompt` nor `push`.
 
 ## Where a row goes
 

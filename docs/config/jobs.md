@@ -7,7 +7,7 @@ A scheduled job is one config entry. `drover tick` runs each due job of each fle
 |---|---|
 | `every` | `"12h"`, `"1d"`, `"7d"`; `0` or `"off"`: only by hand |
 | `check` | a command run in a checkout of the integration head: it passes, nothing to do; it fails, the job files and its output is `{report}` |
-| `title`, `body` | the issue; `{fleet}`, `{integration}`, `{date}`, `{monday}`, `{month}`, and `{report}` in the body |
+| `title`, `body` | the issue; `{fleet}`, `{integration}`, `{head}` (the checked head's short sha), `{date}`, `{monday}`, `{month}`, and `{report}` in the body |
 | `role` | the lane that works the issue; a role the fleet does not configure runs on impl's |
 | `queue` | `top` (default: its role spawned at once) or `end` (drive starts it in turn) |
 | `empty` | set: a lane that ends with nothing pushed closes its issue with this line and its undo list |
@@ -21,6 +21,16 @@ Built in, all on: `lesson` every 7d (files when `drover lesson digest <fleet> --
 ```toml
 [fleet.web.job.triage]
 every = "off"
+```
+
+`integration` (#1785), off by default: `drover integration <fleet>` runs the fleet's `premerge` gate on the
+integration head (on runners when the fleet routes its heavy kinds there), once per head. A red head files
+`integration: <fleet> red at <sha>` with the failing tail and the PRs merged since the last green head; the next green
+head closes it. `drover waiting` and the board show the last check (sha, result, age). Hourly:
+
+```toml
+[fleet.web.job.integration]
+every = "1h"
 ```
 
 At most one issue per job is open, and a title that exists is never filed again. A job that fails to file logs

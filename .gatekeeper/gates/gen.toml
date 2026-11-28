@@ -3,7 +3,7 @@ fix = "run just gen and commit what it writes; never hand-edit a generated file"
 budget_secs = 600
 setup = ["rust", "node"]
 run = '''
-if [ -z "${CI:-}" ]; then echo "CI's local leg runs it"; exit 0; fi
+if [ "${GATEKEEPER_HOST:-}" != ci ]; then echo "CI's local leg runs it"; exit 0; fi
 set -eu
 bash scripts/gen.sh
 if [ -n "$(git status --porcelain)" ]; then git status --short; git diff --stat; echo "a generated file differs from what scripts/gen.sh writes"; exit 1; fi

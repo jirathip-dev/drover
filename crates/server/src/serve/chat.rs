@@ -852,11 +852,14 @@ fn owner_card(ctx: &Ctx, events: &[Event], e: &Event) -> Option<Msg> {
 
 pub(super) fn drawn(ctx: &Ctx, events: &[Event], e: &Event, row: &crate::thread::Row, id: &str) -> Value {
     use crate::thread::RowKind as K;
+    let landed = (e.kind == "epic-landed").then(|| serde_json::from_value(Value::Object(e.data.clone())).ok());
     let m = Msg {
         seq: e.seq,
         ts: e.ts,
         kind: "note".into(),
-        text: row.text.clone(),
+        text: (landed.flatten()).map_or(row.text.clone(), |l| {
+            format!("{}\n{}", row.text, crate::epic::summary(&l))
+        }),
         link: link(e),
         ..Msg::default()
     };
