@@ -22,7 +22,7 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `stray_roots` | `["/tmp", "$TMPDIR"]` | where `drover clean` looks for stray build folders and temp dirs |
 | `min_free_mem_gb` | `2.0` | spawn refuses MEM_LOW under this many GB of free + inactive memory; `[hosts.<n>]` may set its own |
 | `effort` | `unset` | default reasoning effort for roles that set none |
-| `ask_default_minutes` | `30` | a routine ask unanswered this long takes its recommended option |
+| `ask_default_minutes` | `30` | a routine ask filed before #1813 unanswered this long takes its recommended option |
 | `promote_after_merges` | `10` | after this many merges into a fleet's integration branch since the last nudge, drover nudges a promotion to main (0 = off) |
 | `ask_expire_hours` | `24` | an ask no live lane waits on expires after this many hours |
 | `thread_resend_minutes` | `5` | a new-thread send repeating a request id this soon gets the thread it made |

@@ -1,0 +1,1 @@
+- IN_SCOPE: ask (#1813): a lane's ask that names no owner word or its plural/inflection (main, prod, secret, token, delete, spend, cost, $, dependency, scope): nothing is logged; decide it, note the choice in the PR body under `## Decisions` and carry on

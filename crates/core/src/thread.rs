@@ -252,7 +252,8 @@ fn row<'a>(events: &'a [Event], reg: &Registry, e: &'a Event) -> Option<(&'a Eve
             RowKind::Said
         }
         _ if e.kind != "thread-msg" && e.is_push() => {
-            to = if e.issue.is_some() || e.data.contains_key("thread") {
+            let stuck = e.kind == "needs-human" && e.str("code") == Some("STUCK");
+            to = if !stuck && (e.issue.is_some() || e.data.contains_key("thread")) {
                 to
             } else {
                 Target::Owner

@@ -27,7 +27,7 @@ brief names where you sit, the fleet your asks go on and your own instructions.
 - #574: an owner decision that names an amendment to an issue's spec (a scope note): run
   `drover amend <fleet> <issue> --basis q<id> "<text>"` right away. It appends a dated line under the body's
   `## Amendments` (never a comment) and re-runs the open PR's failed spec checks; `--basis` must be an ask on that
-  issue the owner answered (or a routine default), else `REFUSED NO_DECISION`. The id stays in the event log.
+  issue the owner answered (or an old routine ask's default), else `REFUSED NO_DECISION`. The id stays in the event log.
 - #1377: no ask ids (`q<id>`) in issue, PR or comment text: a reader on GitHub cannot open them. Write the decision
   as a plain line.
 - Queue a bug report with `drover queue <fleet> add <n> --repro`: impl's first commit is the failing test, and rev's
