@@ -873,8 +873,7 @@ pub fn offline(ctx: &Ctx, cfg: Option<&Config>, sp: Option<&Event>) -> Option<St
     offline_by(|h| cached(ctx).get(h).is_some_and(|s| !s.up), cfg, sp)
 }
 
-/// `offline` with `down` saying whether a host failed its last probe, so a scan reads the probe file once.
-pub fn offline_by(down: impl FnOnce(&str) -> bool, cfg: Option<&Config>, sp: Option<&Event>) -> Option<String> {
+pub(crate) fn offline_by(down: impl FnOnce(&str) -> bool, cfg: Option<&Config>, sp: Option<&Event>) -> Option<String> {
     let sp = sp?;
     let m = sp.str("machine")?;
     if cfg.is_some_and(|c| !configured(c, m)) {
