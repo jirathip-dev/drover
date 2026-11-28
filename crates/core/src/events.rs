@@ -275,7 +275,6 @@ pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     notify(state, cfg, &ev)
 }
 
-/// `emit` once per action id `id` (#509): the event and its `done` row in one transaction; false when logged already.
 pub(crate) fn emit_once(state: &Path, cfg: &Config, id: &str, ev: &Event) -> Result<bool> {
     let done = Event::new(
         ev.ts,
