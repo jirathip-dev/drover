@@ -256,7 +256,15 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 ));
             }
             if let Some(a) = agent {
-                if let Some(sp) = spawned.filter(|sp| !crate::hosts::on_account(sp)) {
+                let hit = a.note.as_deref().filter(|_| a.limit_hit());
+                if let Some(d) = spawned
+                    .zip(hit)
+                    .and_then(|(sp, n)| crate::hosts::limit_alert(ctx, r, &events, sp, n))
+                {
+                    if held.insert(d.at("key").to_string()) {
+                        fire(ctx, cfg, out, &events, ("drover", None), "usage-limit", d)?;
+                    }
+                } else if let Some(sp) = spawned.filter(|sp| !crate::hosts::on_account(sp)) {
                     let seen = match a.status() {
                         Some(Status::Limited) => Some(("usage-limit", "hit the usage limit")),
                         _ if a.signed_out() => Some(("signed-out", "is signed out")),

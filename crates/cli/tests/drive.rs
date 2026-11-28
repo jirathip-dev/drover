@@ -3,6 +3,8 @@ mod ci_flaky;
 mod common;
 #[path = "drive/done_lanes.rs"]
 mod done_lanes;
+#[path = "drive/lane_live.rs"]
+mod lane_live;
 #[path = "drive/no_baseline.rs"]
 mod no_baseline;
 #[path = "drive/remote_unlisted.rs"]
