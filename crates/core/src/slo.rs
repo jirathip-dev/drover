@@ -494,7 +494,8 @@ fn errors(ctx: &Ctx, events: &[Event], fleet: &str) -> Vec<Breach> {
             && e.str("by") != Some("fast")
             && e.data.get("kick").is_none_or(Value::is_null)
     };
-    let last = events.iter().rfind(slow);
+    let newer = crate::drive::last_pass(ctx, fleet);
+    let last = events.iter().rfind(slow).filter(|e| newer.is_none_or(|t| t <= e.ts));
     let acts = last
         .and_then(|e| e.data.get("actions")?.as_array())
         .into_iter()
