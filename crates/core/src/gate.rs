@@ -304,6 +304,7 @@ fn verdict(
         "stage": stage, "loop": lp, "form_only": form, "spawn_sha": at.and_then(|e| e.str("sha")), "files": shots, "repro": repro,
         "follow_ups": follow_ups(&body)});
     crate::status::verdict(ctx, cfg, r, Event::new(ctx.now, fleet, Some(issue), "verdict", data))?;
+    crate::chore::lessons(ctx, cfg, fleet)?;
     let (v, note) = if form {
         ("FAIL (form-only)", format!(" · not counted · form {}/{of}", used + 1))
     } else {
@@ -1121,7 +1122,8 @@ fn merged(
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "merged", d))?;
     let body = mc.at("body").as_str().unwrap_or_default();
-    crate::propose::open_rollout(ctx, cfg, r, (fleet, issue), body)?;
+    crate::propose::open_rollout(ctx, cfg, (fleet, issue), body)?;
+    crate::chore::promote(ctx, cfg, fleet)?;
     if let Err(e) = follow_up(ctx, cfg, r, out, (fleet, issue), (num, head)) {
         writeln!(out, "follow-ups: {e:#}")?;
     }

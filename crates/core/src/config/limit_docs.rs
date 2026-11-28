@@ -56,6 +56,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "a routine ask filed before #1813 unanswered this long takes its recommended option",
     ),
     (
+        "promote_after_merges",
+        "after this many merges into a fleet's integration branch since the last nudge, drover nudges a promotion to main (0 = off)",
+    ),
+    (
         "ask_expire_hours",
         "an ask no live lane waits on expires after this many hours",
     ),

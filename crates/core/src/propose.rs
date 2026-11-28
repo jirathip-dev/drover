@@ -35,20 +35,43 @@ pub fn propose(
     let text = std::fs::read_to_string(file).with_context(|| format!("cannot read {}", file.display()))?;
     Config::parse(&text).context("the proposed fleet.toml is invalid")?;
     let cur = std::fs::read_to_string(&ctx.config)?;
-    let diff = diff(&cur, &text);
-    if diff.is_empty() {
+    if diff(&cur, &text).is_empty() {
         return refused("BAD_VALUE", "the proposal changes nothing");
     }
+    let id = post(ctx, cfg, (fleet, Some(thread)), &cur, Ok(&text), ro.flatten().copied())?;
+    Ok(writeln!(out, "{id}")?)
+}
+
+fn post(
+    ctx: &Ctx,
+    cfg: &Config,
+    (fleet, thread): (&str, Option<&str>),
+    cur: &str,
+    new: std::result::Result<&str, &str>,
+    rollout: Option<&Event>,
+) -> Result<String> {
+    let events = working(&ctx.state)?;
     let id = format!("c{}", events.iter().filter(|e| e.kind == "config-propose").count() + 1);
-    let sha = sha256(text.as_bytes());
-    crate::devices::write0600(&stored_at(ctx, &id), text.as_bytes())?;
-    stored(ctx, &id, Some(&sha))?;
-    let mut d = json!({"thread": thread, "id": id, "diff": diff, "sha": sha, "base": sha256(cur.as_bytes())});
-    if let Some(Some(o)) = ro {
+    let mut d = json!({"id": id, "base": sha256(cur.as_bytes())});
+    if let Some(t) = thread {
+        d.put("thread", json!(t));
+    }
+    match new {
+        Ok(text) => {
+            let sha = sha256(text.as_bytes());
+            crate::devices::write0600(&stored_at(ctx, &id), text.as_bytes())?;
+            stored(ctx, &id, Some(&sha))?;
+            d.put("diff", json!(diff(cur, text))).put("sha", json!(sha));
+        }
+        Err(why) => {
+            d.put("reason", json!(why));
+        }
+    }
+    if let Some(o) = rollout {
         d.put("rollout", json!(o.issue)).put("rollout_fleet", json!(o.fleet));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "config-propose", d))?;
-    Ok(writeln!(out, "{id}")?)
+    Ok(id)
 }
 
 fn stored_at(ctx: &Ctx, id: &str) -> std::path::PathBuf {
@@ -156,6 +179,9 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) ->
     );
     let line = if apply {
         let cur = std::fs::read_to_string(&ctx.config)?;
+        if let Some(why) = p.str("reason") {
+            return refused("BAD_VALUE", format!("{id} has no diff to apply ({why}); discard it"));
+        }
         if stale(ctx, p) {
             return refused(
                 "STALE",
@@ -229,8 +255,8 @@ pub fn rollouts(events: &[Event]) -> Vec<&Event> {
         .collect()
 }
 
-/// After `fleet` #`n` merged with a `## Rollout` in `body`: logs `rollout-open` once and posts the snippet to the thread that filed it (else the repo's newest), waking its orchestrator to draft the card.
-pub fn open_rollout(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64), body: &str) -> Result<()> {
+/// After `fleet` #`n` merged with a `## Rollout` in `body`: logs `rollout-open` once and posts its config card, built from the fenced lines over the live fleet.toml (else naming why they do not apply, with no diff), to the thread that filed it (else the repo's newest).
+pub fn open_rollout(ctx: &Ctx, cfg: &Config, (fleet, n): (&str, u64), body: &str) -> Result<()> {
     let Some(snippet) = rollout(body) else {
         return Ok(());
     };
@@ -241,22 +267,78 @@ pub fn open_rollout(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, 
     let filed = events.iter().rfind(|e| e.is("issue-filed", fleet, n));
     let filed = filed
         .and_then(|e| e.str("filed_in"))
-        .filter(|t| orchestrator::find(&events, t).is_ok());
+        .filter(|t| orchestrator::fleet_of(&events, t).is_ok());
     let to = filed.or_else(|| crate::thread::route::route(cfg, &events, fleet));
-    let d = json!({"to": to, "snippet": snippet});
-    emit(
-        &ctx.state,
+    let open = Event::new(
+        ctx.now,
+        fleet,
+        Some(n),
+        "rollout-open",
+        json!({"to": to, "snippet": snippet}),
+    );
+    emit(&ctx.state, cfg, open.clone().passive())?;
+    let cur = std::fs::read_to_string(&ctx.config)?;
+    let new = applied(cfg, &cur, &snippet);
+    post(
+        ctx,
         cfg,
-        Event::new(ctx.now, fleet, Some(n), "rollout-open", d).passive(),
+        (fleet, to),
+        &cur,
+        new.as_deref().map_err(String::as_str),
+        Some(&open),
     )?;
-    if let Some(t) = to {
-        let line = format!(
-            "#{n} merged with a rollout, not applied yet:\n{snippet}\nDraft its card now: \
-             `drover config propose {t} <file> --rollout {n}`"
-        );
-        crate::thread::route::tell(ctx, cfg, r, t, &line);
-    }
     Ok(())
+}
+
+fn applied(cfg: &Config, cur: &str, snippet: &str) -> std::result::Result<String, String> {
+    let live: toml::Table = toml::from_str(cur).map_err(|e| format!("fleet.toml does not parse: {e}"))?;
+    let (mut text, mut sec, mut fenced) = (cur.to_string(), String::new(), false);
+    for l in snippet.lines().map(str::trim) {
+        if l.starts_with("```") {
+            fenced = !fenced;
+            continue;
+        }
+        if !fenced || l.is_empty() || l.starts_with('#') {
+            continue;
+        }
+        if l.starts_with("[[") {
+            return Err(format!("`{l}` is an array of tables; drover adds only keys"));
+        }
+        if let Some(t) = table(l) {
+            let f = t.strip_prefix("fleet.").map(|r| r.split('.').next().unwrap_or(r));
+            if let Some(f) = f.filter(|f| !cfg.fleet.contains_key(*f)) {
+                return Err(format!("no fleet {f} in fleet.toml"));
+            }
+            sec = t.to_string();
+            continue;
+        }
+        let kv: toml::Table = toml::from_str(l).map_err(|e| format!("`{l}` is no `key = value` line: {e}"))?;
+        let Some(((k, new), (_, lit))) = kv.iter().next().zip(l.split_once('=')) else {
+            continue;
+        };
+        let mut at = sec.split('.').filter(|p| !p.is_empty());
+        let old = at.try_fold(&live, |t, p| t.get(p)?.as_table()).and_then(|t| t.get(k));
+        match old {
+            Some(o) if o == new => continue,
+            Some(o) => return Err(format!("{sec}.{k} is already {o}, not {}", lit.trim())),
+            None => {}
+        }
+        let (head, lit) = (format!("[{sec}]"), lit.trim());
+        text = match config::set_in(&text, &head, k, lit) {
+            Ok(t) => t,
+            Err(_) if sec.is_empty() => config::set_in(&format!("[_]\n{text}"), "[_]", k, lit)
+                .map_err(|e| format!("{e:#}"))?
+                .get(4..)
+                .unwrap_or_default()
+                .into(),
+            Err(_) => format!("{}\n\n{head}\n{k} = {lit}\n", text.trim_end()),
+        };
+    }
+    if diff(cur, &text).is_empty() {
+        return Err("fleet.toml has every line already".into());
+    }
+    Config::parse(&text).map_err(|e| format!("the lines make fleet.toml invalid: {e:#}"))?;
+    Ok(text)
 }
 
 fn dismiss(ctx: &Ctx, cfg: &Config, (fleet, n): (&str, u64), by: &str) -> Result<String> {
@@ -309,18 +391,32 @@ pub fn filed(ctx: &Ctx, cfg: &Config, thread: &str, text: &str, input: &Value) -
     emit(&ctx.state, cfg, e.passive())
 }
 
-/// The open rollouts (of `fleet`, else all) as `drover waiting` rows: the owner's, on their thread's orchestrator.
+/// The open rollouts (of `fleet`, else all) as `drover waiting` rows: the owner's, on the config card drover posted.
 pub fn rollout_rows(events: &[Event], fleet: Option<&str>) -> Vec<crate::waiting::Waiting> {
     let row = |o: &&Event| {
         let (t, n) = (o.str("to").unwrap_or("no thread"), o.issue.unwrap_or_default());
+        let card =
+            |e: &&Event| e.kind == "config-propose" && e.fleet == o.fleet && e.val("rollout").as_u64() == Some(n);
+        let card = events.iter().rfind(card);
+        let id = card.and_then(|c| c.str("id")).unwrap_or("?");
+        let (what, next) = match card.and_then(|c| c.str("reason")) {
+            Some(why) => (
+                format!("rollout not applied: {why}"),
+                format!("drover rollout dismiss {} {n}", o.fleet),
+            ),
+            None => (
+                format!("rollout not applied (card {id})"),
+                format!("drover config apply {id}"),
+            ),
+        };
         crate::waiting::Waiting {
             fleet: o.fleet.clone(),
             issue: n,
             lane: format!("orchestrator-{t}"),
             who: "owner",
-            what: format!("rollout not applied (thread {t})"),
+            what,
             since: o.ts,
-            next_cmd: Some(format!("drover config propose {t} <file> --rollout {n}")),
+            next_cmd: Some(next),
             promise: None,
         }
     };
