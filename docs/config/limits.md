@@ -71,6 +71,7 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `db_retry_millis` | `10` | the pause between a new database's WAL switch retries |
 | `notify_secs` | `15` | a notifier command or web push send is killed after this long |
 | `gate_check_minutes` | `30` | a premerge or gate check (a build or test run) is killed after this long |
+| `batch_settle_secs` | `30` | how long a batch merge waits for GitHub to call the next PR mergeable after the one before it landed |
 | `shed_read_millis` | `300` | how long drive's intake waits for shed's state changes |
 | `acp_judge_secs` | `30` | shed's judge denies a judged lane's tool call when `drover hook --acp` takes longer |
 | `acp_probe_seconds` | `120` | an agent's test run under shed's judge (before its first judged lane) gives up after this long |

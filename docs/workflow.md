@@ -127,6 +127,7 @@ flowchart TD
     other -.- k_db_busy_secs(["db_busy_secs = 60"])
     other -.- k_db_retry_millis(["db_retry_millis = 10"])
     other -.- k_notify_secs(["notify_secs = 15"])
+    other -.- k_batch_settle_secs(["batch_settle_secs = 30"])
     other -.- k_shed_read_millis(["shed_read_millis = 300"])
     other -.- k_acp_judge_secs(["acp_judge_secs = 30"])
     other -.- k_service_call_secs(["service_call_secs = 2"])

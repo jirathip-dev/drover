@@ -1,0 +1,1 @@
+# batch_max = 4   # #1787: one merge stacks up to this many ready PRs, gates them once and lands each by its own pinned merge; unset or 1 = one at a time (docs/config/batch.md)

@@ -62,10 +62,24 @@ pub(crate) fn merging(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, n: u
     )
 }
 
+impl Lock {
+    pub(crate) fn renew(&self, ctx: &Ctx, secs: u64) -> bool {
+        let l = crate::db::Lease {
+            expires_at: crate::now() + secs,
+            ..self.1.clone()
+        };
+        crate::db::renew(&ctx.state, &self.1, &l)
+    }
+}
+
+pub(crate) fn merge_held(ctx: &Ctx, fleet: &str) -> bool {
+    super::held(ctx, &format!("merge-{fleet}.lock")).is_some()
+}
+
 pub(super) fn limit(ctx: &Ctx, cfg: &Config, l: &crate::db::Lease) -> u64 {
     let merge = crate::db::leases(&ctx.state, "merge-");
-    if merge.iter().any(|m| m.pid == l.pid && m.host == l.host) {
-        return cfg.limits.gate_check_minutes * 60;
+    if let Some(m) = merge.iter().find(|m| m.pid == l.pid && m.host == l.host) {
+        return (cfg.limits.gate_check_minutes * 60).max(m.expires_at.saturating_sub(l.at));
     }
     cfg.limits.kick_max_secs
 }

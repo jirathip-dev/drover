@@ -420,3 +420,14 @@ pattern = "\"agents\", \"--json\""
 paths = ["crates/*/src/**"]
 except = ["crates/core/src/agents.rs"]
 reason = "#1694: shed's agent list is read in core::agents only"
+
+[[ban]]
+pattern = "batch::run"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/gate.rs", "crates/core/src/batch.rs"]
+reason = "#1787: gate::merge is the one door to a merge; a stack is built, checked and landed only under its merge lock"
+
+[[ban]]
+pattern = "\"push\""
+paths = ["crates/core/src/batch.rs"]
+reason = "#1787: a stack is never pushed; each PR lands by its own merge pinned to its reviewed head"

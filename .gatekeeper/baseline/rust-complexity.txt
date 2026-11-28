@@ -206,7 +206,6 @@ crates/core/src/drive.rs: fn start: over 60 lines
 crates/core/src/events.rs: fn fold_into: cognitive complexity over 25
 crates/core/src/events.rs: fn fold_into: over 60 lines
 crates/core/src/flow/chart.rs: fn markdown: over 60 lines
-crates/core/src/gate.rs: fn merge: over 60 lines
 crates/core/src/gate.rs: fn merged: over 60 lines
 crates/core/src/gate.rs: fn verdict: over 60 lines
 crates/core/src/guard.rs: fn turn: over 60 lines
