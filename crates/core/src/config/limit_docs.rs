@@ -205,6 +205,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "a premerge or gate check (a build or test run) is killed after this long",
     ),
     (
+        "batch_settle_secs",
+        "how long a batch merge waits for GitHub to call the next PR mergeable after the one before it landed",
+    ),
+    (
         "shed_read_millis",
         "how long drive's intake waits for shed's state changes",
     ),

@@ -394,6 +394,8 @@ pub struct Fleet {
     pub done_checks: Option<Vec<String>>,
     /// `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
     pub land: Option<Land>,
+    /// The most PRs one merge stacks and gates together (`docs/config/batch.md`); unset or 1 = one at a time.
+    pub batch_max: Option<usize>,
     /// How `merge` lands a PR: `squash` (default) or `merge`.
     #[serde(default)]
     pub merge: MergeMode,
@@ -752,6 +754,7 @@ pub struct Limits {
     pub db_retry_millis: u64,
     pub notify_secs: u64,
     pub gate_check_minutes: u64,
+    pub batch_settle_secs: u64,
     pub shed_read_millis: u64,
     pub acp_judge_secs: u64,
     pub acp_probe_seconds: u64,
@@ -897,6 +900,7 @@ impl Default for Limits {
             db_retry_millis: 10,
             notify_secs: 15,
             gate_check_minutes: 30,
+            batch_settle_secs: 30,
             shed_read_millis: 300,
             acp_judge_secs: 30,
             acp_probe_seconds: 120,
@@ -1340,6 +1344,12 @@ impl Config {
     fn routes_ok(&self) -> Result<()> {
         for (name, f) in &self.fleet {
             let (never, hits) = (f.never_routed(), crate::heavy::hits);
+            if f.batch_max == Some(0) {
+                bail!("fleet.{name}: batch_max is at least 1");
+            }
+            if f.riders() > 0 && f.fast_first().is_some() {
+                bail!("fleet.{name}: batch_max and fast-first landing together; keep one");
+            }
             for kind in f.remote.keys() {
                 let Some(ps) = f.heavy_kinds().remove(kind) else {
                     bail!("fleet.{name}.remote.{kind}: no [fleet.{name}.heavy] kind \"{kind}\" to route");
@@ -1480,6 +1490,10 @@ impl Fleet {
         let mut n: Vec<String> = crate::heavy::NEVER_ROUTED.split(',').map(String::from).collect();
         n.extend(self.remote_deny.iter().cloned());
         n
+    }
+    /// The riders one merge may take: `batch_max − 1`, 0 when batching is off.
+    pub fn riders(&self) -> usize {
+        self.batch_max.unwrap_or(1).saturating_sub(1)
     }
     /// The `[land]` table when this fleet lands fast-first.
     pub fn fast_first(&self) -> Option<&Land> {

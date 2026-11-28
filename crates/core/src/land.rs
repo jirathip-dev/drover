@@ -377,6 +377,9 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
             .map(|v| v.sessions())
             .unwrap_or_default(),
     );
+    if crate::drive::job::merge_held(ctx, fleet) {
+        return Ok(());
+    }
     let busy = |l: &str| ag.busy(l);
     let open = |s: &IssueState| {
         let pr = gh::cached_pr(ctx, fleet, s.issue);

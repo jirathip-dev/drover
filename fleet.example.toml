@@ -52,6 +52,7 @@ repo = "acme/web"
 local = "~/Projects/web"
 integration = "staging"
 # ask_thread = "t6"   # #541: lane asks go to this orchestrator thread first (default: the repo's most recently active one)
+# batch_max = 4   # #1787: one merge stacks up to this many ready PRs, gates them once and lands each by its own pinned merge; unset or 1 = one at a time (docs/config/batch.md)
 # build_dirs = ["ios/build"]   # freed with target, node_modules, .next and dist when a lane finishes or over budget
 # clone_build = ["target"]   # cp -cR (APFS clone) these local folders into a new lane when the lockfile matches
 # done_checks = ["npm run format:check", "drover arch-check"]   # #1362: `turn done` runs these in the lane's worktree (gate_check_minutes each) before any review; unset = `drover arch-check` with .drover/arch.toml, `cargo fmt --check` with a Cargo.toml

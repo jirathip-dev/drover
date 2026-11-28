@@ -788,56 +788,6 @@ fn premerge_file(ctx: &Ctx, fleet: &str, issue: u64) -> std::path::PathBuf {
     ctx.state.with_file_name(format!("premerge-{fleet}-{issue}.md"))
 }
 
-fn premerge(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
-    (fleet, issue): (&str, u64),
-    head: &str,
-) -> Result<Result<Option<u64>, Refusal>> {
-    let f = cfg.fleet(fleet)?;
-    let checks = premerge_checks(f);
-    let rules = std::fs::read_to_string(crate::repo_path(&f.local_path().join(".drover/rules.md"))).unwrap_or_default();
-    if checks.is_empty() && crate::lesson::checks(&rules).iter().all(|c| c.active) {
-        return Ok(Ok(None));
-    }
-    let (wt, into) = (
-        ctx.state.with_file_name(format!("premerge-{fleet}")),
-        format!("origin/{}", f.integration),
-    );
-    let dir = f.local_path();
-    let tip = || crate::clone::fetch_branches(ctx, r, &dir).and_then(|_| git(r, &dir, &["rev-parse", &into]));
-    let heavy = crate::heavy::Heavy::at(cfg, f, None);
-    for _ in 0..2 {
-        let base = tip()?;
-        scratch(r, &dir, &wt, &base)?;
-        let clean = git(r, &wt, &["merge", "--no-ff", "--no-edit", head]).is_ok();
-        let t = crate::clock::instant();
-        let fail = clean
-            .then(|| run_checks(r, (&heavy, &ctx.exe), &wt, &base, &checks))
-            .flatten();
-        if clean && fail.is_none() {
-            crate::lesson::record(ctx, r, &wt, (fleet, issue))?;
-        }
-        let secs = t.elapsed().as_secs();
-        if !clean {
-            return Ok(Err(refuse("NOT_MERGEABLE", format!("{head:.7} conflicts with {into}"))));
-        }
-        if let Some((c, o)) = fail {
-            let at = format!("{head:.7} merged with {into} @ {base:.7}, {secs}s");
-            return Err(premerge_failed(ctx, cfg, r, out, (fleet, issue), (head, &at), (c, &o))?.into());
-        }
-        if tip()? == base {
-            return Ok(Ok(Some(secs)));
-        }
-    }
-    Ok(Err(refuse(
-        "STAGING_MOVED",
-        format!("{into} moved during the premerge checks twice"),
-    )))
-}
-
 pub(crate) fn premerge_checks(f: &Fleet) -> Vec<Check> {
     let check = |p| match p {
         Premerge::Cmd(run) => Check {
@@ -948,25 +898,63 @@ pub fn merge(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
         writeln!(out, "already merged → {} (PR #{})", s("merge_sha"), s("pr"))?;
         return Ok(());
     }
-    let _one = crate::drive::job::merging(ctx, cfg, r, fleet, issue)?;
-    let landed = |num: &str| -> Result<bool> {
-        Ok(json(r, "gh", &["pr", "view", num, "-R", &f.repo, "--json", "state"])?.at("state") == "MERGED")
-    };
+    let lock = crate::drive::job::merging(ctx, cfg, r, fleet, issue)?;
     if let Some(a) = unlogged_merge(&events, fleet, issue) {
         let (num, head) = (a.str("pr").unwrap_or_default(), a.str("head").unwrap_or_default());
         if a.ts + MERGE_SECS > ctx.now && !crate::action::dead(r, a) {
             return refused("IN_FLIGHT", format!("skipped: merge of PR #{num} in flight"));
         }
         let d = json!({"pr": num, "head": head, "recovered": true});
-        let done = a.kind == "done" || landed(num)?;
+        let done = a.kind == "done" || landed(r, f, num)?;
         if a.kind == "intent" {
             crate::action::finish(&ctx.state, ctx.now, a, if done { "done" } else { "failed" }, d)?;
         }
         if done {
             let fast = a.data.get("fast") == Some(&json!(true));
-            return merged(ctx, cfg, r, out, (fleet, issue), &json!({}), (num, head, None, fast));
+            return merged(
+                ctx,
+                cfg,
+                r,
+                out,
+                (fleet, issue),
+                &json!({}),
+                (num, head, None, fast, None),
+            );
         }
     }
+    let lane = st.as_ref().is_none_or(|s| s.lane.is_none());
+    let (pr, res) = eligible(ctx, r, f, &events, (fleet, issue), st)?;
+    let fail = |rf: Refusal| -> Result<()> {
+        let pending = || gh::ci(&gh::required(pr.at("statusCheckRollup"), f.checks(&pr))) == "pending";
+        let quiet = ["STAGING_MOVED", "BEHIND"].contains(&rf.code)
+            || rf.code == "NO_PR" && lane
+            || rf.code == "CI_NOT_GREEN" && pending();
+        if !quiet {
+            let at = pr.at("headRefOid").as_str().unwrap_or_default();
+            refusal(ctx, cfg, &events, (fleet, issue, at), &rf)?;
+        }
+        Err(rf.into())
+    };
+    let lead = match res {
+        Ok(lead) => lead,
+        Err(rf) => return fail(rf),
+    };
+    let riders = crate::batch::plan(ctx, cfg, r, out, &events, fleet, &lead)?;
+    crate::batch::run(ctx, cfg, r, out, (fleet, &lock), lead, riders)?.or_else(fail)
+}
+
+fn landed(r: &dyn Runner, f: &Fleet, num: &str) -> Result<bool> {
+    Ok(json(r, "gh", &["pr", "view", num, "-R", &f.repo, "--json", "state"])?.at("state") == "MERGED")
+}
+
+pub(crate) fn eligible(
+    ctx: &Ctx,
+    r: &dyn Runner,
+    f: &Fleet,
+    events: &[Event],
+    (fleet, issue): (&str, u64),
+    st: Option<IssueState>,
+) -> Result<(Value, Result<crate::batch::Ready, Refusal>)> {
     let branch = branch_of(st.as_ref(), issue);
     let mut pr = if is_main(&f.integration) {
         json!({"baseRefName": f.integration})
@@ -976,7 +964,7 @@ pub fn merge(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
             _ => json!({"error": "no-pr"}),
         }
     };
-    crate::land::mark(ctx, Some(r), f, (fleet, issue), &events, &mut pr);
+    crate::land::mark(ctx, Some(r), f, (fleet, issue), events, &mut pr);
     let fast = pr.at("landing") == "fast-first";
     let h = pr.at("headRefOid").as_str().unwrap_or_default();
     let st = st.map(|mut s| {
@@ -1003,12 +991,12 @@ pub fn merge(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
                 )
             }) {
             Some((code, why)) => Err(refuse(code, why)),
-            None if unverified(&events, (fleet, issue), &head) => Err(refuse("NO_REPRO", no_verify_pass(f, &head))),
+            None if unverified(events, (fleet, issue), &head) => Err(refuse("NO_REPRO", no_verify_pass(f, &head))),
             None => Ok(head),
         },
         res => res,
     };
-    let res = match res.and_then(|h| crate::reroot::head(r, &events, (fleet, f), h)) {
+    let res = match res.and_then(|h| crate::reroot::head(r, events, (fleet, f), h)) {
         Ok(h) if fast && !crate::land::based(ctx, r, f, &h) => Err(refuse(
             "BEHIND",
             format!(
@@ -1018,33 +1006,38 @@ pub fn merge(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
         )),
         res => res,
     };
-    let res = match res {
-        Ok(h) => premerge(ctx, cfg, r, out, (fleet, issue), &h)?.map(|s| (h, s)),
-        Err(rf) => Err(rf),
+    let passed = |h: &str| {
+        let pass = |e: &&Event| e.is("verdict", fleet, issue) && e.str("sha") == Some(h);
+        events.iter().rfind(pass).map_or(0, |e| e.ts)
     };
-    let (head, secs) = match res {
-        Ok(h) => h,
-        Err(rf)
-            if rf.code == "STAGING_MOVED"
-                || rf.code == "BEHIND"
-                || rf.code == "NO_PR" && st.as_ref().is_none_or(|s| s.lane.is_none())
-                || rf.code == "CI_NOT_GREEN"
-                    && gh::ci(&gh::required(pr.at("statusCheckRollup"), f.checks(&pr))) == "pending" =>
-        {
-            return Err(rf.into());
-        }
-        Err(rf) => {
-            let at = pr.at("headRefOid").as_str().unwrap_or_default();
-            refusal(ctx, cfg, &events, (fleet, issue, at), &rf)?;
-            return Err(rf.into());
-        }
-    };
-    gh::flaky(ctx, out, (fleet, Some(issue)), &events, &head)?;
+    let ready = res.map(|head| crate::batch::Ready {
+        issue,
+        pr: pr.clone(),
+        num,
+        passed_at: passed(&head),
+        head,
+        fast,
+        rounds: st.as_ref().map_or(0, |s| s.rounds),
+    });
+    Ok((pr, ready))
+}
+
+pub(crate) fn land_one(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    fleet: &str,
+    m: &crate::batch::Ready,
+    (secs, batch): (Option<u64>, Option<&str>),
+) -> Result<()> {
+    let (f, events, issue, num, head) = (cfg.fleet(fleet)?, working(&ctx.state)?, m.issue, &m.num, &m.head);
+    gh::flaky(ctx, out, (fleet, Some(issue)), &events, head)?;
     gh::forget_pr(ctx, fleet, issue);
     let fields = "number,title,body,files,commits";
-    let view = ["pr", "view", &num, "-R", &f.repo, "--json", fields];
-    let info = json(r, "gh", &view).unwrap_or_else(|_| pr.clone());
-    let (subject, body, human) = merge_message(&info, issue, st.as_ref().map_or(0, |s| s.rounds), &head);
+    let view = ["pr", "view", num, "-R", &f.repo, "--json", fields];
+    let info = json(r, "gh", &view).unwrap_or_else(|_| m.pr.clone());
+    let (subject, body, human) = merge_message(&info, issue, m.rounds, head);
     if !human {
         let d = json!({"pr": num});
         emit(
@@ -1053,20 +1046,28 @@ pub fn merge(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
             Event::new(ctx.now, fleet, Some(issue), "no-human-summary", d),
         )?;
     }
-    let m = [
+    let flags = [
         f.merge.flags(),
-        &["--match-head-commit", &head, "--subject", &subject, "--body", &body],
+        &["--match-head-commit", head, "--subject", &subject, "--body", &body],
     ]
     .concat();
-    let inputs = json!({"pr": num, "head": head, "fast": fast});
-    let probe = |_: &Event| Ok(landed(&num)?.then(|| json!({"pr": num, "head": head})));
-    let full = [&["pr", "merge", &num, "-R", &f.repo][..], &m].concat();
+    let inputs = json!({"pr": num, "head": head, "fast": m.fast});
+    let probe = |_: &Event| Ok(landed(r, f, num)?.then(|| json!({"pr": num, "head": head})));
+    let full = [&["pr", "merge", num, "-R", &f.repo][..], &flags].concat();
     crate::hygiene::args(ctx, r, cfg, fleet, &full)?;
     let at = (fleet, issue, "merge", head.as_str());
     let intent = crate::action::begin(r, &ctx.state, ctx.now, at, inputs, MERGE_SECS, &probe)?.act()?;
     ok(r, "gh", &full)?;
     intent.done(json!({"pr": num, "head": head}))?;
-    merged(ctx, cfg, r, out, (fleet, issue), &pr, (&num, &head, secs, fast))
+    merged(
+        ctx,
+        cfg,
+        r,
+        out,
+        (fleet, issue),
+        &m.pr,
+        (num, head, secs, m.fast, batch),
+    )
 }
 
 fn refusal(
@@ -1106,7 +1107,7 @@ fn merged(
     out: &mut dyn Write,
     (fleet, issue): (&str, u64),
     pr: &Value,
-    (num, head, secs, fast): (&str, &str, Option<u64>, bool),
+    (num, head, secs, fast, batch): (&str, &str, Option<u64>, bool, Option<&str>),
 ) -> Result<()> {
     let f = cfg.fleet(fleet)?;
     let mc = json(
@@ -1118,6 +1119,9 @@ fn merged(
     let mut d = json!({"pr": num, "merge_sha": merge_sha, "verdict_sha": head, "into": f.integration});
     if let Some(s) = secs {
         d.put("premerge_secs", json!(s));
+    }
+    if let Some(b) = batch {
+        d.put("batch", json!(b));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "merged", d))?;
     let body = mc.at("body").as_str().unwrap_or_default();
