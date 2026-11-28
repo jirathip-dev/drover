@@ -1199,7 +1199,8 @@ fn a_design_stage_left_with_no_lane_and_its_flag_off_shows_on_waiting() {
     assert!(w.contains("#12") && w.contains("drover spawn sendmeter 12 impl"), "{w}");
 }
 
-const CARGO: &str = "[dependencies]\nblocks = { git = \"https://github.com/jirathip-dev/blocks\", tag = \"v0.4.0\" }\n\
+const BLOCKS_MANIFEST: &str =
+    "[dependencies]\nblocks = { git = \"https://github.com/jirathip-dev/blocks\", tag = \"v0.4.0\" }\n\
 swag = { git = \"https://github.com/jirathip-dev/swag\", rev = \"5e1f0c2\" },\n";
 const BLOCKS_DIR: &str = "tree .blocks\n\nguard.json\n";
 
@@ -1228,7 +1229,7 @@ fn a_blocks_repo_by_its_folder_its_pinned_dependency_or_its_recipe_gets_a_blocks
     let pin = "`swag = { git = \"https://github.com/jirathip-dev/swag\", rev = \"5e1f0c2\" }`";
     for (name, files, pack) in [
         ("design-blocks-dir", vec![(".blocks", BLOCKS_DIR)], none),
-        ("design-blocks-dep", vec![("Cargo.toml", CARGO)], pin),
+        ("design-blocks-dep", vec![("Cargo.toml", BLOCKS_MANIFEST)], pin),
         (
             "design-blocks-recipe",
             vec![(".drover/design.md", "- medium: blocks\n")],
@@ -1260,7 +1261,7 @@ fn a_recipe_or_issue_naming_another_medium_wins_over_blocks_detection() {
         ),
         (
             "design-blocks-issue-wins",
-            vec![(".blocks", BLOCKS_DIR), ("Cargo.toml", CARGO)],
+            vec![(".blocks", BLOCKS_DIR), ("Cargo.toml", BLOCKS_MANIFEST)],
             "UIKit screens in `ios/design/y/`.",
             "- Medium: UIKit. You write only under `docs/design/`, `ios/design/y/`;",
         ),

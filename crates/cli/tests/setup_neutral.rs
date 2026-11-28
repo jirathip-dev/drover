@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 const WORDS: [&str; 4] = ["jirathip", "sendmeter", "claude-accounts", "tail8c3301"];
 
-const EXCEPTIONS: [(&str, &str, &str); 10] = [
+const EXCEPTIONS: [(&str, &str, &str); 14] = [
     (
         "assets/swag/farm/sprites.svg",
         "(c) 2026 jirathip-dev, MIT",
@@ -52,6 +52,26 @@ const EXCEPTIONS: [(&str, &str, &str); 10] = [
         "README.md",
         "https://github.com/jirathip-dev/herdsman/issues/",
         "the project's own issue links",
+    ),
+    (
+        "roles/design.md",
+        "jirathip-dev/blocks",
+        "#1628: the repo a Blocks design lane files its stand-ins in",
+    ),
+    (
+        "roles/brief-blocks.md",
+        "jirathip-dev/blocks",
+        "#1628: the repo a Blocks design lane files its stand-ins in",
+    ),
+    (
+        "crates/core/src/design.rs",
+        "jirathip-dev/blocks",
+        "#1628: a pinned `blocks` dependency marks a Blocks repo",
+    ),
+    (
+        "crates/core/src/design.rs",
+        "jirathip-dev/swag",
+        "#1628: the pinned swag pack a Blocks design brief names",
     ),
 ];
 
