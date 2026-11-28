@@ -800,6 +800,57 @@ fn a_frozen_file_missing_at_the_base_may_be_created_and_then_only_shrinks() {
 }
 
 #[test]
+fn a_touched_baselined_fn_must_lower_its_entry_and_an_untouched_one_may_stay() {
+    let six = "fn big() {\n    a();\n    b();\n    c();\n    d();\n}\n";
+    let other = "fn huge() {\n    a();\n    b();\n    c();\n    d();\n}\n";
+    let baseline = "crates/core/src/big.rs:big 6\ncrates/core/src/other.rs:huge 6\n";
+    let d = committed(
+        "arch-shrink",
+        ARCH,
+        &[
+            ("crates/core/src/big.rs", six),
+            ("crates/core/src/other.rs", other),
+            (".drover/arch-baseline.txt", baseline),
+        ],
+    );
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    std::fs::write(d.join("crates/core/src/big.rs"), six.replace("b()", "e()")).unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("crates/core/src/big.rs:big: touched, so its baseline entry 6 must shrink"),
+        "{out}"
+    );
+    assert!(!out.contains("other.rs:huge: touched"), "{out}");
+    assert!(out.contains("1 violations"), "{out}");
+    let five = "fn big() {\n    a();\n    c();\n    d();\n}\n";
+    std::fs::write(d.join("crates/core/src/big.rs"), five).unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!(code, 1, "a shrunk fn whose entry stayed fails: {out}");
+    assert!(out.contains("big.rs:big: touched"), "{out}");
+    let lowered = "crates/core/src/big.rs:big 5\ncrates/core/src/other.rs:huge 6\n";
+    std::fs::write(d.join(".drover/arch-baseline.txt"), lowered).unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+}
+
+#[test]
+fn code_past_its_remove_by_date_fails_and_a_future_date_passes() {
+    let marker = |date: &str| format!("// TODO(#1) remove-by{} {date}\nfn shim() {{}}\n", ":");
+    let d = repo("arch-remove-by", &[("crates/core/src/shim.rs", &marker("2000-01-01"))]);
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("crates/core/src/shim.rs:1: past its remove-by date 2000-01-01: delete this code"),
+        "{out}"
+    );
+    std::fs::write(d.join("crates/core/src/shim.rs"), marker("2999-12-31")).unwrap();
+    let (code, out) = arch(&d, &[]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+}
+
+#[test]
 fn a_removed_or_retyped_line_of_an_append_only_file_fails_but_an_added_one_passes() {
     let keys = "a: string\nb: number\n";
     let d = committed(

@@ -363,7 +363,7 @@ struct Watch {
     seen: Option<u64>,
 }
 
-/// The theme moment an event plays on the page (an `ev`'s `k` on `/live`): merged, fail or needs-you.
+/// The theme moment an event plays on the page (an `ev`'s `k` on `/live`): merged, fail or needs-you; `/live` is retired (#746, #1560), remove-by: 2026-12-15.
 pub fn moment(e: &Event) -> Option<&'static str> {
     match e.kind.as_str() {
         "merged" => Some("merged"),

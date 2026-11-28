@@ -10,7 +10,7 @@
 - don't let ts-rs into the release build, let assets/types/ drift from `just types`, hand-copy a generated type, remove or retype a key of crates/cli/tests/golden/contract/v1/, call a client, or type into a chat a client runs: a breaking change is /api/v2, and a line for a client's chat is a row's prompt (enforced by: local/no-ts-rs, local/ts-types, local/append-only, core/arch's `/plugin/` ban, crates/cli/tests/contract_v1.rs, D2's test that a lane ask to an attached chat starts no shed session)
 - don't build HTML in crates/server outside the page shell and the lifeboat (enforced by: local/no-rust-html)
 - don't hard-code a Duration in crates/core/src: make it a [limits] key (enforced by: local/timing, scripts/timing-check.sh)
-- don't break .drover/arch.toml's layers, bans, size baselines, frozen or generated files (docs/workflow.md, web/dist and the brief goldens from `just gen`), or leave a doc stale (enforced by: core/arch and local/gen)
+- don't break .drover/arch.toml's layers, bans, size baselines (a baselined file or fn you touch lowers its entry), frozen or generated files (docs/workflow.md, web/dist and the brief goldens from `just gen`), leave code past its `remove-by:` date, or leave a doc stale (enforced by: core/arch and local/gen)
 - don't write a waiting or next-step line outside crate::promise::Say (enforced by: core/arch, #854 bans)
 - don't fail an active lesson check (enforced by: core/rules)
 - don't break the board at 390 px, its WebKit sheet close or first paint (enforced by: the local/ui-* and local/webkit-* gates)

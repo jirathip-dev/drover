@@ -143,12 +143,12 @@ pub fn detach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<String> 
     Ok(format!("{id} detached from {fleet}"))
 }
 
-/// The old role name a lane started before still carries (`DROVER_LANE`), read for one release.
+/// The old role name a lane started before still carries (`DROVER_LANE`), read for one release; #1560, remove-by: 2026-12-15.
 pub fn is_role(role: &str) -> bool {
     matches!(role, "orchestrator" | "conductor")
 }
 
-/// A `by` in the old spelling (`conductor-<thread>`: a flag, a pre-event) as `orchestrator-<thread>`.
+/// A `by` in the old spelling (`conductor-<thread>`: a flag, a pre-event) as `orchestrator-<thread>`; #1560, remove-by: 2026-12-15.
 pub fn by(b: &str) -> String {
     b.strip_prefix("conductor-")
         .map_or_else(|| b.into(), |t| format!("orchestrator-{t}"))

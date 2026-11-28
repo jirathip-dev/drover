@@ -67,6 +67,12 @@ any other fails. Once the baseline lists crossings they may only shrink: `--writ
 exits 1 naming each new one instead of adding it. A function runs from its `fn` / `function` / `const f = (…) => {` line to the first
 later line at its indent starting with `}`, so the source must be formatted.
 
+#1650: baselines only shrink. With `--base`, a baselined file or function the diff touches (any changed line in the
+file; for a function, a changed line inside it) fails unless the baseline lists it lower than at the base, or drops
+it: lower its entry to the new size in the same PR. Retired code (a compat shim, a "for one release" alias, a
+retired key or route) carries `remove-by: YYYY-MM-DD` on one of its lines, a `///` or `// TODO(#N)`; every checked
+file is scanned, and a marker whose date has passed fails until the code is deleted.
+
 ## Comments and docs (#735)
 
 ```toml
