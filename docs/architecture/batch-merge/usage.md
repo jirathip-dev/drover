@@ -99,7 +99,7 @@ of their own; the next merge step leads them.
 #[test]
 fn a_green_batch_runs_the_gate_once_and_merges_each_pr_at_its_own_head() {
     let (c, r) = fleet("batch_max = 4").ready(&[12, 15, 19]).gate(&["ok"]);
-    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    let (exit, out) = run(&c, &r, &["merge", "app", "12"]);
     assert_eq!(exit, 0, "{out}");
     assert_eq!(r.count("sh -c"), 1);
     assert_eq!(r.calls("gh pr merge"), ["1912 … --match-head-commit h12", "1915 … h15", "1919 … h19"]);

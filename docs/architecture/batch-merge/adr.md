@@ -144,7 +144,7 @@ One PR, four commits, each green.
 2. **Pick, stack, land.** `batch_max` and its load errors, `plan`, `Stack::build`, `land` with its two checks,
    `batch_settle_secs`, the three events, `auto_update`'s early return, the lease renewal and `job::limit`.
 3. **Red.** The retry, the run cache by tree, the bisect, `charge`.
-4. **Numbers and docs.** `drover stats land`'s batch line and `--batch <n>` replay, `docs/config/batch.md`, the
+4. **Numbers and docs.** the replay's numbers (in the PR body), `docs/config/batch.md`, the
    example config line, `doctor`'s strict-rule line, the PR body's numbers and `## Rollout`.
 
 ## The AC's numbers
@@ -155,11 +155,11 @@ One PR, four commits, each green.
   day's `merged` count.
 - Gate runs: `merged` events with `premerge_secs` and no `batch`, plus `batch-checked`, over the same count.
 
-Batching is off until the owner turns it on, so the PR cannot show a live "after". `batch::replay` gives it
+Batching is off until the owner turns it on, so the PR cannot show a live "after". A replay gives it
 from the same day's log: it re-forms the batches from each PR's PASS time, the day's merge order and the
 median gate time, and counts gate runs, catch-up pushes that fall inside a batch, and time under the lock.
-`drover stats land <fleet> --batch <n>` prints both columns. The rollout asks the owner to run the plain
-`drover stats land` a day after and compare.
+Built (#1787): the replay ran once over the log for the PR body, not as a `stats` flag; the rollout asks the
+owner to count the same way a day after and compare.
 
 The `## Rollout` lines, for the fleet of this repo first:
 
