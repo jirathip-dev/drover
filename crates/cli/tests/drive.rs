@@ -2664,6 +2664,25 @@ fn a_working_reviewer_in_the_way_still_waits() {
 }
 
 #[test]
+fn a_review_refused_lane_live_on_every_pass_gives_one_owner_card() {
+    let (c, r) = old_reviewer("drive-live-loop", "working");
+    let at = |mins: u64| drover::Ctx {
+        now: c.now + mins * 60,
+        ..c.clone()
+    };
+    let (out, _) = drive(&at(0), &r);
+    assert!(out.contains("REFUSED LANE_LIVE"), "{out}");
+    assert!(kinds(&c, "needs-human").is_empty());
+    for mins in [60, 90] {
+        drive(&at(mins), &r);
+    }
+    let nh = kinds(&c, "needs-human");
+    assert_eq!(nh.len(), 1, "{nh:?}");
+    assert_eq!(nh[0].str("code"), Some("LANE_LIVE"), "{nh:?}");
+    assert!(nh[0].str("reason").unwrap().contains("sendmeter-rev-12-r1"), "{nh:?}");
+}
+
+#[test]
 fn the_replayed_cooee_1_log_recovers_in_one_pass() {
     let (c, r) = old_reviewer("drive-cooee-1", "done");
     let old = "REFUSED LANE_LIVE: finished (done) lane(s) [\"sendmeter-rev-12-r1\"] in /wt/rev-12-r1; `--supersede` \
