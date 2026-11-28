@@ -10,60 +10,19 @@ pub(super) fn card(now: u64, cfg: &Config, ev: &[Event]) -> Value {
     let mut folds = vec![];
     for fleet in cfg.fleet.keys() {
         let open = crate::scope::open(ev, fleet);
-        let (run, wait): (Vec<&Event>, Vec<&Event>) = open.iter().partition(|q| crate::scope::started(ev, q));
-        if open.is_empty() {
-            continue;
-        }
-        let state = if run.is_empty() { "waits" } else { "scoping" };
-        folds.push(match wait.len() {
-            n if n > 0 && !run.is_empty() => format!("{fleet}: scoping, {n} waits"),
-            _ => format!("{fleet}: {state}"),
+        let waits = open.iter().filter(|q| !crate::scope::started(ev, q)).count();
+        folds.extend(match (open.len(), waits) {
+            (0, _) => None,
+            (n, w) if n == w => Some(format!("{fleet}: waits")),
+            (_, 0) => Some(format!("{fleet}: scoping")),
+            (_, w) => Some(format!("{fleet}: scoping, {w} waits")),
         });
-        for q in open {
-            let req = q.str("req").unwrap_or_default();
-            let running = crate::scope::started(ev, q);
-            let line = q.str("text").filter(|t| !t.is_empty()).unwrap_or("a screenshot");
-            let sub = if running {
-                format!("scoping · {}", crate::events::age(now.saturating_sub(q.ts)))
-            } else {
-                "waits · starts once the one above is filed or dropped".into()
-            };
-            let drop = k::Act {
-                tone: Some(k::Tone::Bad),
-                confirm: Some(k::Confirm {
-                    message: Some("Nothing is filed. Its scope lane exits.".into()),
-                    ..confirm("Drop this new issue?", "Drop")
-                }),
-                ..super::act(
-                    "Drop",
-                    "scope-drop",
-                    fields([("fleet", fleet.as_str().into()), ("req", req.into())]),
-                )
-            };
-            let row = titled(format!("scope-{fleet}-{req}"), format!("{fleet} · {}", cut(line, 60)))
-                .subtitle(plain(sub))
-                .swipe(vec![drop]);
-            rows.push(row.block());
-        }
+        rows.extend(open.into_iter().map(|q| row(now, ev, fleet, q)));
     }
-    let repos: Vec<String> = cfg.fleet.keys().cloned().collect();
-    let last = (ev.iter().rev())
-        .find(|e| e.kind == "scope-request")
-        .map(|e| e.fleet.clone());
-    let chip = k::ComposerChip {
-        name: "repo".into(),
-        cur: last.or_else(|| repos.first().cloned()),
-        all: repos,
-    };
-    let composer = k::Composer::new("new-issue")
-        .id("new-issue-line")
-        .placeholder("one line: the bug or the feature")
-        .chips(vec![chip])
-        .values(fields([("req", format!("new-{now}").into())]));
     if !rows.is_empty() {
         rows = vec![rows_list("scopes", rows)];
     }
-    rows.push(composer.block());
+    rows.push(composer(now, cfg, ev));
     let line = if folds.is_empty() {
         "+ new issue · a line or a screenshot, for any repo".into()
     } else {
@@ -76,6 +35,50 @@ pub(super) fn card(now: u64, cfg: &Config, ev: &[Event]) -> Value {
     let mut v = wire(&card.block());
     v.put("kind", "new-issue".into());
     v
+}
+
+fn row(now: u64, ev: &[Event], fleet: &str, q: &Event) -> k::Block {
+    let req = q.str("req").unwrap_or_default();
+    let line = q.str("text").filter(|t| !t.is_empty()).unwrap_or("a screenshot");
+    let sub = if crate::scope::started(ev, q) {
+        format!("scoping · {}", crate::events::age(now.saturating_sub(q.ts)))
+    } else {
+        "waits · starts once the one above is filed or dropped".into()
+    };
+    let drop = k::Act {
+        tone: Some(k::Tone::Bad),
+        confirm: Some(k::Confirm {
+            message: Some("Nothing is filed. Its scope lane exits.".into()),
+            ..confirm("Drop this new issue?", "Drop")
+        }),
+        ..super::act(
+            "Drop",
+            "scope-drop",
+            fields([("fleet", fleet.into()), ("req", req.into())]),
+        )
+    };
+    titled(format!("scope-{fleet}-{req}"), format!("{fleet} · {}", cut(line, 60)))
+        .subtitle(plain(sub))
+        .swipe(vec![drop])
+        .block()
+}
+
+fn composer(now: u64, cfg: &Config, ev: &[Event]) -> k::Block {
+    let repos: Vec<String> = cfg.fleet.keys().cloned().collect();
+    let last = (ev.iter().rev())
+        .find(|e| e.kind == "scope-request")
+        .map(|e| e.fleet.clone());
+    let chip = k::ComposerChip {
+        name: "repo".into(),
+        cur: last.or_else(|| repos.first().cloned()),
+        all: repos,
+    };
+    k::Composer::new("new-issue")
+        .id("new-issue-line")
+        .placeholder("one line: the bug or the feature")
+        .chips(vec![chip])
+        .values(fields([("req", format!("new-{now}").into())]))
+        .block()
 }
 
 impl Server<'_> {

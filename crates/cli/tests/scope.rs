@@ -49,16 +49,7 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
         .collect()
 }
 
-#[test]
-fn new_issue_spawns_one_scope_lane_with_the_line_and_screenshot_in_its_brief_and_a_second_waits() {
-    let c = ctx(&tmpdir("scope-new"), CONFIG);
-    let sh = FakeShed::attached(&c);
-    let r = Fake::default()
-        .reply("git -C", "")
-        .reply("which shed", "/opt/shed/bin/shed\n");
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let folded = card(&req(&s, "GET", "/screens/cards", "", &ck).1);
+fn assert_folded(folded: &Value) {
     assert_eq!(folded["kind"], "new-issue");
     assert_eq!(
         folded["fold"]["line"],
@@ -73,17 +64,9 @@ fn new_issue_spawns_one_scope_lane_with_the_line_and_screenshot_in_its_brief_and
         !folded.to_string().contains("A scope lane reads"),
         "no explanation line: {folded}"
     );
+}
 
-    let (code, v) = send(&s, &ck, "new-1", LINE, Some(("orders.png", b"PNG bytes")));
-    assert_eq!((code, &v["toast"]), (200, &json!("sendmeter: scoping")), "{v}");
-    let cards = req(&s, "GET", "/screens/cards", "", &ck).1;
-    let spawns = kinds(&c, "spawn");
-    assert_eq!(spawns.len(), 1, "{spawns:?}");
-    assert_eq!(
-        (spawns[0].str("role"), spawns[0].str("agent"), spawns[0].issue),
-        (Some("scope"), Some("sendmeter-scope-0"), Some(0))
-    );
-    assert!(sh.has("sendmeter-scope-0"), "{:?}", sh.methods());
+fn assert_brief(c: &drover::Ctx) {
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-0/.brief.md")).unwrap();
     assert!(
         brief.contains("# ROLE: SCOPE") && brief.contains(&format!("> {LINE}")),
@@ -96,6 +79,50 @@ fn new_issue_spawns_one_scope_lane_with_the_line_and_screenshot_in_its_brief_and
         .and_then(|l| l.strip_suffix('`'))
         .unwrap_or_else(|| panic!("the screenshot is in the brief: {brief}"));
     assert_eq!(std::fs::read(shot).unwrap(), b"PNG bytes");
+}
+
+fn assert_waiting(open: &Value) {
+    assert_eq!(open["fold"]["line"], "sendmeter: scoping, 1 waits");
+    let rows = &open["blocks"][0]["rows"];
+    assert_eq!(rows.as_array().map(Vec::len), Some(2), "{open}");
+    assert_eq!(rows[1]["swipe"][0]["action"], "scope-drop");
+    assert!(
+        rows[1]["swipe"][0]["confirm"]["title"].is_string(),
+        "[drop] has a confirm: {open}"
+    );
+    let drawn = drover_chat::text(open, 120, T).join("\n");
+    for want in [
+        "sendmeter: scoping, 1 waits",
+        "sendmeter · a second line",
+        "repo: sendmeter",
+        "one line: the bug",
+    ] {
+        assert!(drawn.contains(want), "the board draws {want:?}:\n{drawn}");
+    }
+}
+
+#[test]
+fn new_issue_spawns_one_scope_lane_with_the_line_and_screenshot_in_its_brief_and_a_second_waits() {
+    let c = ctx(&tmpdir("scope-new"), CONFIG);
+    let sh = FakeShed::attached(&c);
+    let r = Fake::default()
+        .reply("git -C", "")
+        .reply("which shed", "/opt/shed/bin/shed\n");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    assert_folded(&card(&req(&s, "GET", "/screens/cards", "", &ck).1));
+
+    let (code, v) = send(&s, &ck, "new-1", LINE, Some(("orders.png", b"PNG bytes")));
+    assert_eq!((code, &v["toast"]), (200, &json!("sendmeter: scoping")), "{v}");
+    let cards = req(&s, "GET", "/screens/cards", "", &ck).1;
+    let spawns = kinds(&c, "spawn");
+    assert_eq!(spawns.len(), 1, "{spawns:?}");
+    assert_eq!(
+        (spawns[0].str("role"), spawns[0].str("agent"), spawns[0].issue),
+        (Some("scope"), Some("sendmeter-scope-0"), Some(0))
+    );
+    assert!(sh.has("sendmeter-scope-0"), "{:?}", sh.methods());
+    assert_brief(&c);
     assert_eq!(card(&cards)["fold"]["line"], "sendmeter: scoping");
 
     let (code, v) = send(&s, &ck, "new-2", "a second line", None);
@@ -105,24 +132,7 @@ fn new_issue_spawns_one_scope_lane_with_the_line_and_screenshot_in_its_brief_and
     let cards = req(&s, "GET", "/screens/cards", "", &ck).1;
     assert_eq!(kinds(&c, "spawn").len(), 1, "the second waits");
     assert_eq!(kinds(&c, "scope-request").len(), 2, "a resend logs nothing");
-    let open = card(&cards);
-    assert_eq!(open["fold"]["line"], "sendmeter: scoping, 1 waits");
-    let rows = &open["blocks"][0]["rows"];
-    assert_eq!(rows.as_array().map(Vec::len), Some(2), "{open}");
-    assert_eq!(rows[1]["swipe"][0]["action"], "scope-drop");
-    assert!(
-        rows[1]["swipe"][0]["confirm"]["title"].is_string(),
-        "[drop] has a confirm: {open}"
-    );
-    let drawn = drover_chat::text(&open, 120, T).join("\n");
-    for want in [
-        "sendmeter: scoping, 1 waits",
-        "sendmeter · a second line",
-        "repo: sendmeter",
-        "one line: the bug",
-    ] {
-        assert!(drawn.contains(want), "the board draws {want:?}:\n{drawn}");
-    }
+    assert_waiting(&card(&cards));
 
     let drop = json!({"screen": "cards", "block": "new-issue", "action": "scope-drop",
         "values": {"fleet": "sendmeter", "req": "new-1"}});
@@ -170,21 +180,7 @@ fn draft(c: &drover::Ctx, r: &Fake, marks: &[&str]) -> String {
     out.trim().to_string()
 }
 
-#[test]
-fn approving_the_draft_files_exactly_its_body_and_queues_it_and_dropping_files_nothing() {
-    let c = ctx(&tmpdir("scope-draft"), CONFIG);
-    let r = Fake::default()
-        .reply(
-            "gh issue create",
-            "https://github.com/jirathip-dev/sendmeter/issues/77\n",
-        )
-        .reply(
-            "gh issue view 77",
-            r#"{"title": "fix: keep the row title at 390 px", "body": "x"}"#,
-        );
-    let (code, out) = run(&c, &r, &["draft", "sendmeter", "--title", "t", "--body", "b"]);
-    assert!(code == 3 && out.contains("NO_SCOPE"), "{code} {out}");
-    running(&c, "new-1");
+fn lane_asks(c: &drover::Ctx) {
     let asked = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
         .args([
             "ask",
@@ -209,8 +205,42 @@ fn approving_the_draft_files_exactly_its_body_and_queues_it_and_dropping_files_n
         asked.status.success() && !said.contains("IN_SCOPE"),
         "a scope lane's question reaches the owner: {said}"
     );
-    let q = kinds(&c, "needs-decision").pop().unwrap();
+    let q = kinds(c, "needs-decision").pop().unwrap();
     assert_eq!((q.str("agent"), q.issue), (Some("sendmeter-scope-0"), None), "{q:?}");
+}
+
+fn drops_file_nothing(c: &drover::Ctx, r: &Fake) {
+    running(c, "new-2");
+    let id = draft(c, r, &[]);
+    let (code, out) = run(c, r, &["answer", "sendmeter", &id, "2"]);
+    assert_eq!(code, 0, "{out}");
+    let creates = r
+        .calls
+        .borrow()
+        .iter()
+        .filter(|c| c.starts_with("gh issue create"))
+        .count();
+    assert_eq!(creates, 1, "drop files nothing");
+    assert_eq!(kinds(c, "queue").len(), 1, "drop queues nothing");
+    assert_eq!(kinds(c, "scope-done").pop().unwrap().str("outcome"), Some("dropped"));
+}
+
+#[test]
+fn approving_the_draft_files_exactly_its_body_and_queues_it_and_dropping_files_nothing() {
+    let c = ctx(&tmpdir("scope-draft"), CONFIG);
+    let r = Fake::default()
+        .reply(
+            "gh issue create",
+            "https://github.com/jirathip-dev/sendmeter/issues/77\n",
+        )
+        .reply(
+            "gh issue view 77",
+            r#"{"title": "fix: keep the row title at 390 px", "body": "x"}"#,
+        );
+    let (code, out) = run(&c, &r, &["draft", "sendmeter", "--title", "t", "--body", "b"]);
+    assert!(code == 3 && out.contains("NO_SCOPE"), "{code} {out}");
+    running(&c, "new-1");
+    lane_asks(&c);
     let id = draft(&c, &r, &["repro"]);
     let ask = kinds(&c, "needs-decision").pop().unwrap();
     assert_eq!(
@@ -244,41 +274,13 @@ fn approving_the_draft_files_exactly_its_body_and_queues_it_and_dropping_files_n
     );
     assert_eq!(kinds(&c, "lane-killed").len(), 1, "the scope lane closes");
 
-    running(&c, "new-2");
-    let id = draft(&c, &r, &[]);
-    let (code, out) = run(&c, &r, &["answer", "sendmeter", &id, "2"]);
-    assert_eq!(code, 0, "{out}");
-    let creates = r
-        .calls
-        .borrow()
-        .iter()
-        .filter(|c| c.starts_with("gh issue create"))
-        .count();
-    assert_eq!(creates, 1, "drop files nothing");
-    assert_eq!(kinds(&c, "queue").len(), 1, "drop queues nothing");
-    assert_eq!(kinds(&c, "scope-done").pop().unwrap().str("outcome"), Some("dropped"));
+    drops_file_nothing(&c, &r);
 }
 
 fn hook(lane: &str, tool: &str, input: &Value) -> String {
     let d = tmpdir("scope-hook");
     std::fs::write(d.join("fleet.toml"), CONFIG).unwrap();
-    let input = json!({"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": input});
-    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
-        .args(["hook", "--role", "impl"])
-        .current_dir(&d)
-        .env_remove("FLEET_LANE")
-        .env_remove("DROVER_SCRATCH_TARGET")
-        .env("DROVER_LANE", lane)
-        .env("FLEET_CONFIG", d.join("fleet.toml"))
-        .env("FLEET_STATE", d.join("state/events.jsonl"))
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
-    std::io::Write::write_all(&mut child.stdin.take().unwrap(), input.to_string().as_bytes()).unwrap();
-    let out = child.wait_with_output().unwrap();
-    assert!(out.status.success());
-    String::from_utf8(out.stdout).unwrap()
+    hook_in(&d, lane, tool, input)
 }
 
 #[test]

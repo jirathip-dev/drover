@@ -83,8 +83,7 @@ pub fn cli(ctx: &Ctx, cfg: &Config, r: &dyn Runner, a: Args) -> Result<String> {
     change(ctx, cfg, r, &a.fleet, a.parent, a.op)
 }
 
-/// `queue add`'s epic refusals: none of `issues` is an open epic's parent, and with `--epic` the add would pass `check`.
-pub fn queueable(ctx: &Ctx, fleet: &str, issues: &[u64], epic: Option<u64>) -> Result<()> {
+pub(crate) fn queueable(ctx: &Ctx, fleet: &str, issues: &[u64], epic: Option<u64>) -> Result<()> {
     let events = working(&ctx.state)?;
     let st = fold(&events);
     if let Some(n) = issues.iter().find(|n| is_parent(&events, &st, fleet, **n)) {
@@ -233,16 +232,14 @@ fn opened(events: &[Event], st: &States, fleet: &str) -> Members {
     m
 }
 
-/// The open epic `n` is a child of.
-pub fn parent_of(events: &[Event], st: &States, fleet: &str, n: u64) -> Option<u64> {
+pub(crate) fn parent_of(events: &[Event], st: &States, fleet: &str, n: u64) -> Option<u64> {
     opened(events, st, fleet)
         .into_iter()
         .find(|(_, s)| s.contains(&n))
         .map(|x| x.0)
 }
 
-/// `n` is an open epic's parent.
-pub fn is_parent(events: &[Event], st: &States, fleet: &str, n: u64) -> bool {
+pub(crate) fn is_parent(events: &[Event], st: &States, fleet: &str, n: u64) -> bool {
     opened(events, st, fleet).contains_key(&n)
 }
 

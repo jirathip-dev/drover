@@ -165,8 +165,7 @@ pub fn draft(
     Ok(writeln!(out, "{}", ask.str("id").unwrap_or_default())?)
 }
 
-/// A scope lane's draft ask.
-pub fn is_draft(ask: &Event) -> bool {
+pub(crate) fn is_draft(ask: &Event) -> bool {
     ask.kind == "needs-decision" && ask.data.get("scope").is_some()
 }
 

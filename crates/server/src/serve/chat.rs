@@ -489,8 +489,7 @@ pub fn file(ctx: &Ctx, events: &[Event], id: &str, name: &str, demo: bool) -> Op
     conductor::inside(ctx, &Config::kept(ctx).ok()?, id, p)
 }
 
-/// A composer's attachments: `name` the `/`-joined names, `data` the `,`-joined base64 bodies.
-pub fn attachments(name: &str, data: &str) -> Result<Vec<(String, Vec<u8>)>> {
+pub(super) fn attachments(name: &str, data: &str) -> Result<Vec<(String, Vec<u8>)>> {
     let mut names = name.split('/').map(|n| n.replace(char::is_control, ""));
     let decode = |d| {
         Ok((
