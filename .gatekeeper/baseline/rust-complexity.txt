@@ -72,6 +72,7 @@ crates/cli/tests/hosts.rs: fn a_remote_dry_run_prints_the_argv_the_spawn_sends: 
 crates/cli/tests/hosts.rs: fn a_remote_lane_runs_every_command_on_its_host: over 60 lines
 crates/cli/tests/hosts/wip.rs: fn on_integration: over 60 lines
 crates/cli/tests/hotspots.rs: fn fixture: over 60 lines
+crates/cli/tests/jobs.rs: fn a_red_integration_head_files_one_issue_naming_the_prs_since_green_and_a_green_head_closes_it: over 60 lines
 crates/cli/tests/judged/mod.rs: fn the_follower_tells_a_judged_lane_its_refusals_once_and_stops_one_that_acts_unasked: over 60 lines
 crates/cli/tests/keyboard_webkit.rs: fn the_focused_composer_stays_the_same_node_with_its_focus_text_and_caret_while_the_stream_changes_it: over 60 lines
 crates/cli/tests/land.rs: fn a_single_culprit_is_reverted_and_its_issue_reopened_with_the_log: over 60 lines
@@ -105,6 +106,7 @@ crates/cli/tests/page.rs: fn parity_1_a_paired_phone_answers_settles_cards_pause
 crates/cli/tests/page_drafts.rs: fn a_settled_config_run_or_secret_card_leaves_the_cards_and_the_thread_at_once: over 60 lines
 crates/cli/tests/page_drafts.rs: fn an_answered_card_leaves_the_cards_at_once_and_stays_gone_while_its_answer_runs: over 60 lines
 crates/cli/tests/page_drafts.rs: fn typed_text_focus_caret_and_scroll_survive_repaints_and_a_draft_survives_a_reload_until_sent: over 60 lines
+crates/cli/tests/paused_delivery.rs: fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answers: over 60 lines
 crates/cli/tests/perf.rs: fn boats_in: over 60 lines
 crates/cli/tests/perf.rs: fn huge_with: over 60 lines
 crates/cli/tests/perf.rs: fn the_state_read_stays_under_300ms_on_a_150k_event_log: over 60 lines
@@ -215,6 +217,7 @@ crates/core/src/hook.rs: fn unquote: over 60 lines
 crates/core/src/hosts.rs: fn call: over 60 lines
 crates/core/src/hosts.rs: fn place: over 60 lines
 crates/core/src/hotspots.rs: fn find: over 60 lines
+crates/core/src/jobs.rs: fn run: over 60 lines
 crates/core/src/land.rs: fn auto_update: over 60 lines
 crates/core/src/land.rs: fn watch: over 60 lines
 crates/core/src/lanes.rs: fn join: over 60 lines
