@@ -186,7 +186,9 @@ fn ended(events: &[Event], sessions: &Sessions, sp: &Event) -> Option<Exit> {
         Seen::Here(s) => match s.life {
             Life::Exited { code, last } => Some(Exit {
                 code,
-                cause: logged.as_ref().map_or(Cause::of(code, last), |x| x.cause),
+                cause: logged
+                    .as_ref()
+                    .map_or(Cause::of(code, last, s.note.as_deref()), |x| x.cause),
                 note: s.note.clone(),
                 said: logged.and_then(|x| x.said),
             }),
@@ -235,7 +237,8 @@ pub fn health(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &Sessions, s:
     }
     let since = stamp::since(events, lane).unwrap_or(sp.ts).max(sp.ts);
     let turned = crate::waiting::turn(events, s).is_some();
-    if live.quiet() && !turned && ctx.now >= since + cfg.limits.stall_minutes * 60 {
+    let due = live == Status::Failed || ctx.now >= since + cfg.limits.stall_minutes * 60;
+    if live.quiet() && !turned && due {
         return Health::Stalled { since };
     }
     Health::Fine

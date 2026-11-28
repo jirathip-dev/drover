@@ -27,6 +27,11 @@ const LOG: &[&str] = &[
     r#"{"seq":15,"ts":999014,"fleet":"sendmeter","issue":12,"type":"rollout-open","why":"apply the config"}"#,
     r#"{"seq":16,"ts":999015,"fleet":"sendmeter","issue":30,"type":"stall","agent":"sendmeter-impl-30","mins":40}"#,
     r#"{"seq":17,"ts":999016,"fleet":"drover","type":"host-busy","why":"load 9"}"#,
+    r#"{"seq":18,"ts":999017,"fleet":"sendmeter","type":"epic","op":"add","parent":50,"issues":[51,52,53],"title":"Payments","thread":"t1"}"#,
+    r#"{"seq":19,"ts":999018,"fleet":"sendmeter","issue":51,"type":"merged","pr":60}"#,
+    r#"{"seq":20,"ts":999019,"fleet":"sendmeter","issue":52,"type":"merged"}"#,
+    r#"{"seq":21,"ts":999020,"fleet":"sendmeter","issue":53,"type":"closed-other","by":"external"}"#,
+    r#"{"seq":22,"ts":999021,"fleet":"sendmeter","issue":50,"type":"epic-landed","push":true,"title":"Payments","merged":[{"issue":51,"pr":60,"title":"Refunds"},{"issue":52,"pr":null,"title":""}],"dropped":[53]}"#,
 ];
 
 fn board(name: &str) -> drover::Ctx {
@@ -157,6 +162,7 @@ fn a_row_goes_to_the_thread_that_queued_its_issue_else_the_repos_desk() {
     assert_eq!(to("merged-14"), json!({"k": "thread", "id": "t1"}));
     assert_eq!(to("alert-16"), json!({"k": "desk", "repo": "sendmeter"}));
     assert_eq!(to("alert-17"), json!({"k": "owner"}));
+    assert_eq!(to("epic-sendmeter-50"), json!({"k": "thread", "id": "t1"}));
     let settled = rows.iter().rfind(|r| r["key"] == "ask-sendmeter-q1").unwrap();
     assert_eq!(
         (settled["kind"].clone(), settled["open"].clone()),
@@ -216,7 +222,7 @@ fn the_stream_resumes_after_last_event_id() {
         got += &String::from_utf8_lossy(&buf[..n]);
     }
     let ids: Vec<&str> = got.lines().filter_map(|l| l.strip_prefix("id: ")).collect();
-    assert_eq!(ids, ["16", "17"], "{got}");
+    assert_eq!(ids[..2], ["16", "17"], "{got}");
     let data = got.lines().find_map(|l| l.strip_prefix("data: ")).unwrap();
     let row: Value = serde_json::from_str(data).unwrap();
     assert_eq!((row["seq"].clone(), row["kind"].clone()), (json!(16), json!("alert")));
@@ -278,5 +284,35 @@ fn the_manifest_keeps_contract_v1_and_names_every_chat_path() {
     assert!(m["destructive"].as_array().unwrap().iter().all(|d| actions.contains(d)));
     let mut fails = vec![];
     check("manifest", &m, &mut fails);
+    assert!(fails.is_empty(), "{}", fails.join("\n"));
+}
+
+#[test]
+fn the_new_issue_card_keeps_contract_v1_and_its_actions_are_in_the_manifest() {
+    let c = board("contract-new-issue");
+    for (kind, req) in [
+        ("scope-request", "new-1"),
+        ("scope-started", "new-1"),
+        ("scope-request", "new-2"),
+    ] {
+        let d = json!({"req": req, "text": "a line", "files": []});
+        drover::events::append(&c.state, &drover::events::Event::new(T, "sendmeter", None, kind, d)).unwrap();
+    }
+    let r = Fake::default();
+    let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let (code, cards) = get(&s, "/screens/cards", &bearer());
+    assert_eq!(code, "200", "{cards}");
+    let card = cards.as_array().unwrap().last().unwrap();
+    assert_eq!(card["id"], "new-issue", "{cards}");
+    let (_, m) = get(&s, "/api/v1/manifest", &bearer());
+    for a in ["new-issue", "scope-drop"] {
+        assert!(m["actions"].as_array().unwrap().contains(&json!(a)), "{a}: {m}");
+    }
+    assert!(
+        m["destructive"].as_array().unwrap().contains(&json!("scope-drop")),
+        "{m}"
+    );
+    let mut fails = vec![];
+    check("cards-new-issue", card, &mut fails);
     assert!(fails.is_empty(), "{}", fails.join("\n"));
 }

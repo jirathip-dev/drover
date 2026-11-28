@@ -143,12 +143,12 @@ pub fn detach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<String> 
     Ok(format!("{id} detached from {fleet}"))
 }
 
-/// The old role name a lane started before still carries (`DROVER_LANE`), read for one release.
+/// The old role name a lane started before still carries (`DROVER_LANE`), read for one release; #1560, remove-by: 2026-12-15.
 pub fn is_role(role: &str) -> bool {
     matches!(role, "orchestrator" | "conductor")
 }
 
-/// A `by` in the old spelling (`conductor-<thread>`: a flag, a pre-event) as `orchestrator-<thread>`.
+/// A `by` in the old spelling (`conductor-<thread>`: a flag, a pre-event) as `orchestrator-<thread>`; #1560, remove-by: 2026-12-15.
 pub fn by(b: &str) -> String {
     b.strip_prefix("conductor-")
         .map_or_else(|| b.into(), |t| format!("orchestrator-{t}"))
@@ -260,18 +260,6 @@ fn make(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, (harness, orch): Opt2,
         d.put("req", json!(r));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, repo, None, "thread-new", d))?;
-    if role(cfg, repo).is_ok() {
-        let waiting = |a: &&Event| {
-            a.kind == "needs-decision"
-                && a.fleet == repo
-                && a.data.get("lane_ask").is_some()
-                && crate::thread::route::routed_to(&events, a).is_none()
-                && events::closed(&events, a).is_none()
-        };
-        for a in events.iter().filter(waiting) {
-            crate::thread::route::route_row(ctx, cfg, &id, a)?;
-        }
-    }
     Ok(id)
 }
 

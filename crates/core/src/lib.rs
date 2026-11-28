@@ -15,6 +15,7 @@ pub mod baseline;
 pub mod breaker;
 pub mod card;
 pub mod check;
+pub mod chore;
 mod cli;
 pub mod clock;
 pub mod clone;
@@ -26,6 +27,7 @@ pub mod diagram;
 pub mod doctor;
 pub mod done;
 pub mod drive;
+pub mod epic;
 pub mod events;
 pub mod flow;
 pub mod gate;
@@ -39,6 +41,7 @@ pub mod hosts;
 pub mod hotspots;
 pub mod housekeep;
 pub mod hygiene;
+pub mod integration;
 pub mod jobs;
 pub mod land;
 pub mod lanes;
@@ -63,6 +66,7 @@ pub mod respawn;
 pub mod roots;
 pub mod runner;
 pub mod sandbox;
+pub mod scope;
 pub mod secret;
 pub mod service;
 pub mod session;
@@ -112,7 +116,7 @@ pub struct Ctx {
     pub now: u64,
     /// Tree `drover migrate` works on: `DROVER_HOME`, else `$HOME`.
     pub home: PathBuf,
-    /// Pre-rename fallbacks in use this run; data commands print them on stderr.
+    /// Pre-rename fallbacks in use this run; data commands print them on stderr; the herdsman rename layer, #1560, remove-by: 2026-12-15.
     pub hints: Vec<String>,
 }
 
@@ -393,34 +397,38 @@ fn owner_topic(text: &str) -> bool {
     text.contains('$') || words.any(|w| OWNER_WORDS.split_whitespace().any(|o| o == w))
 }
 
-/// `drover ask`: log a `needs-decision` for the asking lane (`DROVER_LANE`, else none), notify, print its id. a lane's ask (not a conductor's) goes to its repo's conductor thread first (`routed`, no push); with none, or the conductor not reached, to the owner.
+/// `drover ask`: log a `needs-decision` for the asking lane (`DROVER_LANE`, else none), notify the owner, print its id; a lane's ask (not an orchestrator's) that names no owner topic is refused `IN_SCOPE`.
 pub fn ask(
     ctx: &Ctx,
     cfg: &Config,
-    r: &dyn Runner,
     out: &mut dyn Write,
     (fleet, issue): (&str, Option<u64>),
     (q, opts): (&str, &[String]),
-    (rec, kind, thread): (Option<usize>, &str, Option<&str>),
+    (rec, thread): (Option<usize>, Option<&str>),
 ) -> Result<()> {
     cfg.fleet(fleet)?;
-    if kind == "routine" && rec.is_none() {
-        return gate::refused("NO_RECOMMENDATION", "a routine ask needs --recommend <n>");
-    }
-    if kind == "routine" && owner_topic(&format!("{q} {}", opts.join(" "))) {
-        return gate::refused("OWNER_TOPIC", "this ask touches an owner topic; ask it as --kind owner");
-    }
     if q.trim().is_empty() || opts.len() > 4 || rec.is_some_and(|n| n == 0 || n > opts.len()) {
         return gate::refused(
             "BAD_VALUE",
             "an ask is a non-empty question, at most 4 options, --recommend one of them",
         );
     }
+    let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
+    let from_lane = lane
+        .rsplit(':')
+        .next()
+        .is_some_and(|r| !r.is_empty() && r != "scope" && !orchestrator::is_role(r));
+    if from_lane && !owner_topic(&format!("{q} {}", opts.join(" "))) {
+        return gate::refused(
+            "IN_SCOPE",
+            "no owner topic (scope, spend, security or secrets, main or production, data deletion, a new \
+             dependency): decide it yourself, note the choice in the PR body under `## Decisions` and carry on",
+        );
+    }
     let events = working(&ctx.state)?;
     if let Some(t) = thread {
         orchestrator::fleet_of(&events, t)?;
     }
-    let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
     let at = |e: &Event| {
         format!(
             "{}:{}:{}",
@@ -432,32 +440,15 @@ pub fn ask(
     let starts = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "spawn-started");
     let spawned = events.iter().rev().filter(starts).find(|e| at(e) == lane);
     let (a, h) = spawned.map_or((None, None), |e| (e.str("agent"), e.str("host")));
-    let mut d = json!({"question": q, "options": opts, "recommend": rec, "agent": a, "host": h, "kind": kind});
+    let mut d = json!({"question": q, "options": opts, "recommend": rec, "agent": a, "host": h, "kind": "owner"});
     if let Some(t) = thread {
         d.put("thread", json!(t));
-    }
-    let from_lane = lane
-        .rsplit(':')
-        .next()
-        .is_some_and(|r| !r.is_empty() && !orchestrator::is_role(r));
-    let routed = crate::thread::route::route(cfg, &events, fleet).filter(|_| from_lane && thread.is_none());
-    if from_lane && thread.is_none() {
-        d.put("lane_ask", json!(true));
-    }
-    if let Some(t) = routed {
-        d.put("routed", json!(t));
     }
     let ev = Event::new(ctx.now, fleet, issue, "needs-decision", d);
     let ev = events::ask(&ctx.state, cfg, vec![ev], None)?
         .pop()
         .context("ask not logged")?;
-    let id = ev.str("id").unwrap_or_default();
-    if let Some(t) = routed {
-        if let Err(e) = crate::thread::route::lane_ask(ctx, cfg, r, t, &ev) {
-            crate::thread::route::to_owner(ctx, cfg, t, &ev, None, &format!("orchestrator not reached: {e:#}"))?;
-        }
-    }
-    Ok(writeln!(out, "{id}")?)
+    Ok(writeln!(out, "{}", ev.str("id").unwrap_or_default())?)
 }
 
 /// How long the owner may change a conductor's answer, in seconds (the board reads it).
@@ -757,6 +748,7 @@ pub(crate) fn answer_with(
     if design {
         crate::design::decide(ctx, cfg, r, ask, text, by)?;
     }
+    let settled = crate::scope::is_draft(ask) && crate::scope::decide(ctx, cfg, r, out, ask, text)?;
     let extend = ask.issue.filter(|_| ask.data.get("extend").is_some());
     let acts = match extend {
         Some(n) => !gate::past_extend(ctx, fleet, n)?,
@@ -811,7 +803,7 @@ pub(crate) fn answer_with(
         crate::thread::route::flow(ctx, cfg, t, &format!("answered {id}: {q} → {text}"))?;
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {agent}")?);
     }
-    if design {
+    if design || settled {
         return Ok(writeln!(out, "{fleet} {id}: {text}")?);
     }
     let Some(agent) = deliver(ctx, cfg, r, ask, &msg, true)? else {

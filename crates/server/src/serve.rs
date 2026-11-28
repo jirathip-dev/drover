@@ -363,7 +363,7 @@ struct Watch {
     seen: Option<u64>,
 }
 
-/// The theme moment an event plays on the page (an `ev`'s `k` on `/live`): merged, fail or needs-you.
+/// The theme moment an event plays on the page (an `ev`'s `k` on `/live`): merged, fail or needs-you; `/live` is retired (#746, #1560), remove-by: 2026-12-15.
 pub fn moment(e: &Event) -> Option<&'static str> {
     match e.kind.as_str() {
         "merged" => Some("merged"),
@@ -426,6 +426,7 @@ fn hung_up(s: &TcpStream) -> bool {
 enum Later {
     Thread(Event, String),
     Prompt(Box<lanes::Lane>, String, String),
+    Scope(String),
 }
 
 const JSON: &str = "application/json; charset=utf-8";
@@ -958,6 +959,9 @@ impl<'a> Server<'a> {
             match job {
                 Later::Thread(e, l) => chat::deliver(&c, &self.r, &(e, l)),
                 Later::Prompt(l, fleet, text) => self.tell(&c, &l, &fleet, &text),
+                Later::Scope(fleet) => {
+                    drop(Config::kept(&c).and_then(|cfg| crate::scope::next(&c, &cfg, &self.r, &mut vec![], &fleet)));
+                }
             }
             self.kick.store(true, Relaxed);
         }
@@ -2054,6 +2058,7 @@ impl<'a> Server<'a> {
                 done_n: done.len(),
                 backlog,
                 config: config_sheet(ctx, cfg, f, fc, st),
+                epics: crate::epic::open(ctx, events, st, f),
                 ..QueueCard::default()
             };
             if fc.paused {

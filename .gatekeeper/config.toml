@@ -33,9 +33,9 @@ platform = "linux"
 platform = "linux"
 
 [pin]
-version = "1.5.0"
-aarch64-apple-darwin = "8feed2b1fb09133a0a1bf6e3497d0dc5ca0645e7c260276d2cd1392391ad08bd"
-x86_64-unknown-linux-gnu = "8aa0ad6c8be69335f30d1a1c67fe7720c4a3b9a0da040bba664daeea2f79264c"
+version = "1.6.0"
+aarch64-apple-darwin = "99d6195d6e933d5c15f9bd7953cb9dbc1a6e0127e7d679e59d8a099906bd43df"
+x86_64-unknown-linux-gnu = "508ab5f1d83933d9956d81e1902fc7b1a51fb8fde2c32b264f8e5b861c77ba0e"
 
 [rust]
 unsafe_crates = ["drover-sys"]

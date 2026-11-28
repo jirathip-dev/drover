@@ -3,6 +3,8 @@ mod ci_flaky;
 mod common;
 #[path = "drive/done_lanes.rs"]
 mod done_lanes;
+#[path = "drive/lane_live.rs"]
+mod lane_live;
 #[path = "drive/no_baseline.rs"]
 mod no_baseline;
 #[path = "drive/remote_unlisted.rs"]
@@ -1315,13 +1317,11 @@ fn labelled_pr(head: &str, labels: &[&str]) -> String {
 }
 
 #[test]
-fn a_pass_at_the_head_gets_the_merge_label_once_and_a_moved_head_loses_it() {
+fn a_pass_at_the_head_gets_the_default_merge_label_once_and_a_moved_head_loses_it() {
     let dir = tmpdir("drive-label");
-    let cfg = CONFIG.replace(
-        "integration = \"staging\"",
-        "integration = \"staging\"\nmerge_label = \"merge-ready\"",
-    );
-    let c = ctx(&dir, &cfg);
+    let c = ctx(&dir, &CONFIG.replace("merge_label = \"off\"\n", ""));
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    assert_eq!(cfg.fleet["sendmeter"].merge_label.as_deref(), Some("merge-ready"));
     lane(&c, 10, "impl", "sendmeter-impl-12", "gone-12");
     std::fs::remove_dir_all(c.worktrees.join("sendmeter/gone-12")).unwrap();
     let (head, moved) = (sha("abc"), sha("def"));
@@ -1372,7 +1372,7 @@ fn a_pass_at_the_head_gets_the_merge_label_once_and_a_moved_head_loses_it() {
 }
 
 #[test]
-fn no_merge_label_parses_to_none_and_a_pass_adds_no_label() {
+fn merge_label_off_parses_to_none_and_a_pass_adds_no_label() {
     let c = ctx(&tmpdir("drive-no-label"), CONFIG);
     let cfg = drover::config::Config::load(&c.config).unwrap();
     assert_eq!(cfg.fleet["sendmeter"].merge_label, None);
@@ -1410,10 +1410,7 @@ fn no_merge_label_parses_to_none_and_a_pass_adds_no_label() {
 fn status_says_a_ready_pr_lacks_the_merge_label() {
     let c = ctx(
         &tmpdir("drive-label-status"),
-        &CONFIG.replace(
-            "integration = \"staging\"",
-            "integration = \"staging\"\nmerge_label = \"merge-ready\"",
-        ),
+        &CONFIG.replace("merge_label = \"off\"", "merge_label = \"merge-ready\""),
     );
     lane(&c, 10, "impl", "sendmeter-impl-12", "gone-12");
     std::fs::remove_dir_all(c.worktrees.join("sendmeter/gone-12")).unwrap();
@@ -2089,8 +2086,8 @@ fn an_unchanged_head_with_red_ci_stays_and_the_stall_says_what_is_missing() {
 #[test]
 fn a_no_change_round_is_reviewed_while_a_check_that_waits_for_the_label_is_absent() {
     let cfg = CONFIG.replace(
-        "integration = \"staging\"",
-        "integration = \"staging\"\nmerge_label = \"merge-ready\"\nrequired_checks = [\"quality\"]",
+        "merge_label = \"off\"",
+        "merge_label = \"merge-ready\"\nrequired_checks = [\"quality\"]",
     );
     let body = "FAIL (form-only)\n1. blocking [form]: the PR body lacks For humans";
     let (c, r, head) = no_change_in(&cfg, "drive-noop-label", "rev", body, "pending");

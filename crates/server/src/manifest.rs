@@ -1,7 +1,7 @@
 use crate::api::{Manifest, Place, Threads};
 use serde::Serialize;
 
-const ACTIONS: [&str; 27] = [
+const ACTIONS: [&str; 29] = [
     "filter",
     "drive",
     "pause",
@@ -29,9 +29,11 @@ const ACTIONS: [&str; 27] = [
     "host",
     "reap",
     "orphans",
+    "new-issue",
+    "scope-drop",
 ];
 
-const DESTRUCTIVE: [&str; 12] = [
+const DESTRUCTIVE: [&str; 13] = [
     "stop",
     "drop",
     "remove-fleet",
@@ -44,6 +46,7 @@ const DESTRUCTIVE: [&str; 12] = [
     "host",
     "reap",
     "orphans",
+    "scope-drop",
 ];
 
 const ATTACH: &str = "http://127.0.0.1:7777";

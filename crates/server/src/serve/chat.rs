@@ -489,6 +489,17 @@ pub fn file(ctx: &Ctx, events: &[Event], id: &str, name: &str, demo: bool) -> Op
     conductor::inside(ctx, &Config::kept(ctx).ok()?, id, p)
 }
 
+pub(super) fn attachments(name: &str, data: &str) -> Result<Vec<(String, Vec<u8>)>> {
+    let mut names = name.split('/').map(|n| n.replace(char::is_control, ""));
+    let decode = |d| {
+        Ok((
+            names.next().unwrap_or_default(),
+            B64.decode(d).context("a file is not base64")?,
+        ))
+    };
+    data.split(',').filter(|d| !d.is_empty()).map(decode).collect()
+}
+
 pub fn post(
     ctx: &Ctx,
     r: &dyn Runner,
@@ -501,15 +512,7 @@ pub fn post(
     let id = g("t");
     match g("op") {
         "new" | "say" | "queue" | "steer" => {
-            let mut names = g("name").split('/').map(|n| n.replace(char::is_control, ""));
-            let data = g("data").split(',').filter(|d| !d.is_empty());
-            let decode = |d| {
-                Ok((
-                    names.next().unwrap_or_default(),
-                    B64.decode(d).context("a file is not base64")?,
-                ))
-            };
-            let files = data.map(decode).collect::<Result<Vec<_>>>()?;
+            let files = attachments(g("name"), g("data"))?;
             let all: Vec<&str> = files.iter().map(|f| f.0.as_str()).collect();
             let all = all.join(", ");
             let text = or(g("text").trim().is_empty(), &all, g("text"));
@@ -828,6 +831,7 @@ fn owner_card(ctx: &Ctx, events: &[Event], e: &Event) -> Option<Msg> {
     };
     match e.kind.as_str() {
         "config-propose" => match crate::propose::settled(events, &s("id")) {
+            None if e.str("reason").is_some() => Some(m("config", s("id"), format!("✗ {}", s("reason")), false)),
             None => Some(m("config", s("id"), s("diff"), !crate::propose::stale(ctx, e))),
             Some(d) if d.val("applied") == true => Some(Msg {
                 answer: Some(Answered {
@@ -851,11 +855,14 @@ fn owner_card(ctx: &Ctx, events: &[Event], e: &Event) -> Option<Msg> {
 
 pub(super) fn drawn(ctx: &Ctx, events: &[Event], e: &Event, row: &crate::thread::Row, id: &str) -> Value {
     use crate::thread::RowKind as K;
+    let landed = (e.kind == "epic-landed").then(|| serde_json::from_value(Value::Object(e.data.clone())).ok());
     let m = Msg {
         seq: e.seq,
         ts: e.ts,
         kind: "note".into(),
-        text: row.text.clone(),
+        text: (landed.flatten()).map_or(row.text.clone(), |l| {
+            format!("{}\n{}", row.text, crate::epic::summary(&l))
+        }),
         link: link(e),
         ..Msg::default()
     };
@@ -888,7 +895,9 @@ pub(super) fn owner_cards(ctx: &Ctx, events: &[Event], paired: bool) -> Vec<Valu
     let all = crate::events::of_kind(events, &["config-propose", "secret-request"]);
     let card = |e: &Event| {
         let m = owner_card(ctx, events, e).filter(|m| m.answer.is_none())?;
-        Some(wire(&msg_body(ctx.now, e.str("thread")?, &m, paired, None).block()))
+        Some(wire(
+            &msg_body(ctx.now, e.str("thread").unwrap_or_default(), &m, paired, None).block(),
+        ))
     };
     all.into_iter().filter_map(card).collect()
 }
@@ -1089,17 +1098,23 @@ fn config_body(now: u64, key: &str, id: &str, m: &Msg, age: k::Time) -> k::Card 
         if m.open {
             buttons.insert(0, button("apply", "primary", "config-card", v("apply")).block());
         }
-        let sub = or(
-            m.open,
-            "a fleet.toml change for you to apply",
-            "stale: fleet.toml changed since, it can no longer apply",
-        );
+        let (sub, body) = match m.text.strip_prefix("✗ ") {
+            Some(_) => ("drover could not build this rollout: nothing to apply", m.text.clone()),
+            None => (
+                or(
+                    m.open,
+                    "a fleet.toml change for you to apply",
+                    "stale: fleet.toml changed since, it can no longer apply",
+                ),
+                format!("```diff\n{}\n```", m.text.trim_end()),
+            ),
+        };
         card("config")
             .tone(if m.open { k::Tone::Warn } else { k::Tone::Bad })
             .title(format!("config proposal {}", m.from))
             .subtitle(sub)
             .meta(age)
-            .blocks(vec![text("d", &format!("```diff\n{}\n```", m.text.trim_end()))])
+            .blocks(vec![text("d", &body)])
             .buttons(buttons)
     }
 }

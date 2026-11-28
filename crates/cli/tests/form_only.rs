@@ -2,6 +2,7 @@ mod common;
 use common::*;
 use drover::config::Config;
 use drover::events::{append, fold, read, Event, IssueState};
+use drover::thread::Target;
 use serde_json::json;
 
 const FORM: &str = "FAIL (form-only)\n\n- blocking [trailer] abc1234: `Co-Authored-By: an AI`\n  Proof: spec\n  \
@@ -141,7 +142,9 @@ fn one_substantive_or_untagged_blocker_counts() {
     assert!(out.contains("(round 2)"), "{out}");
     let s = state(&c);
     assert_eq!((s.form, logged(&c, "form-only-rejected")), (0, 2));
-    assert_eq!(read(&c.state).unwrap().last().unwrap().val("form_only"), false);
+    let ev = read(&c.state).unwrap();
+    let last = ev.iter().rev().find(|e| e.kind == "verdict").unwrap();
+    assert_eq!(last.val("form_only"), false);
 }
 
 #[test]
@@ -171,6 +174,47 @@ fn past_form_rounds_they_count_and_the_same_form_blocker_gets_stuck() {
         nh.str("reason"),
         Some("stuck: the same blocking finding `[docs-fresh] docs/x.md` in 3 FAILs in a row (2 fix rounds)")
     );
+}
+
+#[test]
+fn the_stuck_card_on_an_issue_queued_from_a_thread_lands_with_the_owner() {
+    let (c, d) = fixture("form-stuck-owner", "");
+    let ev = |ts, n: Option<u64>, kind: &str, d: serde_json::Value| {
+        append(&c.state, &Event::new(ts, "sendmeter", n, kind, d)).unwrap();
+    };
+    ev(3, None, "thread-new", json!({"thread": "t1", "title": "Run"}));
+    ev(4, None, "queue", json!({"op": "add", "issues": [12], "thread": "t1"}));
+    ev(
+        5,
+        Some(12),
+        "needs-human",
+        json!({"code": "RESPAWN_LOOP", "reason": "x"}),
+    );
+    let blocker = "FAIL\n\n- blocking [ac] src/a.rs:3: AC 1 missing\n";
+    for (ts, sha) in [(10, 'a'), (20, 'b'), (30, 'c')] {
+        let d2 = json!({"role": "rev", "agent": "sendmeter-rev-12", "branch": "issue-12"});
+        ev(ts, Some(12), "spawn", d2);
+        verdict(&c, &d, sha, &format!("{blocker}{SPEC}"));
+    }
+    let log = read(&c.state).unwrap();
+    let to = |code: &str| {
+        let nh = log
+            .iter()
+            .rfind(|e| e.kind == "needs-human" && e.str("code") == Some(code))
+            .unwrap();
+        let rows = drover::thread::rows(&log);
+        rows.into_iter()
+            .find(|(_, r)| r.seq == nh.seq)
+            .map(|(_, r)| r.to)
+            .unwrap()
+    };
+    assert_eq!(
+        to("RESPAWN_LOOP"),
+        Target::Thread { id: "t1".into() },
+        "the issue's other cards go home"
+    );
+    assert_eq!(to("STUCK"), Target::Owner);
+    assert!(!log.iter().any(|e| e.kind == "ask-owner" || e.kind == "thread-msg"));
 }
 
 #[test]

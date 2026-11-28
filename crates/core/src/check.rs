@@ -21,11 +21,13 @@ use std::path::Path;
 use std::sync::Arc;
 
 mod fire;
+mod idle;
 mod settle;
 mod stranded;
 mod sweep;
 mod unset;
 
+use idle::{busy, idle, Idle};
 use sweep::{disabled, sweep_off};
 pub use sweep::{drop_scratch, sweep, Sweep};
 
@@ -254,7 +256,15 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 ));
             }
             if let Some(a) = agent {
-                if let Some(sp) = spawned.filter(|sp| !crate::hosts::on_account(sp)) {
+                let hit = a.note.as_deref().filter(|_| a.limit_hit());
+                if let Some(d) = spawned
+                    .zip(hit)
+                    .and_then(|(sp, n)| crate::hosts::limit_alert(ctx, r, &events, sp, n))
+                {
+                    if held.insert(d.at("key").to_string()) {
+                        fire(ctx, cfg, out, &events, ("drover", None), "usage-limit", d)?;
+                    }
+                } else if let Some(sp) = spawned.filter(|sp| !crate::hosts::on_account(sp)) {
                     let seen = match a.status() {
                         Some(Status::Limited) => Some(("usage-limit", "hit the usage limit")),
                         _ if a.signed_out() => Some(("signed-out", "is signed out")),
@@ -1366,7 +1376,7 @@ pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) 
         let budget = cfg.limits.build_budget_gb;
         let trim = |out: &mut dyn Write| -> Result<u64> {
             sweep::reported(ctx, cfg, &on)?;
-            let live = live_lanes(ctx, cfg, &on)?;
+            let live = busy(ctx, &live_lanes(ctx, cfg, &on)?)?;
             (build_dirs(ctx, cfg, &on).iter())
                 .map(|b| trim_remote(&on, name, b, budget, &live, &mut *out))
                 .sum()
@@ -1420,13 +1430,14 @@ fn builds(ctx: &Ctx, cfg: &Config) -> Vec<std::path::PathBuf> {
 
 /// `trim_root` on each of this host's build folders. Bytes freed.
 pub fn trim_builds(ctx: &Ctx, cfg: &Config, budget: f64, live: &Live, out: &mut dyn Write, dry: bool) -> Result<u64> {
+    let idle = idle(ctx, live)?;
     builds(ctx, cfg)
         .iter()
-        .map(|b| trim_root(b, budget, live, out, dry))
+        .map(|b| trim_root(b, budget, live, &idle, out, dry))
         .sum()
 }
 
-fn trim_root(root: &Path, budget: f64, live: &Live, out: &mut dyn Write, dry: bool) -> Result<u64> {
+fn trim_root(root: &Path, budget: f64, live: &Live, idle: &Idle, out: &mut dyn Write, dry: bool) -> Result<u64> {
     if !root.is_dir() {
         return Ok(0);
     }
@@ -1459,11 +1470,17 @@ fn trim_root(root: &Path, budget: f64, live: &Live, out: &mut dyn Write, dry: bo
             writeln!(out, "keep {}: {who} is building", dir.display())?;
             continue;
         }
-        if lane(&dir, depth).is_some_and(|n| live.contains(&n)) {
-            writeln!(out, "keep {}: a live lane", dir.display())?;
-            continue;
-        }
-        let (size, why) = (du(&dir), if depth > 0 { "no live agent" } else { "not building" });
+        let name = lane(&dir, depth).unwrap_or_default();
+        let why = match idle.get(&name) {
+            Some(i) => format!("idle: {i}"),
+            None if live.contains(&name) => {
+                writeln!(out, "keep {}: a live lane", dir.display())?;
+                continue;
+            }
+            None if depth > 0 => "no live agent".into(),
+            None => "not building".into(),
+        };
+        let size = du(&dir);
         let verb = if dry { "would trim" } else { "trimmed" };
         if dry || std::fs::remove_dir_all(&dir).is_ok() {
             writeln!(out, "builds: {verb} {} ({:.2} GB, {why})", dir.display(), gb(size))?;
@@ -1540,8 +1557,9 @@ pub fn trim_on(ctx: &Ctx, on: &On, cfg: &Config, budget: f64, live: &Live, out: 
         return trim_builds(ctx, cfg, budget, live, out, false);
     };
     sweep::reported(ctx, cfg, on)?;
+    let live = busy(ctx, live)?;
     let dirs = build_dirs(ctx, cfg, on);
-    dirs.iter().map(|b| trim_remote(on, m, b, budget, live, out)).sum()
+    dirs.iter().map(|b| trim_remote(on, m, b, budget, &live, out)).sum()
 }
 
 fn trim_remote(on: &On, host: &str, root: &str, budget: f64, live: &Live, out: &mut dyn Write) -> Result<u64> {
@@ -1760,6 +1778,10 @@ pub(crate) fn closed_on_github(
             .map(|s| s.issue)
             .collect();
         open.extend((crate::queue::replay(&ev, name).iter().map(|i| i.issue)).filter(|n| state(*n).is_none()));
+        let watched: Vec<u64> = (crate::epic::watched(&ev, &st, name).into_iter())
+            .filter(|n| !open.contains(n))
+            .collect();
+        open.extend(watched);
         open.retain(|n| gh::cached_pr(ctx, name, *n).at("state") != "MERGED");
         let Ok(closed) = gh::closed(ctx, r, f, name, &open, ctx.now) else {
             continue;

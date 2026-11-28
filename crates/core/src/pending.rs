@@ -198,13 +198,13 @@ pub(crate) fn stuck(
         "HOST_FULL",
         "IN_FLIGHT",
         "ALREADY_DONE",
-        "LANE_LIVE",
         "EXIT",
         "ERROR",
         "STUCK",
     ];
     let carded = step == "start" || step == "respawn" && crate::drive::owner_refusal(code);
-    if carded || waits.contains(&code) || SOFT.contains(&code) || crate::starts::stops(Some(code)) {
+    let stale_check = step == "review" && code == "LANE_LIVE";
+    if carded || stale_check || waits.contains(&code) || SOFT.contains(&code) || crate::starts::stops(Some(code)) {
         return Ok(());
     }
     let mine = crate::events::of_issue(ev, fleet, n);

@@ -103,7 +103,10 @@ fn gone(
         d.put("said", json!(w));
     }
     stamp(ctx, &events, (fleet, issue), agent, d)?;
-    if exit.cause == Cause::Limit {
+    let hit = (exit.note.as_deref()).filter(|n| exit.cause == Cause::Limit && super::limit_text(n));
+    if let Some((sp, note)) = last_spawn(&events, agent).zip(hit) {
+        crate::hosts::hold_limit(ctx, cfg, &crate::runner::Real, sp, note)?;
+    } else if exit.cause == Cause::Limit {
         let events = crate::events::working(&ctx.state)?;
         if let Some(sp) = last_spawn(&events, agent).filter(|sp| !crate::hosts::on_account(sp)) {
             let d = crate::hosts::hold_alert(&events, sp, "hit the usage limit");
@@ -149,16 +152,19 @@ pub fn on_event(ctx: &Ctx, cfg: &Config, r: &dyn Runner, w: &crate::shed::Wire, 
         }
         EventKind::Exited { code } => {
             let open = pulse::update(ctx, &e.name, |p| *p = None)?.is_some_and(|p| p.turn_open);
-            let last = status(&crate::events::working(&ctx.state)?, &e.name).unwrap_or(Status::Unreported);
-            let cause = if open && last != Status::Limited {
+            let events = crate::events::working(&ctx.state)?;
+            let last = status(&events, &e.name).unwrap_or(Status::Unreported);
+            let note = latest(&events, &e.name).and_then(|e| e.str("note"));
+            let note = note.filter(|n| super::limit_note(last, Some(n))).map(String::from);
+            let cause = if open && last != Status::Limited && note.is_none() {
                 Cause::Crash
             } else {
-                Cause::of(*code, last)
+                Cause::of(*code, last, note.as_deref())
             };
             let exit = Exit {
                 code: *code,
                 cause,
-                note: None,
+                note,
                 said: None,
             };
             let said = || {
@@ -242,7 +248,7 @@ fn look(
         Life::Exited { code, last } => {
             let exit = Exit {
                 code,
-                cause: Cause::of(code, last),
+                cause: Cause::of(code, last, s.note.as_deref()),
                 note: s.note.clone(),
                 said: None,
             };
@@ -258,7 +264,7 @@ fn crashed_words<'a>(
 ) -> std::collections::BTreeMap<&'a str, Option<String>> {
     let events = crate::events::working(&ctx.state).unwrap_or_default();
     let new = |s: &&Session| {
-        matches!(s.life, Life::Exited { code, last } if Cause::of(code, last) == Cause::Crash)
+        matches!(s.life, Life::Exited { code, last } if Cause::of(code, last, s.note.as_deref()) == Cause::Crash)
             && latest(&events, &s.name).is_none_or(|e| e.str("state") != Some("gone"))
     };
     let names: Vec<&str> = got.filter(new).map(|s| s.name.as_str()).collect();

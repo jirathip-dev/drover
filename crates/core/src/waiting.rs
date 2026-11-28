@@ -169,13 +169,13 @@ fn no_verdict(events: &[Event], s: &IssueState, path: &str, gone: bool, w: &mut 
 
 type Seen = std::cell::OnceCell<std::collections::BTreeMap<String, crate::hosts::Seen>>;
 
-fn away((ctx, seen): (&Ctx, &Seen), cfg: &Config, events: &[Event], s: &IssueState) -> Option<(&'static str, String)> {
+fn away((ctx, seen): (&Ctx, &Seen), cfg: &Config, sp: Option<&Event>) -> Option<(&'static str, String)> {
     let down = |h: &str| {
         seen.get_or_init(|| crate::hosts::cached(ctx))
             .get(h)
             .is_some_and(|s| !s.up)
     };
-    let sp = last_spawn(events, s.active_lane()?.1)?;
+    let sp = sp?;
     let h = crate::hosts::offline_by(down, Some(cfg), Some(sp))?;
     let removed = sp.str("machine").is_some_and(|m| !crate::hosts::configured(cfg, m));
     Some(match sp.str("agent").filter(|_| removed) {
@@ -722,6 +722,7 @@ pub fn scan_where(
     let busy = |l: &str| agents.iter().any(|a| a.name == l && a.busy());
     let hung = crate::roots::hung_now(events);
     let probed = std::cell::OnceCell::new();
+    let starts = crate::starts::line(cfg, events, ctx.now);
     let mine = |st: &crate::events::States| {
         st.values()
             .filter(|s| cfg.fleet.contains_key(&s.fleet) && !s.settled() && keep(s))
@@ -937,7 +938,8 @@ pub fn scan_where(
             (w.who, w.next_cmd, w.promise) = ("none", None, None);
             w.what = format!("lane unknown: {m}'s shed listing unreadable");
         }
-        if let Some((who, what)) = away((ctx, &probed), cfg, mine, &s) {
+        let lane_sp = s.active_lane().and_then(|(_, a)| last_spawn(mine, a));
+        if let Some((who, what)) = away((ctx, &probed), cfg, lane_sp) {
             (w.who, w.what, w.next_cmd, w.promise) = (who, what, None, None);
         }
         let stuck = ["idle without pushing", "rev idle without", "reviewer exited"]
@@ -951,7 +953,7 @@ pub fn scan_where(
         {
             (w.who, w.what, w.next_cmd, w.promise) = ("none", t, None, None);
         }
-        let sp = s.active_lane().and_then(|(_, a)| last_spawn(mine, a));
+        let sp = lane_sp;
         if sp.is_some_and(|e| crate::hook::rules_stale(cfg, &s.fleet, e)) {
             w.what += " · rules stale";
         }
@@ -990,7 +992,7 @@ pub fn scan_where(
             };
         }
         if let Some((_, at)) = spawn
-            .then(|| crate::starts::place(cfg, events, ctx.now, (&s.fleet, s.issue)))
+            .then(|| crate::starts::place(&starts, (&s.fleet, s.issue)))
             .flatten()
         {
             w.what += &format!(" · {at}");

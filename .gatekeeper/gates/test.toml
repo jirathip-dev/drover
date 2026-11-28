@@ -5,13 +5,13 @@ leg = "test"
 setup = ["rust", "node"]
 shards = { hosted = 4, self-hosted = 4 }
 run = '''
-if [ -z "${CI:-}" ]; then echo "CI's test leg runs it: the whole suite is 19 min serial on a lane's host"; exit 0; fi
+if [ "${GATEKEEPER_HOST:-}" != ci ]; then echo "CI's test leg runs it: the whole suite is 19 min serial on a lane's host"; exit 0; fi
 set -eu
-if [ -n "${CI:-}" ]; then export CARGO_PROFILE_DEV_DEBUG=line-tables-only; fi
+export CARGO_PROFILE_DEV_DEBUG=line-tables-only
 shard={shard}
 targets=--workspace
 if [ "${shard#*/}" != 1 ]; then targets="--workspace $(scripts/test-shards.sh "${shard%/*}")"; fi
-if ! cargo nextest --version >/dev/null 2>&1 && [ -n "${CI:-}" ]; then
+if ! cargo nextest --version >/dev/null 2>&1; then
   curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C "${CARGO_HOME:-$HOME/.cargo}/bin"
 fi
 if cargo nextest --version >/dev/null 2>&1; then

@@ -74,12 +74,14 @@ Production code added only for tests counts against the change too.
 ## Standing answers (decide, don't ask)
 
 - The PR body states `src/ net +N (budget +M)` with one line on why; the budget is a guide, never a gate.
+- A choice inside the issue's scope (a test or tooling pick, an ordering, a fix-round call): make it, list it
+  in the PR body under `## Decisions` with one line on why, and carry on; `drover ask` is for owner topics only.
 - Staging moved or conflicts: merge `origin/<integration>` again and push. Repeat as needed
   (no limit inside one round).
 - Staging itself broken by someone else's merge: fix the minimal break in your PR, say
   "staging build fix" in the body, and carry on.
-- A host tool died (Docker, simulator): retry once after 2 min; then `drover ask --kind owner`
-  (lanes may not change the host).
+- A host tool died (Docker, simulator): retry once after 2 min; then `drover ask` (an owner ask:
+  lanes may not change the host).
 - A shared-file edit another open PR also makes: use the exact text from the issue
   amendment.
 

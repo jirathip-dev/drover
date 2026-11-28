@@ -319,23 +319,7 @@ fn a_job_that_fails_to_file_logs_job_failed() {
 fn only_an_orchestrator_or_the_owner_runs_a_job_by_hand_and_any_lane_lists() {
     let d = tmpdir("jobs-hook");
     std::fs::write(d.join("fleet.toml"), CONFIG).unwrap();
-    let hook = |lane: &str, cmd: &str| {
-        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-        let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
-            .args(["hook", "--role", "impl"])
-            .current_dir(&d)
-            .env_remove("FLEET_LANE")
-            .env_remove("DROVER_SCRATCH_TARGET")
-            .env("DROVER_LANE", lane)
-            .env("FLEET_CONFIG", d.join("fleet.toml"))
-            .env("FLEET_STATE", d.join("state/events.jsonl"))
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .spawn()
-            .unwrap();
-        std::io::Write::write_all(&mut child.stdin.take().unwrap(), input.to_string().as_bytes()).unwrap();
-        String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
-    };
+    let hook = |lane: &str, cmd: &str| hook_in(&d, lane, "Bash", &json!({"command": cmd}));
     for lane in ["sendmeter:12:impl", "sendmeter:12:deps", "sendmeter:12:rev"] {
         assert!(
             hook(lane, "drover job sendmeter deps").contains("REFUSED ORCHESTRATOR_ONLY"),
@@ -345,4 +329,115 @@ fn only_an_orchestrator_or_the_owner_runs_a_job_by_hand_and_any_lane_lists() {
         assert_eq!(hook(lane, "drover lesson digest sendmeter --days 7"), "", "{lane}");
     }
     assert_eq!(hook("sendmeter:-:orchestrator", "drover job sendmeter lesson"), "");
+}
+
+const GATE: &str = "sh -c renice -n 19 -p $$ >/dev/null 2>&1; cd \"$0\" && make lint";
+const RED: &str = "sh -c cd \"$0\" && /opt/drover/bin/drover integration sendmeter";
+
+fn gated(name: &str) -> drover::Ctx {
+    let cfg =
+        config("\n[fleet.sendmeter.job.integration]\nevery = \"1h\"\n[fleet.sendmeter.job.audit]\nevery = \"off\"\n")
+            .replace(
+                "integration = \"staging\"   # never main",
+                "integration = \"staging\"\npremerge = [\"make lint\"]",
+            );
+    ctx(&tmpdir(name), &cfg)
+}
+
+fn at(r: Fake, sha: &str) -> Fake {
+    r.once("git rev-parse HEAD", 0, &format!("{sha}\n"))
+}
+
+fn check(c: &drover::Ctx, r: &Fake) -> (i32, String) {
+    run(c, r, &["integration", "sendmeter"])
+}
+
+#[test]
+fn a_red_integration_head_files_one_issue_naming_the_prs_since_green_and_a_green_head_closes_it() {
+    let c = gated("integration-red");
+    let _sh = FakeShed::attached(&c);
+    let (a, b, d) = ("a".repeat(40), "b".repeat(40), "d".repeat(40));
+    let r = at(fake().reply(GATE, "ok\n"), &a);
+    assert_eq!(check(&c, &r), (0, "aaaaaaa is green\n".into()));
+
+    let r = fake()
+        .once(GATE, 1, "lint: L1 in src/x.rs\n")
+        .reply("git log --first-parent", "fix x (#12)\nadd y (#13)\n");
+    let r = at(r, &b);
+    let (code, red) = check(&c, &r);
+    assert_eq!(code, 1, "{red}");
+    assert!(
+        red.contains("`make lint` failed at bbbbbbb:\nlint: L1 in src/x.rs"),
+        "{red}"
+    );
+    assert!(
+        red.contains("PRs merged since aaaaaaa, the last green head: #12, #13"),
+        "{red}"
+    );
+    assert!(r.called(&format!("git log --first-parent --format=%s {a}..HEAD")));
+
+    let short = format!("git -C {} rev-parse", c.state.with_file_name("job-sendmeter").display());
+    let r = fake()
+        .once(RED, 1, &red)
+        .once(&short, 0, "bbbbbbb\n")
+        .reply("gh issue create", &format!("{CREATED}97\n"));
+    tick(&c, NOW, &r);
+    let created = r
+        .calls
+        .borrow()
+        .iter()
+        .find(|l| l.starts_with("gh issue create"))
+        .cloned();
+    let created = created.expect("a red head files");
+    assert!(
+        created.contains("--title integration: sendmeter red at bbbbbbb --body"),
+        "{created}"
+    );
+    assert!(
+        created.contains("#12, #13") && created.contains("lint: L1"),
+        "{created}"
+    );
+
+    let r = fake()
+        .once(RED, 1, &red)
+        .once(&short, 0, "ccccccc\n")
+        .reply("gh issue create", &format!("{CREATED}98\n"));
+    let (code, out) = run(&c, &r, &["job", "sendmeter", "integration"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("its issue #97 is open") && !r.called("gh issue create"),
+        "{out}"
+    );
+
+    let r = at(fake().reply(GATE, "ok\n").reply("gh issue close", ""), &d);
+    let (code, out) = check(&c, &r);
+    assert_eq!(code, 0, "{out}");
+    let close = r
+        .calls
+        .borrow()
+        .iter()
+        .find(|l| l.starts_with("gh issue close 97"))
+        .cloned();
+    assert!(close.expect("closed").contains("--comment ddddddd is green"));
+    assert_eq!(
+        fold(&read(&c.state).unwrap())[&("sendmeter".into(), 97)].state,
+        "closed"
+    );
+}
+
+#[test]
+fn the_same_integration_head_is_never_checked_twice_and_the_board_shows_its_last_check() {
+    let c = gated("integration-once");
+    let _sh = FakeShed::attached(&c);
+    let sha = "e".repeat(40);
+    let r = at(at(fake().once(GATE, 1, "boom\n"), &sha), &sha);
+    assert_eq!(check(&c, &r).0, 1);
+    let (code, out) = check(&c, &r);
+    assert_eq!((code, out.as_str()), (0, "eeeeeee is checked already\n"));
+    assert_eq!(r.count(GATE), 1, "{:?}", r.calls.borrow());
+
+    let (_, board) = run(&c, &r, &["board", "sendmeter"]);
+    assert!(board.contains("integration eeeeeee red 0s ago"), "{board}");
+    let (_, waiting) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert!(waiting.contains("sendmeter: integration eeeeeee red"), "{waiting}");
 }

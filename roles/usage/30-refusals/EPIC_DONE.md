@@ -1,0 +1,1 @@
+- EPIC_DONE: epic add: after it no child would be open (all merged or closed): nothing to track, and an add never lands an epic

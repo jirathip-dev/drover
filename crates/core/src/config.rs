@@ -30,7 +30,7 @@ pub struct Config {
     /// The retired account keys still set (`Config::warnings`).
     #[serde(skip)]
     pub retired: Vec<String>,
-    /// Fleet.toml still names `[conductor]` or a `role.conductor` (doctor's deprecation line).
+    /// Fleet.toml still names `[conductor]` or a `role.conductor` (doctor's deprecation line); #1560, remove-by: 2026-12-15.
     #[serde(skip)]
     pub old_names: bool,
     /// The Telegram bridge is removed; a leftover `[telegram]` is a warning (`Config::warnings`).
@@ -323,7 +323,7 @@ pub struct Fleet {
     /// The only checks merge, `check` and `wait` look at (latest run of each); empty = all.
     #[serde(default)]
     pub required_checks: Vec<String>,
-    /// A label the PR needs for its full CI (e.g. `merge-ready`), kept on it exactly while a PASS stands at its head; unset = none.
+    /// A label the PR needs for its full CI, kept on it exactly while a PASS stands at its head; unset = `merge-ready`, `off` = none.
     pub merge_label: Option<String>,
     /// `always` catches every behind ready PR up with integration; unset/`needed`: only on a conflict or a strict rule.
     pub update_ready: Option<String>,
@@ -352,7 +352,7 @@ pub struct Fleet {
     /// Build caches shared by the fleet's lanes, exported like `env`; opt-in.
     #[serde(default)]
     pub shared_cache: BTreeMap<String, String>,
-    /// Build folders a new lane APFS-clones from `local` on a lockfile match; `clone_node_modules` is its alias for one release.
+    /// Build folders a new lane APFS-clones from `local` on a lockfile match; `clone_node_modules` is its alias for one release; remove-by: 2026-12-15.
     #[serde(default)]
     pub clone_build: Vec<String>,
     #[serde(default)]
@@ -705,6 +705,7 @@ pub struct Limits {
     pub min_free_mem_gb: f64,
     pub effort: Option<String>,
     pub ask_default_minutes: u64,
+    pub promote_after_merges: u64,
     pub ask_expire_hours: u64,
     pub thread_resend_minutes: u64,
     pub idle_reap_minutes: u64,
@@ -845,6 +846,7 @@ impl Default for Limits {
             min_free_mem_gb: 2.0,
             effort: None,
             ask_default_minutes: 30,
+            promote_after_merges: 10,
             ask_expire_hours: 24,
             thread_resend_minutes: 5,
             idle_reap_minutes: 10,
@@ -1040,7 +1042,7 @@ impl Config {
         own.or(&self.hygiene).or(&hygiene_default())
     }
 
-    /// Each retired key still set, as `(key, what to do)`: doctor's `!` rows, the board's line, `check`'s `config-warning`; never a load error.
+    /// Each retired key still set, as `(key, what to do)`: doctor's `!` rows, the board's line, `check`'s `config-warning`; never a load error; #1560, remove-by: 2026-12-15.
     pub fn warnings(&self) -> Vec<(&'static str, String)> {
         let gone = "removed (#1576): accounts are shed's, a role or fleet names one with `account`; delete";
         let acct = (!self.retired.is_empty()).then(|| ("[accounts]", format!("{gone} {}", self.retired.join(", "))));
@@ -1256,6 +1258,11 @@ impl Config {
             f.form_rounds.get_or_insert(c.limits.form_rounds);
             f.respawn_per_pass.get_or_insert(c.limits.respawn_per_pass);
             f.ci_flaky_retries.get_or_insert(c.limits.ci_flaky_retries);
+            f.merge_label = match f.merge_label.take().as_deref() {
+                None => Some("merge-ready".into()),
+                Some("off") => None,
+                Some(l) => Some(l.into()),
+            };
             (f.bad, f.pipeline, f.jobs) = (p.validate(name, &f.role), Some(p), jobs(name, &c.job, f)?);
         }
         for (name, f) in &mut c.fleet {
@@ -1497,7 +1504,7 @@ impl Fleet {
     }
     /// The configured role a lane runs as: a role only a job names is impl's unless its own role is set.
     pub fn role_key<'a>(&self, role: &'a str) -> &'a str {
-        if !self.role.contains_key(role) && self.jobs.values().any(|j| j.role == role) {
+        if !self.role.contains_key(role) && (role == "scope" || self.jobs.values().any(|j| j.role == role)) {
             "impl"
         } else {
             role

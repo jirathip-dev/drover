@@ -2333,3 +2333,66 @@ fn a_host_with_the_shed_job_starts_it_and_never_autostarts_a_server_outside_it()
     assert!(line.starts_with("✗ shed — "), "{line}");
     assert!(!f.called(&auto), "{:?}", f.calls.borrow());
 }
+
+fn errored(b: &FakeShed, note: &str) {
+    b.lock().terms.get_mut("sendmeter-impl-12").unwrap()["reported"] = json!({"state": "error", "note": note});
+}
+
+#[test]
+fn an_acp_lane_in_error_on_its_weekly_limit_raises_one_usage_limit_and_waits_for_the_reset() {
+    let (c, b, f, wt, _) = acp_lane("acp-weekly");
+    errored(
+        &b,
+        "Internal error: You've hit your weekly limit · resets 8am (Asia/Bangkok)",
+    );
+    let cli = Push(b.cli(&f), wt.clone());
+    for s in [60, 120] {
+        look(&later(&c, s), &b.on(&cli));
+        let (code, out) = run(&later(&c, s), &cli, &["check"]);
+        assert_eq!(code, 0, "{out}");
+    }
+    let hit = logged(&c, "usage-limit");
+    assert_eq!(hit.len(), 1, "one alert: {hit:?}");
+    let until = hit[0].data.get("until").and_then(Value::as_u64).expect("a reset time");
+    assert!(until > c.now + 120 && until <= c.now + 86_400, "{hit:?}");
+    assert!(hit[0].str("reason").unwrap().contains("usage limit"), "{hit:?}");
+    let out = drive_at(&c, &cli, 180);
+    let driven = logged(&c, "driven");
+    assert!(
+        driven.iter().all(|e| e.str("code") != Some("LANE_LIVE")) && !out.contains("LANE_LIVE"),
+        "{out}"
+    );
+    assert!(driven.iter().any(|e| e.str("code") == Some("LOGIN_NEEDED")), "{out}");
+    assert_eq!(logged(&c, "spawn").len(), 1, "no new lane before the reset: {out}");
+    let out = drive_at(&c, &cli, until - c.now + 60);
+    assert_eq!(logged(&c, "spawn").len(), 2, "respawned after the reset: {out}");
+    let sup = logged(&c, "supersede");
+    assert_eq!(sup.len(), 1, "{out}");
+    assert_eq!(sup[0].val("killed"), &json!(["sendmeter-impl-12"]), "{sup:?}");
+    assert_eq!(logged(&c, "usage-limit").len(), 1, "{out}");
+}
+
+#[test]
+fn an_acp_lane_in_error_is_respawned_on_the_next_pass() {
+    let (c, b, f, wt, _) = acp_lane("acp-error");
+    errored(&b, "Internal error: stream closed");
+    let cli = Push(b.cli(&f), wt.clone());
+    let out = drive_at(&c, &cli, 120);
+    assert_eq!(logged(&c, "spawn").len(), 2, "{out}");
+    let sup = logged(&c, "supersede");
+    assert_eq!(sup[0].val("killed"), &json!(["sendmeter-impl-12"]), "{sup:?}");
+    assert!(logged(&c, "usage-limit").is_empty(), "{out}");
+}
+
+#[test]
+fn a_spawn_over_a_lane_in_error_ends_it_without_supersede() {
+    let (c, b, f, wt, _) = acp_lane("acp-error-spawn");
+    errored(&b, "Internal error: stream closed");
+    let cli = Push(b.cli(&f), wt.clone());
+    let (code, out) = run(&later(&c, 60), &cli, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out}");
+    let sup = logged(&c, "supersede");
+    assert_eq!(sup.len(), 1, "{out}");
+    assert_eq!(sup[0].val("killed"), &json!(["sendmeter-impl-12"]), "{sup:?}");
+    assert_eq!(logged(&c, "spawn").len(), 2, "{out}");
+}

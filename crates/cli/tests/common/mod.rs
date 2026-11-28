@@ -22,6 +22,7 @@ pub const CONFIG: &str = r#"# fleet config (test)
 [fleet.sendmeter]
 repo = "jirathip-dev/sendmeter"
 local = "/tmp/does-not-matter/sendmeter"
+merge_label = "off"
 integration = "staging"   # never main
 
 [fleet.sendmeter.role.impl]
@@ -902,4 +903,25 @@ pub fn fake_service(c: &Ctx, pid: u64) {
             std::io::Write::write_all(&mut &s, format!("{{\"pid\": {pid}}}\n").as_bytes()).ok();
         }
     });
+}
+
+/// `drover hook --role impl` run as lane `lane` in folder `d` (its `fleet.toml` written by the caller) on one `PreToolUse` call: its stdout.
+pub fn hook_in(d: &Path, lane: &str, tool: &str, input: &serde_json::Value) -> String {
+    let call = serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": input});
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
+        .args(["hook", "--role", "impl"])
+        .current_dir(d)
+        .env_remove("FLEET_LANE")
+        .env_remove("DROVER_SCRATCH_TARGET")
+        .env("DROVER_LANE", lane)
+        .env("FLEET_CONFIG", d.join("fleet.toml"))
+        .env("FLEET_STATE", d.join("state/events.jsonl"))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::io::Write::write_all(&mut child.stdin.take().unwrap(), call.to_string().as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    String::from_utf8(out.stdout).unwrap()
 }

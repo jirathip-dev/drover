@@ -73,8 +73,8 @@ impl Rules {
             branches,
             deny,
             groups: cfg.orchestrator.groups().into_iter().map(String::from).collect(),
-            reviewer: family == Some("rev") || role == "triage",
-            builds: !matches!(role, "lesson" | "triage") && family == Some("impl"),
+            reviewer: family == Some("rev") || matches!(role, "triage" | "scope"),
+            builds: !matches!(role, "lesson" | "triage" | "scope") && family == Some("impl"),
             hygiene: None,
         }
     }
@@ -888,6 +888,11 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
         return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs a job by hand (#1756)".into());
     }
     let triage = lane.split(':').nth(2) == Some("triage");
+    if lane.split(':').nth(2) == Some("scope") && matches!(r.first(), Some(&("spawn" | "merge"))) {
+        return Some(
+            "REFUSED SCOPE_ONLY: a scope lane asks and drafts one issue; it never spawns or merges (#1783)".into(),
+        );
+    }
     let acts = matches!(r.get(1), Some(&("close" | "fold" | "label" | "docs")));
     if !orchestrator && r.first() == Some(&"triage") && !(acts && triage) {
         return Some(
@@ -895,6 +900,10 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
              docs (#1100)"
                 .into(),
         );
+    }
+    let epic = r.first() == Some(&"queue") && r.iter().any(|w| w.split('=').next() == Some("--epic"));
+    if !orchestrator && (r.first() == Some(&"epic") || epic) {
+        return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner changes an epic (#1786)".into());
     }
     if !orchestrator && r.first() == Some(&"amend") {
         return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover amend` (#574)".into());

@@ -378,7 +378,7 @@ fn drain_through(fault: Ssh) {
     let wt = d.join("worktree");
     std::fs::create_dir_all(wt.join(".drover")).unwrap();
     std::fs::write(wt.join(".git"), "gitdir: elsewhere\n").unwrap();
-    let ask = json!({"args": ["ask", "sendmeter", "12", "Which way?", "--option", "a", "--option", "b"],
+    let ask = json!({"args": ["ask", "sendmeter", "12", "Which way to main?", "--option", "a", "--option", "b"],
                      "lane": "sendmeter:12:impl", "ts": (NOW - 30) * 1000});
     let ob = wt.join(".drover/outbox.jsonl");
     std::fs::write(&ob, format!("{ask}\n")).unwrap();
@@ -400,7 +400,7 @@ fn drain_through(fault: Ssh) {
     );
     assert!(kinds(&c, "needs-decision").is_empty());
     assert!(
-        std::fs::read_to_string(&ob).unwrap().contains("Which way?"),
+        std::fs::read_to_string(&ob).unwrap().contains("Which way to main?"),
         "the line waits on its host"
     );
 
@@ -418,7 +418,7 @@ fn drain_through(fault: Ssh) {
         1,
         "delivered once the link is back, and only once: {asks:?}"
     );
-    assert_eq!(asks[0].str("question"), Some("Which way?"));
+    assert_eq!(asks[0].str("question"), Some("Which way to main?"));
 }
 
 #[test]

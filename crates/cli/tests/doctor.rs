@@ -15,6 +15,7 @@ repo = "o/demo"
 private_names = ["Initrode"]
 local = "{local}"
 integration = "staging"
+merge_label = "off"
 
 [fleet.demo.role.impl]
 harness = "{harness}"
@@ -195,10 +196,7 @@ fn all_good_exits_zero_and_never_writes() {
 fn a_missing_merge_label_is_red_with_its_create_command_then_green() {
     let (c, _) = setup("doc-label", "claude");
     let text = std::fs::read_to_string(&c.config).unwrap();
-    let text = text.replace(
-        "integration = \"staging\"",
-        "integration = \"staging\"\nmerge_label = \"merge-ready\"",
-    );
+    let text = text.replace("merge_label = \"off\"", "merge_label = \"merge-ready\"");
     std::fs::write(&c.config, text).unwrap();
     let list = "gh label list --repo o/demo --search merge-ready";
     let r = good().once(list, 0, "[]");

@@ -27,6 +27,7 @@ pub fn role_prompt(role: &str) -> &'static str {
         ),
         "lesson" => include_str!("../roles/lesson.md"),
         "triage" => include_str!("../roles/triage.md"),
+        "scope" => include_str!("../roles/scope.md"),
         "deps" => concat!(include_str!("../roles/impl.md"), "\n", include_str!("../roles/deps.md")),
         "verify" => include_str!("../roles/verify.md"),
         _ => include_str!("../roles/rev.md"),
@@ -43,7 +44,7 @@ fn lane_prompt(f: &Fleet, role: &str) -> String {
 }
 
 fn prompt_kind<'a>(f: &'a Fleet, role: &'a str) -> &'a str {
-    let own = matches!(role, "lesson" | "triage" | "deps") || role == "verify" && f.family(role) == "rev";
+    let own = matches!(role, "lesson" | "triage" | "deps" | "scope") || role == "verify" && f.family(role) == "rev";
     if own {
         role
     } else {
@@ -321,6 +322,12 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
                 format!("{fleet}#{issue} is merged; a merged issue never reopens"),
             );
         }
+        if crate::events::with_states(&ev, |s| crate::epic::is_parent(&ev, s, fleet, issue)) {
+            return refused(
+                "EPIC_PARENT",
+                format!("{fleet}#{issue} is an open epic's parent: drover never builds it"),
+            );
+        }
         let impl_branch = crate::gate::branch_of(st.as_ref(), issue);
         let (agent, branch, base, head) = if f.family(role) == "rev" {
             let rounds = st.as_ref().and_then(|s| s.stage_rounds.get(f.flow().stage_of(role)));
@@ -477,6 +484,11 @@ fn brief(
                     ""
                 }
         }
+        _ if p.role == "scope" => format!(
+            include_str!("../roles/brief-scope.md"),
+            fleet = p.lane.split(':').next().unwrap_or_default(),
+            integration = integration
+        ),
         _ if p.role == "triage" => format!(
             include_str!("../roles/brief-triage.md"),
             fleet = p.lane.split(':').next().unwrap_or_default(),
@@ -1155,6 +1167,8 @@ fn start(
     let live: Vec<&Session> = agents.iter().filter(|a| a.in_dir(&p.agent, &p.worktree)).collect();
     let names: Vec<&str> = live.iter().map(|a| a.name.as_str()).collect();
     let mut dup = vec![];
+    let ended = errored(ctx, (cfg, r), &events, &live)?;
+    let supersede = o.supersede || ended;
     let stale = live.iter().all(|a| !a.busy()) && orphan(&agents, &events, &p).is_some();
     if stale {
         let last = events
@@ -1213,17 +1227,17 @@ fn start(
             dup.push(("WORKTREE_DIRTY", format!("{wt} is no fleet lane and has {why}")));
         }
     }
-    if let Some(pane) = orphan(&agents, &events, &p).filter(|_| live.len() == 1 && !o.supersede) {
+    if let Some(pane) = orphan(&agents, &events, &p).filter(|_| live.len() == 1 && !supersede) {
         return adopt(ctx, cfg, r, out, (fleet, issue, role), &pane, &json!({})).map(|()| true);
     }
-    if let Some((code, msg)) = dup.first().filter(|_| !o.supersede) {
+    if let Some((code, msg)) = dup.first().filter(|_| !supersede) {
         return refused(
             code,
             format!("{msg}{}", if stale { "" } else { "; `--supersede` replaces it" }),
         );
     }
     let asked = o.by.as_deref().is_some_and(|b| b != "drive") && o.why.is_none();
-    if let Some(age) = (asked && !stale && !live.is_empty())
+    if let Some(age) = (asked && !stale && !ended && !live.is_empty())
         .then(|| {
             progressed(
                 ctx.now,
@@ -1268,7 +1282,7 @@ fn start(
         Some((code, why)) => return refused(code, why),
         None => {}
     }
-    let step = if o.supersede && !dup.is_empty() {
+    let step = if supersede && !dup.is_empty() {
         "supersede"
     } else {
         "spawn"
@@ -1290,7 +1304,7 @@ fn start(
     *intent =
         Some(crate::action::begin(r, &ctx.state, ctx.now, (fleet, issue, step, &key), inputs, secs, &probe)?.act()?);
     let (mut wip, saved) = (None, (cfg, fleet));
-    if o.supersede && !dup.is_empty() {
+    if supersede && !dup.is_empty() {
         let was = last_spawn(&events, &p.agent);
         let old = crate::hosts::On::of(base, was);
         let owt = was.and_then(|e| e.str("worktree")).unwrap_or(&wt);
@@ -1339,7 +1353,7 @@ fn start(
     let mut sha = None;
     let (note, history);
     let brief_text = {
-        let iss = crate::gh::spec(ctx, base, f, fleet, issue, true)?;
+        let iss = crate::scope::spec(ctx, base, (f, fleet, issue), role)?;
         if on.machine.is_some() && !on.exists(&Path::new(&local).join(".git")) {
             ok(r, "sh", &["-c", &clone_sh(&f.repo, &f.integration, &local)])?;
         }
@@ -1561,6 +1575,15 @@ fn start(
 }
 
 pub const SPAWN_SECS: u64 = 3 * term::CONFIRM_SECS;
+
+fn errored(ctx: &Ctx, (cfg, r): (&Config, &dyn Runner), events: &[Event], live: &[&Session]) -> Result<bool> {
+    let ended = !live.is_empty() && live.iter().all(|a| a.status() == Some(Status::Failed));
+    let held = live.iter().filter(|a| ended && a.limit_hit());
+    for (sp, a) in held.filter_map(|a| Some((last_spawn(events, &a.name)?, a))) {
+        crate::hosts::hold_limit(ctx, cfg, r, sp, a.note.as_deref().unwrap_or_default())?;
+    }
+    Ok(ended)
+}
 
 fn orphan(agents: &[Session], events: &[Event], p: &Plan) -> Option<String> {
     let a = agents

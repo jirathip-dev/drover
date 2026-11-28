@@ -98,20 +98,11 @@ and restores the terminal. The lane hook refuses it (`OWNER_ONLY`).
   The thread shows the ask with its options, the recommended one first. `drover answer <fleet> <id> <n>` (the
   tap later) logs the decision, adds `DECISION <id>: <text>` to the thread and types it into the orchestrator.
   `--thread` with an unknown thread refuses `NO_SUCH_THREAD`.
-- **Lane asks (#541):** an `ask` from an impl, rev, fix or design lane (no `--thread`) goes to its repo's orchestrator
-  thread first: `[fleet.<n>] ask_thread = "t6"`, else the repo's most recently active thread (archived ones never).
-  It is logged `routed` (no push) and typed into that orchestrator (woken as by `say`) as a system line the board hides;
-  it stays open on the board and the issue card. No thread (or the orchestrator not reached: `ask-owner`), the owner
-  gets it as before. #1491: a lane ask still open with no thread is routed to the repo's next new thread (the one
-  opened from it, or any): its system line is logged there, so that thread's orchestrator answers it as below, and an
-  owner line in it answers it `--typed`. The orchestrator answers with `drover answer <fleet> <id> <n> --basis "<quote | q<id>>"`, logged
-  `by: orchestrator-<thread>` with its `basis`, and only if the ask is a lane ask on its repo, its question and choice
-  name no owner topic (the `OWNER_TOPIC` words), and the basis is 3+ words found verbatim in the issue's spec
-  (Amendments included) or an answered decision id. An ask routed to no thread is `REFUSED OWNER_ASK: <id> was
-  routed to no thread`. Else `REFUSED OWNER_ASK: <why>; ask the owner`, and the ask is
-  logged `ask-owner` in the thread: a choice row (the orchestrator's pick recommended) that pushes like an ask. Each
-  orchestrator answer posts `answered <id> for #<n>: <choice>, because <basis>` with [change] for 30 min (no push); the
-  owner's pick there re-sends `DECISION <id>: <choice>` to the lane, `by: owner`, replacing it.
+- **Lane asks (#1813, replacing #541's routing):** an `ask` from an impl, rev, fix or design lane goes straight to the
+  owner as a card with the lane's recommendation, never to an orchestrator thread. A lane's ask that names no owner
+  topic (the owner words of `IN_SCOPE`) is `REFUSED IN_SCOPE`, nothing logged: the lane decides it and notes the choice
+  in its PR body under `## Decisions`. An orchestrator's `drover answer … --basis` on a lane ask is
+  `REFUSED OWNER_ASK: <id> was routed to no thread`; asks routed before #1813 still answer as they did.
 - **Amendments (#574):** `drover amend <fleet> <issue> --basis q<id> "<text>"` (orchestrators and the owner; the lane
   hook refuses it for impl, rev and design lanes) writes an owner's decision into the spec: it appends
   `- **Amendment (<YYYY-MM-DD>)**: <text>` to the issue body's `## Amendments` section (made once, at the end), logs `amend`
@@ -180,15 +171,26 @@ always carries it: past the last 30 messages it stays right under the older-mess
 
 A feature that adds a fleet.toml key does nothing until the config turns it on. Its PR body carries a `## Rollout`
 section: the exact fleet.toml lines in a fenced block and which fleets they go in (`none`, or no section, rolls out
-nothing). `drover merge` of such a PR logs `rollout-open` once and posts one row to the thread whose orchestrator
-filed the issue (the lane hook logs `issue-filed` on its `gh issue create`), else the repo's newest thread:
-`#<n> merged with a rollout, not applied yet:` with the snippet. That wakes the thread's orchestrator, which drafts the
-card at once with `drover config propose <thread> <file> --rollout <n>` (refused `NO_SUCH_ROLLOUT` unless #n's
-rollout is open), so the owner only taps [apply]. The apply logs `rollout-done` for #n and its line ends
-`, rollout #<n> done`. The owner may instead run `drover rollout dismiss <fleet> <n> [--by <who>]` (owner only; the
-lane hook refuses it, `OWNER_ONLY`), logged `rollout-dismissed` with `by`. Until either, `drover waiting` (and
-`--json`) lists it as the owner's: `<fleet> #<n> owner: rollout not applied (thread <t>) (<age>)`, its lane the
-thread's orchestrator. Nothing is ever applied by itself.
+nothing). `drover merge` of such a PR logs `rollout-open` once and (#1781) posts the config card itself, in the
+thread that filed the issue (the lane hook logs `issue-filed` on its `gh issue create`), else the repo's newest thread,
+else the repo's owner cards: the fenced lines set into the live fleet.toml, its diff exactly those lines. When they do
+not apply cleanly (a key already set to another value, a fleet fleet.toml has not, an array of tables, a line that
+leaves fleet.toml invalid), the card names the reason and has no diff and no [apply]. A hand-made card may still name
+the rollout: `drover config propose <thread> <file> --rollout <n>` (refused `NO_SUCH_ROLLOUT` unless #n's rollout is
+open). The apply logs `rollout-done` for #n and its line ends `, rollout #<n> done`. The owner may instead run
+`drover rollout dismiss <fleet> <n> [--by <who>]` (owner only; the lane hook refuses it, `OWNER_ONLY`), logged
+`rollout-dismissed` with `by`. Until either, `drover waiting` (and `--json`) lists it as the owner's:
+`<fleet> #<n> owner: rollout not applied (card <id>)` with `drover config apply <id>`, or `rollout not applied:
+<reason>` with `drover rollout dismiss <fleet> <n>`. Nothing is ever applied by itself.
+
+## Nudges (#1781)
+
+Two chores drover raises itself, as a `system` row whose prompt names the command, to the repo's attached chat (the
+newest still attached), else as an owner card (an alert on the repo's cards, pushed) naming it:
+
+- **Lessons:** the fleet's second review FAIL since its last lessons nudge or lesson issue: `drover job <fleet> lesson`.
+- **Promotion:** every `[limits] promote_after_merges` (default 10, `0` off) merges into the integration branch since
+  the last promotion nudge: the `gh pr create` that opens the integration→main PR.
 
 ## Capability groups and run cards (#538)
 

@@ -157,6 +157,13 @@ impl Session {
     pub fn signed_out(&self) -> bool {
         self.auth().is_some()
     }
+    pub(crate) fn limit_hit(&self) -> bool {
+        let last = match self.life {
+            Life::Running(s) => s,
+            Life::Exited { last, .. } => last,
+        };
+        limit_note(last, self.note.as_deref())
+    }
     fn auth(&self) -> Option<&str> {
         let n = self.note.as_deref().filter(|n| n.starts_with("auth:"));
         n.filter(|_| self.status() == Some(Status::Failed))
@@ -165,6 +172,15 @@ impl Session {
     pub fn in_dir(&self, name: &str, dir: &Path) -> bool {
         self.name == name || self.cwd.starts_with(dir)
     }
+}
+
+pub(crate) fn limit_text(note: &str) -> bool {
+    let n = note.to_lowercase();
+    n.contains("limit") && n.contains("resets ")
+}
+
+pub(crate) fn limit_note(last: Status, note: Option<&str>) -> bool {
+    matches!(last, Status::Failed | Status::Done) && note.is_some_and(limit_text)
 }
 
 /// Why a lane's session ended, from shed's exit code and last status.
@@ -177,10 +193,11 @@ pub enum Cause {
 }
 
 impl Cause {
-    /// An exit with `code` after shed last reported `last`.
-    pub fn of(code: Option<i32>, last: Status) -> Cause {
+    /// An exit with `code` after shed last reported `last` with `note`.
+    pub fn of(code: Option<i32>, last: Status, note: Option<&str>) -> Cause {
         match last {
             Status::Limited => Cause::Limit,
+            _ if limit_note(last, note) => Cause::Limit,
             Status::Working | Status::Running | Status::Failed => Cause::Crash,
             _ if code != Some(0) => Cause::Crash,
             _ => Cause::Ended,

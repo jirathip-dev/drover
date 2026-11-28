@@ -14,6 +14,8 @@ use k::{Act, Confirm, Figure, Label, Shown, Tap, Tile, Time, Tone, Toned};
 use serde_json::Value;
 use std::sync::atomic::Ordering::Relaxed;
 
+#[path = "screens_epics.rs"]
+mod epics;
 #[path = "screens_lanes.rs"]
 mod lanes;
 #[path = "later.rs"]
@@ -95,6 +97,8 @@ pub fn page_places() -> Value {
 mod fleets;
 #[path = "screens_hosts.rs"]
 mod hosts;
+#[path = "screens_scope.rs"]
+mod scope;
 
 const THREAD_ACTIONS: [&str; 11] = [
     "thread-new",
@@ -542,11 +546,12 @@ fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q, lanes: &[Lane], lat
         )
         .block(),
     ];
-    let blocks = vec![
+    let mut blocks = epics::epics(ctx, ev, c, q, lanes);
+    blocks.extend([
         section("inprogress", "in progress", busy),
         section("queued", "queued", rows("queued", tree(&queued))),
         rows_list(&format!("done-{f}"), end),
-    ];
+    ]);
     let mut v = k::Card::new()
         .id(format!("fleet-{f}"))
         .tone(tone)

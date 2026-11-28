@@ -109,6 +109,10 @@ impl Registry {
                 let (t, n) = (e.str("filed_in").unwrap_or_default(), e.issue.unwrap_or_default());
                 self.homes.entry((e.fleet.clone(), n)).or_insert_with(|| t.into());
             }
+            "epic" if e.str("op") == Some("add") && !id.is_empty() => {
+                let p = e.val("parent").as_u64().unwrap_or_default();
+                self.homes.entry((e.fleet.clone(), p)).or_insert_with(|| id.clone());
+            }
             "queue" if e.str("op") == Some("add") && !id.is_empty() => {
                 for n in e
                     .val("issues")
@@ -241,7 +245,8 @@ fn row<'a>(events: &'a [Event], reg: &Registry, e: &'a Event) -> Option<(&'a Eve
         }
         ("secret-set" | "secret-dismissed", _) => RowKind::SecretCard,
         ("rollout-done" | "rollout-dismissed", _) => RowKind::Rollout,
-        ("merged", _) => RowKind::Merged,
+        ("nudge", _) => RowKind::Alert,
+        ("merged" | "epic-landed", _) => RowKind::Merged,
         ("thread-msg", Some("system")) => {
             prompt = Some(s("text"));
             RowKind::System
@@ -251,7 +256,8 @@ fn row<'a>(events: &'a [Event], reg: &Registry, e: &'a Event) -> Option<(&'a Eve
             RowKind::Said
         }
         _ if e.kind != "thread-msg" && e.is_push() => {
-            to = if e.issue.is_some() || e.data.contains_key("thread") {
+            let stuck = e.kind == "needs-human" && e.str("code") == Some("STUCK");
+            to = if !stuck && (e.issue.is_some() || e.data.contains_key("thread")) {
                 to
             } else {
                 Target::Owner
@@ -266,6 +272,7 @@ fn row<'a>(events: &'a [Event], reg: &Registry, e: &'a Event) -> Option<(&'a Eve
         RowKind::ConfigCard => format!("config-{}", s("id")),
         RowKind::SecretCard => format!("secret-{}-{}", s("thread"), s("name")),
         RowKind::Rollout => format!("rollout-{}-{}", e.fleet, e.issue.unwrap_or_default()),
+        RowKind::Merged if e.kind == "epic-landed" => format!("epic-{}-{}", e.fleet, e.issue.unwrap_or_default()),
         k => format!(
             "{}-{}",
             serde_json::to_value(k).unwrap_or_default().as_str().unwrap_or_default(),
