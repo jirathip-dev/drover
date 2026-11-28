@@ -828,6 +828,7 @@ fn owner_card(ctx: &Ctx, events: &[Event], e: &Event) -> Option<Msg> {
     };
     match e.kind.as_str() {
         "config-propose" => match crate::propose::settled(events, &s("id")) {
+            None if e.str("reason").is_some() => Some(m("config", s("id"), format!("✗ {}", s("reason")), false)),
             None => Some(m("config", s("id"), s("diff"), !crate::propose::stale(ctx, e))),
             Some(d) if d.val("applied") == true => Some(Msg {
                 answer: Some(Answered {
@@ -891,7 +892,9 @@ pub(super) fn owner_cards(ctx: &Ctx, events: &[Event], paired: bool) -> Vec<Valu
     let all = crate::events::of_kind(events, &["config-propose", "secret-request"]);
     let card = |e: &Event| {
         let m = owner_card(ctx, events, e).filter(|m| m.answer.is_none())?;
-        Some(wire(&msg_body(ctx.now, e.str("thread")?, &m, paired, None).block()))
+        Some(wire(
+            &msg_body(ctx.now, e.str("thread").unwrap_or_default(), &m, paired, None).block(),
+        ))
     };
     all.into_iter().filter_map(card).collect()
 }
@@ -1092,17 +1095,23 @@ fn config_body(now: u64, key: &str, id: &str, m: &Msg, age: k::Time) -> k::Card 
         if m.open {
             buttons.insert(0, button("apply", "primary", "config-card", v("apply")).block());
         }
-        let sub = or(
-            m.open,
-            "a fleet.toml change for you to apply",
-            "stale: fleet.toml changed since, it can no longer apply",
-        );
+        let (sub, body) = match m.text.strip_prefix("✗ ") {
+            Some(_) => ("drover could not build this rollout: nothing to apply", m.text.clone()),
+            None => (
+                or(
+                    m.open,
+                    "a fleet.toml change for you to apply",
+                    "stale: fleet.toml changed since, it can no longer apply",
+                ),
+                format!("```diff\n{}\n```", m.text.trim_end()),
+            ),
+        };
         card("config")
             .tone(if m.open { k::Tone::Warn } else { k::Tone::Bad })
             .title(format!("config proposal {}", m.from))
             .subtitle(sub)
             .meta(age)
-            .blocks(vec![text("d", &format!("```diff\n{}\n```", m.text.trim_end()))])
+            .blocks(vec![text("d", &body)])
             .buttons(buttons)
     }
 }
