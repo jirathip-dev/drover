@@ -63,6 +63,7 @@ pub mod respawn;
 pub mod roots;
 pub mod runner;
 pub mod sandbox;
+pub mod scope;
 pub mod secret;
 pub mod service;
 pub mod session;
@@ -439,7 +440,7 @@ pub fn ask(
     let from_lane = lane
         .rsplit(':')
         .next()
-        .is_some_and(|r| !r.is_empty() && !orchestrator::is_role(r));
+        .is_some_and(|r| !r.is_empty() && r != "scope" && !orchestrator::is_role(r));
     let routed = crate::thread::route::route(cfg, &events, fleet).filter(|_| from_lane && thread.is_none());
     if from_lane && thread.is_none() {
         d.put("lane_ask", json!(true));
@@ -757,6 +758,7 @@ pub(crate) fn answer_with(
     if design {
         crate::design::decide(ctx, cfg, r, ask, text, by)?;
     }
+    let settled = crate::scope::is_draft(ask) && crate::scope::decide(ctx, cfg, r, out, ask, text)?;
     let extend = ask.issue.filter(|_| ask.data.get("extend").is_some());
     let acts = match extend {
         Some(n) => !gate::past_extend(ctx, fleet, n)?,
@@ -811,7 +813,7 @@ pub(crate) fn answer_with(
         crate::thread::route::flow(ctx, cfg, t, &format!("answered {id}: {q} → {text}"))?;
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {agent}")?);
     }
-    if design {
+    if design || settled {
         return Ok(writeln!(out, "{fleet} {id}: {text}")?);
     }
     let Some(agent) = deliver(ctx, cfg, r, ask, &msg, true)? else {

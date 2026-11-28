@@ -1277,7 +1277,7 @@ pub fn place(
     let pre = (events, last.and_then(|e| e.str("root")));
     let design = crate::events::STAGES.contains(&f.family(role));
     let pin = f.role.get(f.role_key(role)).and_then(|r| r.host.as_deref());
-    if let Some(h) = force.or(pin).or(design.then_some("main")) {
+    if let Some(h) = force.or(pin).or((design || role == "scope").then_some("main")) {
         let main = cfg
             .hosts
             .iter()

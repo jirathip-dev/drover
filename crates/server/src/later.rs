@@ -111,6 +111,9 @@ impl Server<'_> {
             shown.push(json!({"type": "card", "id": "later", "kind": "later", "tone": "mute",
                 "fold": {"line": format!("{} later", later.len())}, "blocks": later}));
         }
+        if let Some(cfg) = crate::config::Config::kept(ctx).ok().filter(|_| paired) {
+            shown.push(super::scope::card(ctx.now, &cfg, &ev));
+        }
         Value::Array(shown)
     }
 

@@ -27,6 +27,7 @@ pub fn role_prompt(role: &str) -> &'static str {
         ),
         "lesson" => include_str!("../roles/lesson.md"),
         "triage" => include_str!("../roles/triage.md"),
+        "scope" => include_str!("../roles/scope.md"),
         "deps" => concat!(include_str!("../roles/impl.md"), "\n", include_str!("../roles/deps.md")),
         "verify" => include_str!("../roles/verify.md"),
         _ => include_str!("../roles/rev.md"),
@@ -43,7 +44,7 @@ fn lane_prompt(f: &Fleet, role: &str) -> String {
 }
 
 fn prompt_kind<'a>(f: &'a Fleet, role: &'a str) -> &'a str {
-    let own = matches!(role, "lesson" | "triage" | "deps") || role == "verify" && f.family(role) == "rev";
+    let own = matches!(role, "lesson" | "triage" | "deps" | "scope") || role == "verify" && f.family(role) == "rev";
     if own {
         role
     } else {
@@ -477,6 +478,11 @@ fn brief(
                     ""
                 }
         }
+        _ if p.role == "scope" => format!(
+            include_str!("../roles/brief-scope.md"),
+            fleet = p.lane.split(':').next().unwrap_or_default(),
+            integration = integration
+        ),
         _ if p.role == "triage" => format!(
             include_str!("../roles/brief-triage.md"),
             fleet = p.lane.split(':').next().unwrap_or_default(),
@@ -1339,7 +1345,7 @@ fn start(
     let mut sha = None;
     let (note, history);
     let brief_text = {
-        let iss = crate::gh::spec(ctx, base, f, fleet, issue, true)?;
+        let iss = crate::scope::spec(ctx, base, (f, fleet, issue), role)?;
         if on.machine.is_some() && !on.exists(&Path::new(&local).join(".git")) {
             ok(r, "sh", &["-c", &clone_sh(&f.repo, &f.integration, &local)])?;
         }

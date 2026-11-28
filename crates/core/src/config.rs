@@ -1502,7 +1502,7 @@ impl Fleet {
     }
     /// The configured role a lane runs as: a role only a job names is impl's unless its own role is set.
     pub fn role_key<'a>(&self, role: &'a str) -> &'a str {
-        if !self.role.contains_key(role) && self.jobs.values().any(|j| j.role == role) {
+        if !self.role.contains_key(role) && (role == "scope" || self.jobs.values().any(|j| j.role == role)) {
             "impl"
         } else {
             role

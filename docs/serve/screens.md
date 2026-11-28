@@ -54,6 +54,14 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   dir>/themes/<name>/scene.svg` overriding it; farm, with none, gets the drawn ranch), the farm sprites from the pinned
   swag pack, one page per repo ([‹] [›], the dots, ←/→, a wheel or a drag), the repo's needs-you cards from
   `/screens/cards`, and `[A]`/`[☀]`/`[☾]` in the header (Auto: night before 07:00 and from 19:00, phone clock);
+- #1783: the last card of `/screens/cards` (paired only, so the page, the board and cooee's cards place all draw it) is
+  `new-issue`: a repo chip, a line and [+] for a screenshot. Its `new-issue` action logs a `scope-request` (once per
+  `req`) and starts that repo's one `scope` lane (`drover spawn <fleet> 0 scope`, on the main host) once the reply is
+  sent; a second request waits. Each open request is a row, `scoping` or `waits`, whose [Drop] (`scope-drop`, behind
+  its confirm) files nothing and closes a running lane. The lane is read-only (no edit, commit, spawn or merge); it asks
+  through `drover ask <fleet> -` and posts its draft with `drover draft`, an ask whose `approve` makes drover file
+  exactly that title and body and queue it with the draft's `--mark`s, `drop` files nothing, and a typed note goes to
+  the lane as a revise; approve and drop close the lane and the next waiting request starts;
 - `GET /screens/<x>` answers from the hub (#1372, `serve/hub.rs`): each screen is built once per change for every
   reader, and only when a signal it depends on moved (the log, the snapshot, a background read, the config, the gh
   cache folder, a 30 s clock); a read of a stale screen nobody is building builds it, others wait for that build. It

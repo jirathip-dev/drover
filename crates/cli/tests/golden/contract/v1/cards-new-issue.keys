@@ -1,0 +1,24 @@
+blocks[].action: string
+blocks[].chips[].all[]: string
+blocks[].chips[].cur: string
+blocks[].chips[].name: string
+blocks[].id: string
+blocks[].placeholder: string
+blocks[].rows[].id: string
+blocks[].rows[].subtitle: string
+blocks[].rows[].swipe[].action: string
+blocks[].rows[].swipe[].confirm.message: string
+blocks[].rows[].swipe[].confirm.ok: string
+blocks[].rows[].swipe[].confirm.title: string
+blocks[].rows[].swipe[].label: string
+blocks[].rows[].swipe[].tone: string
+blocks[].rows[].swipe[].values.fleet: string
+blocks[].rows[].swipe[].values.req: string
+blocks[].rows[].title: string
+blocks[].rows[].type: string
+blocks[].type: string
+blocks[].values.req: string
+fold.line: string
+id: string
+kind = "new-issue"
+type: string

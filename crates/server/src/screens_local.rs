@@ -34,6 +34,7 @@ impl Server<'_> {
         match name {
             "later" => self.hide_card(ctx, by, &a["values"]),
             n if HOST_ACTIONS.contains(&n) => self.host_op(ctx, n, &a["values"]),
+            n @ ("new-issue" | "scope-drop") => self.scope_op(ctx, by, n, &a["values"]),
             _ => self.action(ctx, name, a),
         }
     }

@@ -489,6 +489,18 @@ pub fn file(ctx: &Ctx, events: &[Event], id: &str, name: &str, demo: bool) -> Op
     conductor::inside(ctx, &Config::kept(ctx).ok()?, id, p)
 }
 
+/// A composer's attachments: `name` the `/`-joined names, `data` the `,`-joined base64 bodies.
+pub fn attachments(name: &str, data: &str) -> Result<Vec<(String, Vec<u8>)>> {
+    let mut names = name.split('/').map(|n| n.replace(char::is_control, ""));
+    let decode = |d| {
+        Ok((
+            names.next().unwrap_or_default(),
+            B64.decode(d).context("a file is not base64")?,
+        ))
+    };
+    data.split(',').filter(|d| !d.is_empty()).map(decode).collect()
+}
+
 pub fn post(
     ctx: &Ctx,
     r: &dyn Runner,
@@ -501,15 +513,7 @@ pub fn post(
     let id = g("t");
     match g("op") {
         "new" | "say" | "queue" | "steer" => {
-            let mut names = g("name").split('/').map(|n| n.replace(char::is_control, ""));
-            let data = g("data").split(',').filter(|d| !d.is_empty());
-            let decode = |d| {
-                Ok((
-                    names.next().unwrap_or_default(),
-                    B64.decode(d).context("a file is not base64")?,
-                ))
-            };
-            let files = data.map(decode).collect::<Result<Vec<_>>>()?;
+            let files = attachments(g("name"), g("data"))?;
             let all: Vec<&str> = files.iter().map(|f| f.0.as_str()).collect();
             let all = all.join(", ");
             let text = or(g("text").trim().is_empty(), &all, g("text"));
