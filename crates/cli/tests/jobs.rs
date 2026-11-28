@@ -319,23 +319,7 @@ fn a_job_that_fails_to_file_logs_job_failed() {
 fn only_an_orchestrator_or_the_owner_runs_a_job_by_hand_and_any_lane_lists() {
     let d = tmpdir("jobs-hook");
     std::fs::write(d.join("fleet.toml"), CONFIG).unwrap();
-    let hook = |lane: &str, cmd: &str| {
-        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-        let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
-            .args(["hook", "--role", "impl"])
-            .current_dir(&d)
-            .env_remove("FLEET_LANE")
-            .env_remove("DROVER_SCRATCH_TARGET")
-            .env("DROVER_LANE", lane)
-            .env("FLEET_CONFIG", d.join("fleet.toml"))
-            .env("FLEET_STATE", d.join("state/events.jsonl"))
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .spawn()
-            .unwrap();
-        std::io::Write::write_all(&mut child.stdin.take().unwrap(), input.to_string().as_bytes()).unwrap();
-        String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
-    };
+    let hook = |lane: &str, cmd: &str| hook_in(&d, lane, "Bash", &json!({"command": cmd}));
     for lane in ["sendmeter:12:impl", "sendmeter:12:deps", "sendmeter:12:rev"] {
         assert!(
             hook(lane, "drover job sendmeter deps").contains("REFUSED ORCHESTRATOR_ONLY"),

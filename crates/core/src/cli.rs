@@ -209,6 +209,19 @@ enum Cmd {
         note: Option<String>,
     },
     #[command(
+        about = "A scope lane's issue draft as the owner's ask: approve files it and queues it with its marks, drop files nothing, a typed note revises it"
+    )]
+    Draft {
+        fleet: String,
+        #[arg(long, help = "The issue's one-line title")]
+        title: String,
+        #[arg(long, help = "The issue body: Problem, Wanted, AC, Notes")]
+        body: String,
+        #[arg(long, value_name = "MARK", value_parser = crate::scope::MARKS)]
+        #[arg(help = "Queue it --repro (a bug), --design or --architect")]
+        mark: Vec<String>,
+    },
+    #[command(
         about = "Orchestrators and the owner: write an owner-decided amendment into the issue body's `## Amendments`; re-runs the PR's failed spec checks"
     )]
     Amend {
@@ -1658,6 +1671,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         (&crate::orchestrator::by(&by), None),
                     )?,
                 },
+                Cmd::Draft {
+                    fleet,
+                    title,
+                    body,
+                    mark,
+                } => crate::scope::draft(ctx, &cfg, out, &fleet, (&title, &body), &mark)?,
                 Cmd::Amend {
                     fleet,
                     issue,

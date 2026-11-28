@@ -987,7 +987,9 @@ pub fn with_states<T>(events: &[Event], f: impl FnOnce(&States) -> T) -> T {
 
 pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
     for e in events {
-        let Some(n) = e.issue else { continue };
+        let Some(n) = e.issue.filter(|n| *n != crate::scope::LANE) else {
+            continue;
+        };
         let new = || IssueState {
             fleet: e.fleet.clone(),
             issue: n,

@@ -826,6 +826,7 @@ fn one(
     laps.lap("PR reads, gates, steps");
     mark("spawns");
     res = res.or(failed(starts(ctx, cfg, r, out, name), out, name, "spawns"));
+    res = res.or(failed(crate::scope::next(ctx, cfg, r, out, name), out, name, "spawns"));
     if KICK.get().is_none() {
         res = res.or(failed(undriven::cards(ctx, cfg, r, out, name), out, name, "spawns"));
     }

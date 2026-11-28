@@ -42,5 +42,6 @@
         "blocks": [
           { "type": "text", "markdown": "**Split the board's sheet into two?**" },
           { "type": "choice", "id": "q944", "action": "answer", "options": [ { "value": "split", "label": "split" }, { "value": "keep", "label": "keep" } ],
-            "other": { "placeholder": "other…" } } ] } ] }
+            "other": { "placeholder": "other…" } } ] } ] },
+  {"blocks": [{"id": "scopes", "rows": [{"id": "scope-sendmeter-new-1", "subtitle": "scoping · 0s", "swipe": [{"action": "scope-drop", "confirm": {"message": "Nothing is filed. Its scope lane exits.", "ok": "Drop", "title": "Drop this new issue?"}, "label": "Drop", "tone": "bad", "values": {"fleet": "sendmeter", "req": "new-1"}}], "title": "sendmeter · a line", "type": "row"}, {"id": "scope-sendmeter-new-2", "subtitle": "waits · starts once the one above is filed or dropped", "swipe": [{"action": "scope-drop", "confirm": {"message": "Nothing is filed. Its scope lane exits.", "ok": "Drop", "title": "Drop this new issue?"}, "label": "Drop", "tone": "bad", "values": {"fleet": "sendmeter", "req": "new-2"}}], "title": "sendmeter · a line", "type": "row"}], "type": "list"}, {"action": "new-issue", "chips": [{"all": ["sendmeter"], "cur": "sendmeter", "name": "repo"}], "id": "new-issue-line", "placeholder": "one line: the bug or the feature", "type": "composer", "values": {"req": "new-1000000"}}], "fold": {"line": "sendmeter: scoping, 1 waits"}, "id": "new-issue", "kind": "new-issue", "type": "card"}
 ]

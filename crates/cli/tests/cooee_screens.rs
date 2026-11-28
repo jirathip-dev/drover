@@ -1305,7 +1305,8 @@ fn parity_68_later_hides_a_card_on_every_client_logs_it_and_folds_into_one_n_lat
     let restarted = Server::new(&c, &r, Some(ADDR.into()));
     for (s, ck) in [(&s, ""), (&s, ck.as_str()), (&restarted, "")] {
         let cards = req(s, T, "GET", "/screens/cards", "", ck).1;
-        assert_eq!(top_of(&cards), ["nhc-sendmeter-5", "later"]);
+        let new = if ck.is_empty() { &[][..] } else { &["new-issue"][..] };
+        assert_eq!(top_of(&cards), [&["nhc-sendmeter-5", "later"][..], new].concat());
         assert_eq!(later_of(&cards), ["run-r1", "ask-q7"]);
         let line = find(&cards, "later");
         assert_eq!(

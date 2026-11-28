@@ -97,6 +97,8 @@ pub fn page_places() -> Value {
 mod fleets;
 #[path = "screens_hosts.rs"]
 mod hosts;
+#[path = "screens_scope.rs"]
+mod scope;
 
 const THREAD_ACTIONS: [&str; 11] = [
     "thread-new",

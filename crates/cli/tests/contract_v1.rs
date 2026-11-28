@@ -286,3 +286,33 @@ fn the_manifest_keeps_contract_v1_and_names_every_chat_path() {
     check("manifest", &m, &mut fails);
     assert!(fails.is_empty(), "{}", fails.join("\n"));
 }
+
+#[test]
+fn the_new_issue_card_keeps_contract_v1_and_its_actions_are_in_the_manifest() {
+    let c = board("contract-new-issue");
+    for (kind, req) in [
+        ("scope-request", "new-1"),
+        ("scope-started", "new-1"),
+        ("scope-request", "new-2"),
+    ] {
+        let d = json!({"req": req, "text": "a line", "files": []});
+        drover::events::append(&c.state, &drover::events::Event::new(T, "sendmeter", None, kind, d)).unwrap();
+    }
+    let r = Fake::default();
+    let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let (code, cards) = get(&s, "/screens/cards", &bearer());
+    assert_eq!(code, "200", "{cards}");
+    let card = cards.as_array().unwrap().last().unwrap();
+    assert_eq!(card["id"], "new-issue", "{cards}");
+    let (_, m) = get(&s, "/api/v1/manifest", &bearer());
+    for a in ["new-issue", "scope-drop"] {
+        assert!(m["actions"].as_array().unwrap().contains(&json!(a)), "{a}: {m}");
+    }
+    assert!(
+        m["destructive"].as_array().unwrap().contains(&json!("scope-drop")),
+        "{m}"
+    );
+    let mut fails = vec![];
+    check("cards-new-issue", card, &mut fails);
+    assert!(fails.is_empty(), "{}", fails.join("\n"));
+}
