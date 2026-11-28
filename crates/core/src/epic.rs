@@ -16,17 +16,17 @@ pub type Members = BTreeMap<u64, BTreeSet<u64>>;
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "is", rename_all = "kebab-case")]
-pub enum Child {
+pub enum Member {
     Merged { issue: u64, pr: Option<u64>, t: u64 },
     Dropped { issue: u64, t: u64 },
     Open { issue: u64, state: String, t: u64 },
 }
 
-impl Child {
+impl Member {
     /// Its issue number.
     pub fn issue(&self) -> u64 {
         match self {
-            Child::Merged { issue, .. } | Child::Dropped { issue, .. } | Child::Open { issue, .. } => *issue,
+            Member::Merged { issue, .. } | Member::Dropped { issue, .. } | Member::Open { issue, .. } => *issue,
         }
     }
 }
@@ -39,7 +39,7 @@ pub struct Epic {
     pub parent: u64,
     pub title: String,
     pub since: u64,
-    pub children: Vec<Child>,
+    pub children: Vec<Member>,
 }
 
 /// A merged child as `epic-landed` carries it.
@@ -107,18 +107,18 @@ pub fn queueable(ctx: &Ctx, fleet: &str, issues: &[u64], epic: Option<u64>) -> R
 }
 
 impl Epic {
-    fn count(&self, f: impl Fn(&Child) -> bool) -> usize {
+    fn count(&self, f: impl Fn(&Member) -> bool) -> usize {
         self.children.iter().filter(|c| f(c)).count()
     }
 
     /// `k`: the merged children.
     pub fn merged(&self) -> usize {
-        self.count(|c| matches!(c, Child::Merged { .. }))
+        self.count(|c| matches!(c, Member::Merged { .. }))
     }
 
     /// The children closed unmerged.
     pub fn dropped(&self) -> usize {
-        self.count(|c| matches!(c, Child::Dropped { .. }))
+        self.count(|c| matches!(c, Member::Dropped { .. }))
     }
 
     /// `n`: the children not dropped.
@@ -132,7 +132,7 @@ impl Epic {
     }
 
     fn open_in(&self, f: impl Fn(&str) -> bool) -> usize {
-        self.count(|c| matches!(c, Child::Open { state, .. } if f(state)))
+        self.count(|c| matches!(c, Member::Open { state, .. } if f(state)))
     }
 
     /// The counts after `k/n merged`, zero ones left out: `2 in progress · 1 dropped`.
@@ -153,11 +153,11 @@ impl Epic {
 
     /// The one line `drover waiting` and the compact board print.
     pub fn line(&self) -> String {
-        let hash = |c: &Child| format!("#{}", c.issue());
-        let open: Vec<String> = (self.children.iter().filter(|c| matches!(c, Child::Open { .. })))
+        let hash = |c: &Member| format!("#{}", c.issue());
+        let open: Vec<String> = (self.children.iter().filter(|c| matches!(c, Member::Open { .. })))
             .map(hash)
             .collect();
-        let gone: Vec<String> = (self.children.iter().filter(|c| matches!(c, Child::Dropped { .. })))
+        let gone: Vec<String> = (self.children.iter().filter(|c| matches!(c, Member::Dropped { .. })))
             .map(hash)
             .collect();
         let mut words = vec![format!(
@@ -183,8 +183,8 @@ impl Epic {
     }
 
     fn landed(&self, ctx: &Ctx) -> Landed {
-        let kid = |c: &Child| match c {
-            Child::Merged { issue, pr, .. } => Some(Kid {
+        let kid = |c: &Member| match c {
+            Member::Merged { issue, pr, .. } => Some(Kid {
                 issue: *issue,
                 pr: *pr,
                 title: crate::gh::cached_title(ctx, &self.fleet, *issue).unwrap_or_default(),
@@ -194,8 +194,8 @@ impl Epic {
         Landed {
             title: self.title.clone(),
             merged: self.children.iter().filter_map(kid).collect(),
-            dropped: (self.children.iter().filter(|c| matches!(c, Child::Dropped { .. })))
-                .map(Child::issue)
+            dropped: (self.children.iter().filter(|c| matches!(c, Member::Dropped { .. })))
+                .map(Member::issue)
                 .collect(),
         }
     }
@@ -246,21 +246,21 @@ pub fn is_parent(events: &[Event], st: &States, fleet: &str, n: u64) -> bool {
     opened(events, st, fleet).contains_key(&n)
 }
 
-fn child(events: &[Event], st: &States, fleet: &str, n: u64) -> Child {
+fn child(events: &[Event], st: &States, fleet: &str, n: u64) -> Member {
     let queued = || crate::queue::replay(events, fleet).iter().any(|i| i.issue == n);
     match st.get(&(fleet.to_string(), n)) {
-        Some(s) if s.state == "merged" => Child::Merged {
+        Some(s) if s.state == "merged" => Member::Merged {
             issue: n,
             pr: s.pr,
             t: s.last_ts,
         },
-        Some(s) if s.state == "closed" => Child::Dropped { issue: n, t: s.last_ts },
-        Some(s) => Child::Open {
+        Some(s) if s.state == "closed" => Member::Dropped { issue: n, t: s.last_ts },
+        Some(s) => Member::Open {
             issue: n,
             state: s.shown(),
             t: s.last_ts,
         },
-        None => Child::Open {
+        None => Member::Open {
             issue: n,
             state: if queued() { "queued" } else { "not queued" }.into(),
             t: 0,
@@ -313,7 +313,7 @@ pub fn check(events: &[Event], st: &States, fleet: &str, parent: u64, op: &Op) -
     all.extend(kids);
     if !all
         .iter()
-        .any(|n| matches!(child(events, st, fleet, *n), Child::Open { .. }))
+        .any(|n| matches!(child(events, st, fleet, *n), Member::Open { .. }))
     {
         let why = "no child would be open (all merged or closed): there is nothing to track";
         return refused("EPIC_DONE", format!("{fleet}#{parent}: {why}"));
@@ -349,7 +349,7 @@ pub fn change(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, parent: u64,
     let e = open(ctx, &events, &st, fleet).into_iter().find(|e| e.parent == parent);
     let list: Vec<u64> = e
         .as_ref()
-        .map_or(vec![], |e| e.children.iter().map(Child::issue).collect());
+        .map_or(vec![], |e| e.children.iter().map(Member::issue).collect());
     let title = e.map(|e| e.title).unwrap_or_default();
     let n = list.len();
     Ok(format!(

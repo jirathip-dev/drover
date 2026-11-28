@@ -153,7 +153,7 @@ One PR, three commits, each green.
 
 1. **The list.** `epic.rs` (`replay`, `check`, `change`, `parent_of`, `is_parent`), the `epic` verb, `queue add
    --epic`, the three refusals, the hook line, `Registry::add`'s arm.
-2. **The views.** `Child`, `Epic`, `open`, `line`; `IssueState.pr`; `watched` in the closed-issues check;
+2. **The views.** `Member`, `Epic`, `open`, `line`; `IssueState.pr`; `watched` in the closed-issues check;
    `QueueCard.epics`; `screens_epics.rs` and its one call; the compact board and `drover waiting`.
 3. **The landing.** `settle`, `summary`, `events::emit_once`, the fold arm, `plain`, the row kind and key,
    `RowView.epic`, the web push title, the two call sites; the contract keys; the docs (a new `epics.md` page under

@@ -2,7 +2,7 @@ use super::{
     label, link, open, picked, plain, row, rows_list, section, sheet, since, state, titled, view, Ctx, Event, Figure,
     Kind, Lane, QueueCard, Tone, Q,
 };
-use crate::epic::{Child, Epic};
+use crate::epic::{Epic, Member};
 use blocks as k;
 
 fn head(f: &str, e: &Epic) -> k::Row {
@@ -17,23 +17,23 @@ fn head(f: &str, e: &Epic) -> k::Row {
         .tap(sheet(format!("/screens/issue?repo={f}&issue={}", e.parent)))
 }
 
-fn kid(ctx: &Ctx, ev: &[Event], c: &QueueCard, lanes: &[Lane], x: &Child) -> k::Row {
+fn kid(ctx: &Ctx, ev: &[Event], c: &QueueCard, lanes: &[Lane], x: &Member) -> k::Row {
     let (f, n) = (c.name.as_str(), x.issue());
     let id = format!("ep-{f}-{n}");
     let title = format!("#{n} {}", crate::gh::cached_title(ctx, f, n).unwrap_or_default());
     let plain_row = || titled(id.clone(), title.trim_end());
     let v = match x {
-        Child::Merged { pr, t, .. } => plain_row()
+        Member::Merged { pr, t, .. } => plain_row()
             .figure(Figure {
                 issue: Some(n),
                 ..state(Tone::Done)
             })
             .subtitle(plain(pr.map_or("merged".into(), |p| format!("merged · PR #{p}"))))
             .value(since(*t)),
-        Child::Dropped { .. } => plain_row()
+        Member::Dropped { .. } => plain_row()
             .badge(label("dropped", Tone::Mute))
             .subtitle(plain("closed unmerged · not counted")),
-        Child::Open { state, .. } => match c.rows.iter().find(|r| r.issue == n) {
+        Member::Open { state, .. } => match c.rows.iter().find(|r| r.issue == n) {
             Some(r) => row(
                 ctx,
                 ev,

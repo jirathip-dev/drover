@@ -46,12 +46,12 @@ pub struct Epic {
     pub title: String,
     /// When its first child was added.
     pub since: u64,
-    pub children: Vec<Child>,
+    pub children: Vec<Member>,
 }
 
 /// A child, by the state its own issue has. `t` is when it got there.
 #[serde(tag = "is", rename_all = "kebab-case")]
-pub enum Child {
+pub enum Member {
     Merged { issue: u64, pr: Option<u64>, t: u64 },
     Dropped { issue: u64, t: u64 },
     /// `state` as `drover status` words it (`queued`, `impl`, `review(1)`, `ready`, `blocked`, …) or `not queued`.
@@ -78,7 +78,7 @@ pub struct Landed {
 pub enum Op { Add(Vec<u64>), Rm(Vec<u64>) }
 ```
 
-| A child's issue | Child |
+| A child's issue | Member |
 |---|---|
 | state `merged` | `Merged`, `pr` from its state |
 | state `closed` (closed on GitHub, by triage, by a lane's end) | `Dropped` |

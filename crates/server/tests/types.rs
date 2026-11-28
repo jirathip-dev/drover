@@ -45,7 +45,7 @@ macro_rules! each {
             drover_server::thread::RowKind,
             drover_server::thread::Push,
             drover_server::epic::Epic,
-            drover_server::epic::Child,
+            drover_server::epic::Member,
             drover_server::epic::Landed,
             drover_server::epic::Kid,
             Link,

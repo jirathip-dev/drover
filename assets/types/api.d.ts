@@ -171,12 +171,12 @@ export type Push = { title: string, body: string, tag: string, };
 /**
  * One open epic as every view shows it: the parent, its title, when its first child was added, its children.
  */
-export type Epic = { fleet: string, parent: number, title: string, since: number, children: Array<Child>, };
+export type Epic = { fleet: string, parent: number, title: string, since: number, children: Array<Member>, };
 
 /**
  * A child, by the state its own issue has; `t` is when it got there.
  */
-export type Child = { "is": "merged", issue: number, pr: number | null, t: number, } | { "is": "dropped", issue: number, t: number, } | { "is": "open", issue: number, state: string, t: number, };
+export type Member = { "is": "merged", issue: number, pr: number | null, t: number, } | { "is": "dropped", issue: number, t: number, } | { "is": "open", issue: number, state: string, t: number, };
 
 /**
  * What `epic-landed` carries; the comment and the row's block are both written from it.
