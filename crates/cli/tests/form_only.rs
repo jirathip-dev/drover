@@ -142,7 +142,9 @@ fn one_substantive_or_untagged_blocker_counts() {
     assert!(out.contains("(round 2)"), "{out}");
     let s = state(&c);
     assert_eq!((s.form, logged(&c, "form-only-rejected")), (0, 2));
-    assert_eq!(read(&c.state).unwrap().last().unwrap().val("form_only"), false);
+    let ev = read(&c.state).unwrap();
+    let last = ev.iter().rev().find(|e| e.kind == "verdict").unwrap();
+    assert_eq!(last.val("form_only"), false);
 }
 
 #[test]
