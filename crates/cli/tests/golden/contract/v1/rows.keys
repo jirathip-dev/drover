@@ -1,5 +1,12 @@
 more: boolean
 rows[].block: object
+rows[].epic.dropped[]: number
+rows[].epic.merged[].issue: number
+rows[].epic.merged[].pr: null
+rows[].epic.merged[].pr: number
+rows[].epic.merged[].title: string
+rows[].epic.title: string
+rows[].epic: null
 rows[].fleet: string
 rows[].handoff.choices: array
 rows[].handoff.error: null

@@ -321,6 +321,12 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
                 format!("{fleet}#{issue} is merged; a merged issue never reopens"),
             );
         }
+        if crate::events::with_states(&ev, |s| crate::epic::is_parent(&ev, s, fleet, issue)) {
+            return refused(
+                "EPIC_PARENT",
+                format!("{fleet}#{issue} is an open epic's parent: drover never builds it"),
+            );
+        }
         let impl_branch = crate::gate::branch_of(st.as_ref(), issue);
         let (agent, branch, base, head) = if f.family(role) == "rev" {
             let rounds = st.as_ref().and_then(|s| s.stage_rounds.get(f.flow().stage_of(role)));

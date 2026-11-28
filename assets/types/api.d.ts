@@ -144,9 +144,9 @@ export type ThreadRow = { id: string, title: string, age: string, unread: boolea
 export type Rows = { seq: number, more: boolean, rows: Array<RowView>, };
 
 /**
- * A row as cooee reads it: the row, what every surface draws (`block`), and a handoff row's item.
+ * A row as cooee reads it: the row, what every surface draws (`block`), a handoff row's item and a landed epic's `epic`.
  */
-export type RowView = { block: JsonValue, handoff?: Handoff | null, seq: number, ts: number, key: string, to: Target, kind: RowKind, fleet: string, issue?: number | null, text: string, open: boolean, prompt?: string | null, push?: Push | null, };
+export type RowView = { block: JsonValue, handoff?: Handoff | null, epic?: Landed | null, seq: number, ts: number, key: string, to: Target, kind: RowKind, fleet: string, issue?: number | null, text: string, open: boolean, prompt?: string | null, push?: Push | null, };
 
 /**
  * One thing a thread shows, made from one logged event (`seq`, `ts`), without its block.
@@ -167,6 +167,26 @@ export type RowKind = "ask" | "decision" | "handoff" | "run-card" | "config-card
  * A notification's words; a newer one with the same `tag` replaces the older.
  */
 export type Push = { title: string, body: string, tag: string, };
+
+/**
+ * One open epic as every view shows it: the parent, its title, when its first child was added, its children.
+ */
+export type Epic = { fleet: string, parent: number, title: string, since: number, children: Array<Member>, };
+
+/**
+ * A child, by the state its own issue has; `t` is when it got there.
+ */
+export type Member = { "is": "merged", issue: number, pr: number | null, t: number, } | { "is": "dropped", issue: number, t: number, } | { "is": "open", issue: number, state: string, t: number, };
+
+/**
+ * What `epic-landed` carries; the comment and the row's block are both written from it.
+ */
+export type Landed = { title: string, merged: Array<Kid>, dropped: Array<number>, };
+
+/**
+ * A merged child as `epic-landed` carries it.
+ */
+export type Kid = { issue: number, pr: number | null, title: string, };
 
 /**
  * A linked thread's chip: `from t5`, `continued in t6`.
@@ -373,9 +393,9 @@ export type Vendor = { name: string, vendor: string, };
 export type QueueTab = { now: number, rw: boolean, live: boolean, mtime: string, error?: string | null, fleets: Array<QueueCard>, };
 
 /**
- * A fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done`: today's `merged` events, newest first (`done_n` of them), the backlog and the [config] sheet.
+ * A fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done`: today's `merged` events, newest first (`done_n` of them), the backlog, the [config] sheet and its open `epics`.
  */
-export type QueueCard = { name: string, k: string, serial: Array<string>, paths: Array<string>, need: number, paused?: string | null, drive: Drive, notes: Array<string>, rows: Array<QueueRow>, done: Array<DoneRow>, done_n: number, backlog?: Backlog | null, config: ConfigSheet, marks: { [key in string]: Marks }, };
+export type QueueCard = { name: string, k: string, serial: Array<string>, paths: Array<string>, need: number, paused?: string | null, drive: Drive, notes: Array<string>, rows: Array<QueueRow>, done: Array<DoneRow>, done_n: number, backlog?: Backlog | null, config: ConfigSheet, marks: { [key in string]: Marks }, epics: Array<Epic>, };
 
 /**
  * A queued row's marks by its issue (`QueueCard.marks`): `design`, `verify` (`on`, `off`, none: by `ui_paths`), `repro`, its serial groups and `needs` tags, and the stage `note` its row shows (`verify(n)`, `verify skipped: …`).
@@ -649,7 +669,11 @@ form: number,
 /**
  * Worktrees its lanes were spawned in (an agent: a spawn naming none) and not cleaned since.
  */
-worktrees: Array<string>, };
+worktrees: Array<string>, 
+/**
+ * The PR its `merged` event names: kept past the 14-day archive of its events.
+ */
+pr?: number | null, };
 
 export type Waiting = { fleet: string, issue: number, 
 /**

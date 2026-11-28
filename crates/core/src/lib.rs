@@ -26,6 +26,7 @@ pub mod diagram;
 pub mod doctor;
 pub mod done;
 pub mod drive;
+pub mod epic;
 pub mod events;
 pub mod flow;
 pub mod gate;

@@ -1,9 +1,7 @@
 use crate::config::Config;
 use crate::events::{append, emit, fold, working, Event, IssueState, Json};
 use crate::runner::{ok, Runner};
-use crate::session::Session;
-use crate::waiting::Waiting;
-use crate::{gh, queue, stall, waiting, Ctx};
+use crate::{gh, queue, session::Session, stall, waiting, waiting::Waiting, Ctx};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::cell::{Cell, RefCell};
@@ -814,7 +812,8 @@ fn one(
     if KICK.get().is_none() {
         let closed =
             working(&ctx.state).and_then(|ev| crate::check::closed_on_github((ctx, cfg, r, out), ev, Some(name)));
-        failed(closed.map(drop), out, name, "closed issues");
+        let land = |_| crate::epic::settle(ctx, cfg, r, out, name);
+        failed(closed.and_then(land), out, name, "closed issues");
     }
     laps.lap("closed issues");
     mark("PR reads, gates, steps");

@@ -761,6 +761,11 @@ pub fn board(
     let serial = fleet_use(ctx, events, &st, fleet, cfg).map_or(String::new(), |s| format!(", {s}"));
     let mut lines = vec![format!("{fleet}: {} queued, {active} active{serial}", q.len())];
     lines.extend(crate::integration::line(now, events, fleet));
+    lines.extend(
+        crate::epic::open(ctx, events, &st, fleet)
+            .iter()
+            .map(crate::epic::Epic::line),
+    );
     lines.push(head);
     let row = |pos: String, n: u64, last: Option<String>| {
         let s = st.get(&(fleet.to_string(), n));

@@ -423,12 +423,13 @@ pub struct Rows {
     pub rows: Vec<RowView>,
 }
 
-/// A row as cooee reads it: the row, what every surface draws (`block`), and a handoff row's item.
+/// A row as cooee reads it: the row, what every surface draws (`block`), a handoff row's item and a landed epic's `epic`.
 pub struct RowView {
     #[serde(flatten)]
     pub row: drover_core::thread::Row,
     pub block: Value,
     pub handoff: Option<Handoff>,
+    pub epic: Option<drover_core::epic::Landed>,
 }
 
 /// API v1's `repo/<fleet>/threads`: the repo's conductor threads, newest-active first.
@@ -734,7 +735,7 @@ pub struct QueueTab {
     pub fleets: Vec<QueueCard>,
 }
 
-/// A fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done`: today's `merged` events, newest first (`done_n` of them), the backlog and the [config] sheet.
+/// A fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done`: today's `merged` events, newest first (`done_n` of them), the backlog, the [config] sheet and its open `epics`.
 pub struct QueueCard {
     pub name: String,
     pub k: String,
@@ -750,6 +751,7 @@ pub struct QueueCard {
     pub backlog: Option<Backlog>,
     pub config: ConfigSheet,
     pub marks: BTreeMap<String, Marks>,
+    pub epics: Vec<drover_core::epic::Epic>,
 }
 
 /// A queued row's marks by its issue (`QueueCard.marks`): `design`, `verify` (`on`, `off`, none: by `ui_paths`), `repro`, its serial groups and `needs` tags, and the stage `note` its row shows (`verify(n)`, `verify skipped: …`).
