@@ -167,6 +167,26 @@ fn no_verdict(events: &[Event], s: &IssueState, path: &str, gone: bool, w: &mut 
     w.next_cmd = Some(format!("drover spawn {f} {n} {c} --supersede"));
 }
 
+type Seen = std::cell::OnceCell<std::collections::BTreeMap<String, crate::hosts::Seen>>;
+
+fn away((ctx, seen): (&Ctx, &Seen), cfg: &Config, sp: Option<&Event>) -> Option<(&'static str, String)> {
+    let down = |h: &str| {
+        seen.get_or_init(|| crate::hosts::cached(ctx))
+            .get(h)
+            .is_some_and(|s| !s.up)
+    };
+    let sp = sp?;
+    let h = crate::hosts::offline_by(down, Some(cfg), Some(sp))?;
+    let removed = sp.str("machine").is_some_and(|m| !crate::hosts::configured(cfg, m));
+    Some(match sp.str("agent").filter(|_| removed) {
+        Some(a) => (
+            "owner",
+            format!("{h}: lane {a} is on a host no longer in [hosts]; needs you"),
+        ),
+        None => ("none", h),
+    })
+}
+
 fn rev_exited(ctx: &Ctx, cfg: &Config, events: &[Event], lane: &str, agents: &[Session]) -> bool {
     let sp = last_spawn(events, lane);
     !agents.iter().any(|a| a.name == lane)
@@ -701,7 +721,7 @@ pub fn scan_where(
     let listed = view.as_ref().map(crate::link::view::View::sessions).unwrap_or_default();
     let busy = |l: &str| agents.iter().any(|a| a.name == l && a.busy());
     let hung = crate::roots::hung_now(events);
-    let starts = crate::starts::line(cfg, events, ctx.now);
+    let (probed, starts) = (std::cell::OnceCell::new(), crate::starts::line(cfg, events, ctx.now));
     let mine = |st: &crate::events::States| {
         st.values()
             .filter(|s| cfg.fleet.contains_key(&s.fleet) && !s.settled() && keep(s))
@@ -917,8 +937,9 @@ pub fn scan_where(
             (w.who, w.next_cmd, w.promise) = ("none", None, None);
             w.what = format!("lane unknown: {m}'s shed listing unreadable");
         }
-        if let Some(h) = crate::hosts::offline(ctx, Some(cfg), sp).filter(|_| s.active_lane().is_some()) {
-            (w.who, w.what, w.next_cmd, w.promise) = ("none", h, None, None);
+        let lane_sp = s.active_lane().and_then(|(_, a)| last_spawn(mine, a));
+        if let Some((who, what)) = away((ctx, &probed), cfg, lane_sp) {
+            (w.who, w.what, w.next_cmd, w.promise) = (who, what, None, None);
         }
         let stuck = ["idle without pushing", "rev idle without", "reviewer exited"]
             .iter()
@@ -931,8 +952,7 @@ pub fn scan_where(
         {
             (w.who, w.what, w.next_cmd, w.promise) = ("none", t, None, None);
         }
-        let sp = s.active_lane().and_then(|(_, a)| last_spawn(mine, a));
-        if sp.is_some_and(|e| crate::hook::rules_stale(cfg, &s.fleet, e)) {
+        if lane_sp.is_some_and(|e| crate::hook::rules_stale(cfg, &s.fleet, e)) {
             w.what += " · rules stale";
         }
         let gone = || gh::missing(ctx, live.then_some(r), cfg, (&s.fleet, s.issue), mine, &pr);
