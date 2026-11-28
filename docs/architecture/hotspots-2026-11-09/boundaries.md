@@ -4,7 +4,7 @@
 
 | caller | may call | never |
 |---|---|---|
-| `overlap::cap_check`, `overlap::cap_at`, `overlap::cap_view`, `check` (the `cap-near` alert), `serve`'s banner | `overlap::cap_at_sha` | read `ci/cap.toml` or the folder themselves |
+| `overlap::cap_check`, `overlap::cap_at`, `overlap::cap_view`, `check` (the `cap-near` alert), `serve`'s banner | `overlap::cap_at_sha` | read ci/cap.toml (deleted in #1845) or the folder themselves |
 | `overlap::cap_at_sha` | `runner` (git `ls-tree`, `show`), the filesystem for the working tree | events, config |
 | `hook` | `CAP_PATHS` | know what a raise is: the exemption stays in `cli`'s policy build |
 | `cli/<area>.rs` | its core module(s), `Ctx`, `Runner` | another area's file; `cli/mod.rs` is the only caller of an area's `run` |

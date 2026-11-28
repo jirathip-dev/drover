@@ -15,7 +15,7 @@ the report itself is noise that would send next week's architect after the wrong
 
 ## Where it stands
 
-- `ci/cap.toml` is raised by 27 of its 29 merges: one number, 396 `conflict-predicted` events. The note beside each
+- ci/cap.toml (deleted in #1845) is raised by 27 of its 29 merges: one number, 396 `conflict-predicted` events. The note beside each
   raise already is one file per change (`docs/architecture.md:161`): only the number still collides.
 - `crates/core/src/cli.rs:921` is a budget bumped per feature (33 of 99 merges), with a comment that lists every bump.
   A limit that is raised on demand every time guards nothing; a rule nothing enforces is retired.
@@ -45,9 +45,9 @@ the report itself is noise that would send next week's architect after the wrong
 
 ## Decision
 
-- **The cap (slice 2).** The effective cap is the highest `line_cap` among `ci/cap.toml` and `ci/cap.d/*.toml` at the
+- **The cap (slice 2).** The effective cap is the highest `line_cap` among ci/cap.toml (deleted in #1845) and `ci/cap.d/*.toml` at the
   sha in question. A raise adds `ci/cap.d/<date>-<cap>.toml` with `line_cap` and a `why` string that is the note
-  (the orchestrator's `cap: raise … to <N>` issue, as today); `ci/cap.toml` keeps `[fleet.herdsman]`, today's
+  (the orchestrator's `cap: raise … to <N>` issue, as today); ci/cap.toml (deleted in #1845) keeps `[fleet.herdsman]`, today's
   `line_cap` as the floor and `warn_within`, and is listed `frozen`; the folder is a `[[collect]]`. One reader
   (`overlap::cap_at_sha`) serves `cap-check` (the working tree), `cap_at` and `cap_view` (a sha). The hook's
   `CAP_FILE` refusal covers the folder too, with the same exemption (an issue titled `cap:`). Highest, not sum: two
