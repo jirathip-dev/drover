@@ -947,6 +947,40 @@ fn landed(r: &dyn Runner, f: &Fleet, num: &str) -> Result<bool> {
     Ok(json(r, "gh", &["pr", "view", num, "-R", &f.repo, "--json", "state"])?.at("state") == "MERGED")
 }
 
+fn holds(
+    ctx: &Ctx,
+    r: &dyn Runner,
+    f: &Fleet,
+    events: &[Event],
+    (fleet, issue): (&str, u64),
+    (num, head): (&str, String),
+    fast: bool,
+) -> Result<Result<String, Refusal>> {
+    let res = match unjoined(ctx, r, f, (fleet, issue), (num, &head))?
+        .iter()
+        .find(|(g, _)| f.serial.iter().any(|c| c.name == g.name))
+        .map(|(g, p)| {
+            (
+                "SERIAL_UNMARKED",
+                format!("{}: PR touches {p}; queue #{issue} with `--serial {0}` first", g.name),
+            )
+        }) {
+        Some((code, why)) => Err(refuse(code, why)),
+        None if unverified(events, (fleet, issue), &head) => Err(refuse("NO_REPRO", no_verify_pass(f, &head))),
+        None => Ok(head),
+    };
+    match res.and_then(|h| crate::reroot::head(r, events, (fleet, f), h)) {
+        Ok(h) if fast && !crate::land::based(ctx, r, f, &h) => Ok(Err(refuse(
+            "BEHIND",
+            format!(
+                "{} moved past {h:.7}; drive catches it up, its fast checks run again",
+                f.integration
+            ),
+        ))),
+        res => Ok(res),
+    }
+}
+
 pub(crate) fn eligible(
     ctx: &Ctx,
     r: &dyn Runner,
@@ -981,30 +1015,8 @@ pub(crate) fn eligible(
         gate(f, &pr, st.as_ref())
     };
     let res = match res {
-        Ok(head) => match unjoined(ctx, r, f, (fleet, issue), (&num, &head))?
-            .iter()
-            .find(|(g, _)| f.serial.iter().any(|c| c.name == g.name))
-            .map(|(g, p)| {
-                (
-                    "SERIAL_UNMARKED",
-                    format!("{}: PR touches {p}; queue #{issue} with `--serial {0}` first", g.name),
-                )
-            }) {
-            Some((code, why)) => Err(refuse(code, why)),
-            None if unverified(events, (fleet, issue), &head) => Err(refuse("NO_REPRO", no_verify_pass(f, &head))),
-            None => Ok(head),
-        },
-        res => res,
-    };
-    let res = match res.and_then(|h| crate::reroot::head(r, events, (fleet, f), h)) {
-        Ok(h) if fast && !crate::land::based(ctx, r, f, &h) => Err(refuse(
-            "BEHIND",
-            format!(
-                "{} moved past {h:.7}; drive catches it up, its fast checks run again",
-                f.integration
-            ),
-        )),
-        res => res,
+        Ok(h) => holds(ctx, r, f, events, (fleet, issue), (&num, h), fast)?,
+        Err(e) => Err(e),
     };
     let passed = |h: &str| {
         let pass = |e: &&Event| e.is("verdict", fleet, issue) && e.str("sha") == Some(h);

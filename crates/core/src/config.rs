@@ -1492,7 +1492,7 @@ impl Fleet {
         n
     }
     /// The riders one merge may take: `batch_max − 1`, 0 when batching is off.
-    pub fn riders(&self) -> usize {
+    pub(crate) fn riders(&self) -> usize {
         self.batch_max.unwrap_or(1).saturating_sub(1)
     }
     /// The `[land]` table when this fleet lands fast-first.

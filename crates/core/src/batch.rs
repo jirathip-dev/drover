@@ -119,37 +119,11 @@ pub(crate) fn run(
     let members: Vec<Ready> = std::iter::once(lead).chain(riders).collect();
     for _ in 0..2 {
         let base = tip()?;
-        let wt = ctx.state.with_file_name(format!("premerge-{fleet}"));
-        crate::gate::scratch(r, &dir, &wt, &base)?;
-        let mut s = Stack {
-            wt,
-            base,
-            layers: vec![],
+        let s = match build(ctx, cfg, r, (fleet, &dir, &into), base, &members)? {
+            Ok(v) => v,
+            Err(rf) => return Ok(Err(rf)),
         };
-        let mut dropped = vec![];
-        for m in &members {
-            if git(r, &s.wt, &["merge", "--no-ff", "--no-edit", &m.head]).is_err() {
-                if s.layers.is_empty() {
-                    return Ok(Err(refuse(
-                        "NOT_MERGEABLE",
-                        format!("{:.7} conflicts with {into}", m.head),
-                    )));
-                }
-                git(r, &s.wt, &["merge", "--abort"]).ok();
-                dropped.push(json!({"issue": m.issue, "why": "conflict"}));
-                continue;
-            }
-            let o = git(r, &s.wt, &["rev-parse", "HEAD", "HEAD^{tree}"])?;
-            let (commit, tree) = o.split_once('\n').unwrap_or_default();
-            let (member, commit, tree) = (m.clone(), commit.trim().into(), tree.trim().into());
-            s.layers.push(Layer { member, commit, tree });
-        }
         let id = s.layers.last().map(|l| l.tree.clone()).unwrap_or_default();
-        let ms: Vec<Value> = (s.layers.iter().map(|l| &l.member))
-            .map(|m| json!({"issue": m.issue, "pr": m.num, "head": m.head}))
-            .collect();
-        let d = json!({"batch": id, "base": s.base, "lead": members.first().map(|m| m.issue), "members": ms, "dropped": dropped});
-        log(ctx, cfg, (fleet, s.layers.len()), "batch-planned", d)?;
         let t = crate::clock::instant();
         let checked = check(ctx, cfg, r, (fleet, lock, &id), &s, &checks)?;
         let secs = t.elapsed().as_secs();
@@ -176,26 +150,82 @@ pub(crate) fn run(
         let (Some((c, o)), Some(l)) = (culprit, s.layers.get(k)) else {
             return Ok(Ok(()));
         };
-        let m = &l.member;
-        let under: Vec<String> = (s.layers.iter().take(k))
-            .map(|l| format!("#{}", l.member.issue))
-            .collect();
-        let on = if under.is_empty() {
-            String::new()
-        } else {
-            format!(" on {}", under.join(", "))
-        };
-        let at = format!("{:.7} merged with {into} @ {:.7}{on}, {secs}s", m.head, s.base);
-        let rf = crate::gate::premerge_failed(ctx, cfg, r, out, (fleet, m.issue), (&m.head, &at), (&c, &o))?;
-        if k == 0 {
-            return Err(rf.into());
-        }
+        charge(ctx, cfg, r, out, fleet, (&s, k, secs), &l.member, (&c, &o))?;
         return Ok(Ok(()));
     }
     Ok(Err(refuse(
         "STAGING_MOVED",
         format!("{into} moved during the premerge checks twice"),
     )))
+}
+
+fn build(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    (fleet, dir, into): (&str, &std::path::Path, &str),
+    base: String,
+    members: &[Ready],
+) -> Result<Result<Stack, Refusal>> {
+    let wt = ctx.state.with_file_name(format!("premerge-{fleet}"));
+    crate::gate::scratch(r, dir, &wt, &base)?;
+    let mut s = Stack {
+        wt,
+        base,
+        layers: vec![],
+    };
+    let mut dropped = vec![];
+    for m in members {
+        if git(r, &s.wt, &["merge", "--no-ff", "--no-edit", &m.head]).is_err() {
+            if s.layers.is_empty() {
+                return Ok(Err(refuse(
+                    "NOT_MERGEABLE",
+                    format!("{:.7} conflicts with {into}", m.head),
+                )));
+            }
+            git(r, &s.wt, &["merge", "--abort"]).ok();
+            dropped.push(json!({"issue": m.issue, "why": "conflict"}));
+            continue;
+        }
+        let o = git(r, &s.wt, &["rev-parse", "HEAD", "HEAD^{tree}"])?;
+        let (commit, tree) = o.split_once('\n').unwrap_or_default();
+        let (member, commit, tree) = (m.clone(), commit.trim().into(), tree.trim().into());
+        s.layers.push(Layer { member, commit, tree });
+    }
+    let id = s.layers.last().map(|l| l.tree.clone()).unwrap_or_default();
+    let ms: Vec<Value> = (s.layers.iter().map(|l| &l.member))
+        .map(|m| json!({"issue": m.issue, "pr": m.num, "head": m.head}))
+        .collect();
+    let d = json!({"batch": id, "base": s.base, "lead": members.first().map(|m| m.issue), "members": ms, "dropped": dropped});
+    log(ctx, cfg, (fleet, s.layers.len()), "batch-planned", d)?;
+    Ok(Ok(s))
+}
+
+fn charge(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    fleet: &str,
+    (s, k, secs): (&Stack, usize, u64),
+    m: &Ready,
+    (c, o): (&Check, &str),
+) -> Result<()> {
+    let into = format!("origin/{}", cfg.fleet(fleet)?.integration);
+    let under: Vec<String> = (s.layers.iter().take(k))
+        .map(|l| format!("#{}", l.member.issue))
+        .collect();
+    let on = if under.is_empty() {
+        String::new()
+    } else {
+        format!(" on {}", under.join(", "))
+    };
+    let at = format!("{:.7} merged with {into} @ {:.7}{on}, {secs}s", m.head, s.base);
+    let rf = crate::gate::premerge_failed(ctx, cfg, r, out, (fleet, m.issue), (&m.head, &at), (c, o))?;
+    if k == 0 {
+        return Err(rf.into());
+    }
+    Ok(())
 }
 
 fn log(ctx: &Ctx, cfg: &Config, (fleet, n): (&str, usize), kind: &str, d: Value) -> Result<()> {
