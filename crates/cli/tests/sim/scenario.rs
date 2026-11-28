@@ -14,6 +14,7 @@ repo = "{REPO}"
 public = false
 local = "LOCAL"
 integration = "staging"
+merge_label = "off"
 flow = "legacy"
 baseline = "{BASELINE}"
 

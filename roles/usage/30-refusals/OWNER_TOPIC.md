@@ -1,1 +1,0 @@
-- OWNER_TOPIC: ask: `--kind routine` with an owner word or its plural/inflection (main, prod, secret, token, delete, spend, cost, $, dependency, scope)

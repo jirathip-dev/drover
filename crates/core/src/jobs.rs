@@ -75,8 +75,14 @@ pub fn entries(fleet: &str, layers: &[&BTreeMap<String, toml::Table>]) -> Result
         if role.is_empty() || !role.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
             bail!("{at}: role \"{role}\" is letters, digits and `-`");
         }
-        if fill(&job.title, &[("{fleet}", fleet), ("{integration}", "x")], 0).contains('{') {
-            bail!("{at}: title \"{}\" has a placeholder other than {{fleet}} {{integration}} {{date}} {{monday}} {{month}}", job.title);
+        if fill(
+            &job.title,
+            &[("{fleet}", fleet), ("{integration}", "x"), ("{head}", "x")],
+            0,
+        )
+        .contains('{')
+        {
+            bail!("{at}: title \"{}\" has a placeholder other than {{fleet}} {{integration}} {{head}} {{date}} {{monday}} {{month}}", job.title);
         }
         Ok((name, job))
     };
@@ -174,7 +180,7 @@ pub fn done(
     close(ctx, cfg, r, out, (fleet, n), line)
 }
 
-fn open(events: &std::sync::Arc<crate::events::Log>, fleet: &str, name: &str) -> Option<u64> {
+pub(crate) fn open(events: &std::sync::Arc<crate::events::Log>, fleet: &str, name: &str) -> Option<u64> {
     let mine = |e: &&Event| e.kind == "job-filed" && e.fleet == fleet && e.str("job") == Some(name);
     (events.iter().filter(mine).filter_map(|e| e.issue))
         .rfind(|n| events.states.get(&(fleet.to_string(), *n)).is_none_or(|s| !s.done()))
@@ -231,9 +237,14 @@ pub fn run(
         ("{integration}", f.integration.as_str()),
         ("{drover}", ctx.exe.as_str()),
     ];
-    let mut report = String::new();
+    let (mut report, mut head) = (String::new(), String::new());
     if let Some(cmd) = &job.check {
         let d = checkout(ctx, r, f, fleet)?;
+        if job.title.contains("{head}") {
+            head = ok(r, "git", &["-C", &d, "rev-parse", "--short=7", "HEAD"])?
+                .trim()
+                .to_string();
+        }
         let sh = format!("cd \"$0\" && {}", fill(cmd, &vars, ctx.now));
         let o = r.run("sh", &argv(&["-c", &sh, &d]))?;
         let text = format!("{}{}", o.stdout, o.stderr).replace(&d, ".");
@@ -243,6 +254,7 @@ pub fn run(
             return Ok(Ran::Nothing("its check passed".into()));
         }
     }
+    vars.push(("{head}", &head));
     if let Some(n) = open(&working(&ctx.state)?, fleet, name) {
         return Ok(Ran::Nothing(format!("its issue #{n} is open")));
     }
