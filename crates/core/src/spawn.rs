@@ -1161,16 +1161,7 @@ fn start(
     let live: Vec<&Session> = agents.iter().filter(|a| a.in_dir(&p.agent, &p.worktree)).collect();
     let names: Vec<&str> = live.iter().map(|a| a.name.as_str()).collect();
     let mut dup = vec![];
-    let ended = !live.is_empty() && live.iter().all(|a| a.status() == Some(Status::Failed));
-    for (sp, a) in live
-        .iter()
-        .filter(|_| ended)
-        .filter_map(|a| Some((last_spawn(&events, &a.name)?, a)))
-    {
-        if let Some(n) = a.note.as_deref().filter(|_| a.limit_hit()) {
-            crate::hosts::hold_limit(ctx, cfg, r, sp, n)?;
-        }
-    }
+    let ended = errored(ctx, (cfg, r), &events, &live)?;
     let supersede = o.supersede || ended;
     let stale = live.iter().all(|a| !a.busy()) && orphan(&agents, &events, &p).is_some();
     if stale {
@@ -1578,6 +1569,15 @@ fn start(
 }
 
 pub const SPAWN_SECS: u64 = 3 * term::CONFIRM_SECS;
+
+fn errored(ctx: &Ctx, (cfg, r): (&Config, &dyn Runner), events: &[Event], live: &[&Session]) -> Result<bool> {
+    let ended = !live.is_empty() && live.iter().all(|a| a.status() == Some(Status::Failed));
+    let held = live.iter().filter(|a| ended && a.limit_hit());
+    for (sp, a) in held.filter_map(|a| Some((last_spawn(events, &a.name)?, a))) {
+        crate::hosts::hold_limit(ctx, cfg, r, sp, a.note.as_deref().unwrap_or_default())?;
+    }
+    Ok(ended)
+}
 
 fn orphan(agents: &[Session], events: &[Event], p: &Plan) -> Option<String> {
     let a = agents
