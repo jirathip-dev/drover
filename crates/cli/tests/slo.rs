@@ -470,3 +470,30 @@ fn named_waits_never_restart_or_move_a_quiet_lane() {
         assert_eq!(card(&c, &sh, NOW + H2 + 60), None, "{name}: no card");
     }
 }
+
+#[test]
+fn a_pass_error_clears_on_the_next_successful_pass_once_kicks_and_10k_events_bury_it() {
+    let c = ctx(&tmpdir("slo-pass-ok"), CONFIG);
+    let sh = FakeShed::attached(&c);
+    let pass =
+        |ts: u64, d: Value| serde_json::to_string(&Event::new(NOW + ts, "sendmeter", None, "drive-pass", d)).unwrap();
+    let words = "failed in spawns: database or disk is full: Error code 13";
+    let failed = json!({"by": "auto", "step": "spawns", "kick": null, "actions": [{"step": "pass", "outcome": "error", "words": words}]});
+    let ok = json!({"by": "auto", "step": "PR reads, gates, steps", "kick": null, "actions": []});
+    let kick =
+        json!({"by": "auto", "step": "PR reads, gates, steps", "kick": 7, "actions": [{"step": "review", "issue": 7}]});
+    let mut log = vec![pass(0, failed), pass(300, ok), pass(400, kick)];
+    log.extend(
+        (0..10_000u64).map(|i| {
+            serde_json::to_string(&Event::new(NOW + 400, "sendmeter", None, "note", json!({"i": i}))).unwrap()
+        }),
+    );
+    rewrite_log(&c.state, &(log.join("\n") + "\n"));
+    std::fs::write(c.state.with_file_name("drive-sendmeter.last"), (NOW + 300).to_string()).unwrap();
+    fast(&at(&c, 600), &sh);
+    let stuck: Vec<Event> = of_kind(&c, "stuck")
+        .into_iter()
+        .filter(|e| e.str("key") == Some("pass-error:sendmeter"))
+        .collect();
+    assert!(stuck.is_empty(), "{stuck:?}");
+}
