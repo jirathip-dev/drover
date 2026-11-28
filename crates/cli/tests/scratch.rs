@@ -813,3 +813,31 @@ fn reclaim_removes_a_merged_lanes_clone_folder_and_keeps_a_live_ones() {
     assert!(!done.exists(), "the merged lane's clone goes: {out}");
     assert!(live.join("blob").exists(), "the live lane's clone stays: {out}");
 }
+
+#[test]
+fn reclaim_and_clean_report_the_shared_cache_and_never_delete_it() {
+    let (c, _) = setup("shared-cache-kept", 0);
+    spawn(&c, 12, "impl", "sendmeter-impl-12");
+    merged(&c, 12);
+    spawn(&c, 13, "impl", "sendmeter-impl-13");
+    let caches = [".cache/sccache/a", ".cache/pnpm/v3"].map(|d| blob(&c.worktrees, d).join("blob"));
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    sh.lane("sendmeter-impl-13", "idle", "/x");
+    let r = Fake::default().reply("lsof", "").reply("git -C", "");
+    for args in [&["reclaim", "--apply"][..], &["clean", "--yes"]] {
+        let (code, out) = run(&c, &r, args);
+        assert_eq!(code, 0, "{out}");
+        for n in ["sccache", "pnpm"] {
+            let d = c.worktrees.join(".cache").join(n);
+            assert!(
+                out.contains(&format!("shared cache {}: 0.00 GB (kept)", d.display())),
+                "{out}"
+            );
+        }
+        assert!(
+            caches.iter().all(|p| p.exists()),
+            "{args:?} keeps the shared cache: {out}"
+        );
+    }
+}

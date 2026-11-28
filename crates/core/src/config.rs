@@ -274,6 +274,8 @@ pub struct HostCfg {
     /// Who issues gh's token here: `managed` (default) warns before it expires, `external` never does.
     #[serde(default)]
     pub github_token: GithubToken,
+    /// #1641: set on this host's entry, its lanes share sccache and pnpm's store in `<root>/.cache`, sccache capped at this size (`"50G"`).
+    pub cache_size: Option<String>,
 }
 
 /// Who issues a host's GitHub token.

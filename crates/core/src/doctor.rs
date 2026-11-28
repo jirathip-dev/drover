@@ -36,6 +36,7 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
             checks(ctx, &cfg, r, &mut rows);
             rows.extend(just_rows(ctx, &cfg, r));
             rows.extend(crate::status::doctor(ctx, &cfg));
+            rows.extend(crate::roots::caches(ctx, &cfg).iter().map(|l| format!("✓ {l}")));
         }
         Err(e) => rows.push(format!("✗ config — {e:#} → edit {}", ctx.config.display())),
     }

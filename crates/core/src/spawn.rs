@@ -1132,6 +1132,12 @@ fn start(
                 .insert("DROVER_RULES".into(), p.rules_file().display().to_string());
         }
     }
+    if on.machine.is_none() {
+        let root = placed.as_ref().map_or(ctx.worktrees.as_path(), |pl| pl.root.as_path());
+        let own = |k: &String| f.env.contains_key(k) || f.shared_cache.contains_key(k);
+        p.env
+            .extend(crate::roots::cache_env(cfg, root).into_iter().filter(|v| !own(&v.0)));
+    }
     let hm = placed.as_ref().and_then(|pl| pl.home.as_deref());
     let home = |a: Vec<String>| crate::hosts::rehome(a, hm);
     let wt = p.worktree.to_string_lossy().into_owned();
