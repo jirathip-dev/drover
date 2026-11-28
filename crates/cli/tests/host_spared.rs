@@ -153,6 +153,8 @@ fn a_changed_host_key_alerts_once_and_is_never_retried_in_a_loop() {
             "{alerts:?}"
         );
     }
+    let (code, out) = run(&c, &KeyChanged(local()), &["housekeep", "--only", "check"]);
+    assert_eq!(code, 0, "{out}");
     let ev = read(&c.state).unwrap();
     assert!(ev.iter().any(|e| e.kind == "host-offline"), "the host shows offline");
 }

@@ -51,8 +51,8 @@ mod tests {
             mcp_file: wt.join(".mcp.lane.json"),
             head: s(),
             title: s(),
-            lane_key: None,
-            sandbox: None,
+                sandbox: None,
+            account: None,
         }
     }
 

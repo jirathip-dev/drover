@@ -111,7 +111,7 @@ fn one_more_round_on_a_blocked_lanes_ask_closes_it_and_gives_the_lane_its_round(
     assert_eq!(card(&s, &c, &cookie), None, "the card is gone");
     assert_eq!(kinds(&c, "round-extended"), 1, "the lane gets its round");
     let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
-    assert_eq!((st.extra, st.state.as_str()), (1, "fix(2)"));
+    assert_eq!(st.state, "fix(2)");
 }
 
 #[test]
@@ -201,6 +201,12 @@ fn a_requeued_lessons_issue_starts_its_lesson_lane_never_impl() {
     sh.attach(&c);
     let r = runner();
     ok(&c, &r, &["queue", "sendmeter", "add", "12"]);
+    ev(
+        &c,
+        9,
+        "job-filed",
+        json!({"job": "lesson", "role": "lesson", "title": "lessons: sendmeter"}),
+    );
     let d = json!({"role": "lesson", "agent": "sendmeter-lesson-12", "pane": "sendmeter-lesson-12"});
     ev(&c, 10, "spawn", d);
     ev(&c, 11, drover::pending::REQUEUED, json!({"by": "owner"}));

@@ -206,7 +206,7 @@ fn work_over_the_limit_when_a_group_lands_keeps_going_and_only_new_impl_waits() 
     }
     lane(&c, 12);
     drive(&c, &fake(&[(12, ".github/workflows/ci.yml\n")]));
-    assert_eq!(logged(&c, 12, "serial-held"), [] as [std::string::String; 0]);
+    assert_eq!(logged(&c, 12, "serial-held"), <[std::string::String; 0]>::default());
     assert_eq!(
         run(
             &c,
@@ -308,7 +308,7 @@ fn a_hot_file_arch_toml_freezes_is_no_group_anymore() {
     );
     assert_eq!(
         drover::queue::hot_files(&read(&c.state).unwrap(), "sendmeter"),
-        [] as [std::string::String; 0]
+        <[std::string::String; 0]>::default()
     );
 }
 
@@ -321,8 +321,8 @@ fn a_pr_touching_no_hot_file_is_never_held() {
     drive(&c, &r);
     drive(&c, &r);
     assert_eq!(logged(&c, 9, "serial-joined"), [format!("hot {HOT}")]);
-    assert_eq!(logged(&c, 13, "serial-joined"), [] as [std::string::String; 0]);
-    assert_eq!(logged(&c, 13, "serial-held"), [] as [std::string::String; 0]);
+    assert_eq!(logged(&c, 13, "serial-joined"), <[std::string::String; 0]>::default());
+    assert_eq!(logged(&c, 13, "serial-held"), <[std::string::String; 0]>::default());
     let (_, out) = run(&c, &r, &["spawn", "sendmeter", "13", "impl", "--supersede"]);
     assert!(!out.contains("SERIAL_BUSY"), "{out}");
 }

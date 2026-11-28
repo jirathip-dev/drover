@@ -39,7 +39,7 @@ why = """
 """
 ```
 
-`cap-check`, `drover cap`, the `cap-near` alert and the page banner read one function, the effective cap at a sha:
+`cap-check`, the removed cap view (#1812), the `cap-near` alert and the page banner read one function, the effective cap at a sha:
 the highest `line_cap` among `ci/cap.toml` and `ci/cap.d/*.toml`.
 
 ```rust

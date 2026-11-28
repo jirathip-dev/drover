@@ -1,0 +1,9 @@
+about = "assets/ JS and CSS lines against the 1500 soft budget: reported, never failing"
+fix = "nothing to fix: a warning only"
+budget_secs = 5
+paths = ["assets/**"]
+run = '''
+n=$(cat assets/*.js assets/*.css | wc -l)
+echo "assets JS/CSS lines: $n"
+if [ "$n" -gt 1500 ]; then echo "warning: assets JS/CSS is $n lines, over the 1500 soft budget"; fi
+'''

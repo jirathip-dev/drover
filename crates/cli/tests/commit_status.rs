@@ -47,7 +47,7 @@ fn kinds(c: &drover::Ctx, k: &str) -> usize {
     read(&c.state).unwrap().iter().filter(|e| e.kind == k).count()
 }
 
-const FAIL: &str = "FAIL\n\n- blocking [correctness] src/x.rs:3: wrong\n  Proof: spec\n  > AC1: it works\n  src/x.rs:3 breaks it\n- non-blocking: a nit\n";
+const FAIL: &str = "FAIL\n\n- blocking [ac] src/x.rs:3: wrong\n  Proof: spec\n  > AC1: it works\n  src/x.rs:3 breaks it\n- non-blocking: a nit\n";
 
 fn drive_fake(head: &str) -> Fake {
     let pr = json!({"number": 34, "state": "OPEN", "baseRefName": "staging", "headRefOid": head, "mergeable": "MERGEABLE",

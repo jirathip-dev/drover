@@ -1,0 +1,41 @@
+packs = ["core", "rust", "ts"]
+integration = "staging"
+
+[cache]
+
+[docs]
+watch = ["crates/core/src/cli.rs", "crates/core/src/config.rs", "crates/core/src/config/limit_docs.rs", "crates/server/src/api.rs"]
+skip = [".drover/**", "roles/usage-tail.md", "scripts/test-shards.txt"]
+
+[ts]
+projects = ["web"]
+install = "npm --prefix web ci --no-audit --no-fund"
+
+[off]
+"core/cap" = "#1812: drover has no line cap; size is watched by arch.toml size rules and hotspots"
+
+[budgets]
+"core/arch" = 600
+
+[legs.release]
+platform = "linux"
+
+[legs.release-hub]
+platform = "linux"
+
+[legs.test]
+platform = "linux"
+
+[legs.ui]
+platform = "linux"
+
+[legs.ui-webkit]
+platform = "linux"
+
+[pin]
+version = "1.6.0"
+aarch64-apple-darwin = "99d6195d6e933d5c15f9bd7953cb9dbc1a6e0127e7d679e59d8a099906bd43df"
+x86_64-unknown-linux-gnu = "508ab5f1d83933d9956d81e1902fc7b1a51fb8fde2c32b264f8e5b861c77ba0e"
+
+[rust]
+unsafe_crates = ["drover-sys"]

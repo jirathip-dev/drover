@@ -1,1 +1,0 @@
-# cap_script = "scripts/line-cap.sh"   # #754: `drover cap` runs it and reads its `N / cap M` lines; unset = the first premerge check naming a cap, else the built-in Rust count

@@ -90,7 +90,7 @@ fn groups_default_to_all_but_pause_and_set_and_name_only_known_groups() {
 fn the_orchestrator_brief_lists_the_fleets_groups() {
     let sh = FakeShed::new();
     let acp = format!(
-        "account = \"C\"\n\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        "\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n",
         sh.sock.display()
     );
     let mut c = setup(
@@ -272,7 +272,6 @@ fn a_hard_no_is_refused_at_posting() {
         "git push origin +staging",
         "git filter-repo --path secrets",
         "gh api -X DELETE repos/o/r/branches/main/protection",
-        "drover merge sendmeter 5 --owner-override",
     ] {
         let (code, out) = post(&c, cmd);
         assert_eq!(

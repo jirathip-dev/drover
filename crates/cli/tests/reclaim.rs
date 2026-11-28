@@ -131,8 +131,8 @@ struct Held(std::process::Child);
 
 impl Drop for Held {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        self.0.kill().ok();
+        self.0.wait().ok();
     }
 }
 
@@ -226,6 +226,90 @@ fn the_shared_build_folder_is_trimmed_past_its_budget_except_a_building_profile(
     assert!(!idle.exists(), "{out}");
     assert!(
         building.join("deps/blob").exists() && out.contains("cargo is building"),
+        "{out}"
+    );
+}
+
+fn idle_lane_events(c: &drover::Ctx) {
+    let ev = |issue: u64, kind: &str, d: serde_json::Value| {
+        append(&c.state, &Event::new(10, "sendmeter", Some(issue), kind, d)).unwrap();
+    };
+    let spawn = |issue: u64, role: &str| {
+        let agent = format!("sendmeter-{role}-{issue}");
+        ev(issue, "spawn", json!({"role": role, "agent": agent, "pane": "p1"}));
+    };
+    spawn(1, "impl");
+    ev(1, "needs-human", json!({"why": "ROUND_LIMIT"}));
+    spawn(2, "impl");
+    ev(2, "parked", json!({"why": "later"}));
+    spawn(3, "impl");
+    spawn(3, "rev");
+    spawn(6, "impl");
+    spawn(6, "rev");
+    ev(6, "verdict", json!({"sha": "a".repeat(40), "verdict": "PASS"}));
+    spawn(4, "impl");
+    spawn(5, "impl");
+    ev(5, "needs-human", json!({"why": "ROUND_LIMIT"}));
+}
+
+fn build_profile(root: &Path, agent: &str) -> PathBuf {
+    let dir = root.join(agent).join("debug");
+    std::fs::create_dir_all(dir.join("deps")).unwrap();
+    std::fs::write(dir.join("deps/blob"), vec![0u8; 4096]).unwrap();
+    std::fs::write(dir.join(".cargo-lock"), "").unwrap();
+    dir
+}
+
+#[test]
+fn over_build_budget_an_idle_live_lanes_folder_is_trimmed_but_a_working_or_building_one_stays() {
+    let d = tmpdir("reclaim-idle-live");
+    let root = d.join("worktrees/.build");
+    let cfg = CONFIG.replace("build_root = \"\"", "build_budget_gb = 0");
+    let c = ctx(&d, &cfg);
+    idle_lane_events(&c);
+    let profile = |agent: &str| build_profile(&root, agent);
+    let sh = FakeShed::attached(&c);
+    let agents = ["impl-1", "impl-2", "impl-3", "impl-4", "impl-5", "rev-3", "rev-6"].map(|a| format!("sendmeter-{a}"));
+    for a in &agents {
+        sh.lane(a, "idle", "/x");
+    }
+    let idle = [
+        (profile(&agents[0]), "needs-human"),
+        (profile(&agents[1]), "parked"),
+        (profile(&agents[2]), "stage moved on"),
+    ];
+    let (working, reviewing, reviewed) = (profile(&agents[3]), profile(&agents[5]), profile(&agents[6]));
+    let building = profile(&agents[4]);
+    let held = std::fs::File::open(building.join(".cargo-lock")).unwrap();
+    held.lock().unwrap();
+    let r = Fake::default().reply("git -C", "").reply("lsof", "");
+    let mut out = vec![];
+    let config = drover::config::Config::load(&c.config).unwrap();
+    drover::check::budget(&c, &config, &sh.on(&r), &mut out).unwrap();
+    let out = String::from_utf8(out).unwrap();
+    for (dir, why) in &idle {
+        assert!(!dir.exists(), "{}: {out}", dir.display());
+        assert!(out.contains(&format!("builds: trimmed {}", dir.display())), "{out}");
+        let line = out.lines().find(|l| l.contains(&*dir.to_string_lossy())).unwrap();
+        assert!(line.ends_with(&format!("idle: {why})")), "{line}");
+    }
+    assert!(!reviewed.exists(), "a rev lane with a verdict builds nothing: {out}");
+    for w in [&working, &reviewing] {
+        assert!(w.join("deps/blob").exists(), "{out}");
+        assert!(out.contains(&format!("keep {}: a live lane", w.display())), "{out}");
+    }
+    assert!(building.join("deps/blob").exists(), "{out}");
+    assert!(
+        out.contains(&format!("keep {}: cargo is building", building.display())),
+        "{out}"
+    );
+
+    let again = [profile(&agents[0]), profile(&agents[2])];
+    let (code, out) = run(&c, &r, &["reclaim", "--apply"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(again.iter().all(|d| !d.exists()), "reclaim uses the same rule: {out}");
+    assert!(
+        working.join("deps/blob").exists() && building.join("deps/blob").exists(),
         "{out}"
     );
 }

@@ -48,14 +48,242 @@ impl Route {
 /// Commands never sent to a build machine, whatever a fleet's patterns: history readers, `gh`, `drover`, signing, release builds, containers, stdin and `.env` readers.
 pub const NEVER_ROUTED: &str = "git *,gh *,drover *,*nx affected*,*--changed*,*merge-base*,*origin/*,*codesign*,*notarytool*,*--release*,cargo install*,docker *,podman *,colima *,orb *,*supabase start*,*<*,*.env*";
 
-fn segments(cmd: &str) -> Vec<String> {
-    (cmd.split(['\n', ';', '|', '&', '(', ')']))
-        .map(|s| {
-            let w: Vec<&str> = s.split_whitespace().collect();
-            let at = w.iter().position(|w| !w.contains('=') || w.starts_with('-'));
-            at.and_then(|i| w.get(i..)).map_or(String::new(), |t| t.join(" "))
-        })
-        .collect()
+/// The `cargo` kind of a fleet with heavy kinds or routes that sets no `cargo` kind of its own.
+pub const CARGO: &str = "cargo build*,cargo check*,cargo clippy*,cargo test*,cargo nextest*,cargo run*,cargo xtask*";
+
+#[derive(Default)]
+struct Part {
+    words: Vec<String>,
+    plain: Vec<String>,
+    redirs: Vec<String>,
+    op: String,
+}
+
+impl Part {
+    fn args(&self) -> Vec<&str> {
+        let mut w: Vec<&str> = (self.plain.iter())
+            .map(String::as_str)
+            .filter(|w| !w.is_empty())
+            .collect();
+        let at = w.iter().position(|w| !w.contains('=') || w.starts_with('-'));
+        w.split_off(at.unwrap_or(w.len()))
+    }
+
+    fn plain(&self) -> String {
+        self.args().join(" ")
+    }
+
+    fn dirs(&self) -> Vec<&str> {
+        let a = self.args();
+        let cd = matches!(a.first(), Some(&("cd" | "pushd"))).then(|| a.get(1).copied().unwrap_or("~"));
+        let pairs = a.iter().zip(a.iter().skip(1));
+        let flags = pairs
+            .filter(|(f, _)| matches!(**f, "-C" | "--manifest-path"))
+            .map(|(_, v)| *v);
+        let joined = a.iter().filter_map(|w| w.strip_prefix("--manifest-path="));
+        cd.into_iter().chain(flags).chain(joined).collect()
+    }
+
+    fn text(&self) -> String {
+        self.words
+            .iter()
+            .chain(&self.redirs)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+#[derive(Default)]
+struct Line {
+    parts: Vec<Part>,
+    unsplit: Option<&'static str>,
+    part: Part,
+    w: String,
+    m: String,
+    word: bool,
+    to: Option<String>,
+}
+
+impl Line {
+    fn end_word(&mut self) {
+        if !self.word {
+            return;
+        }
+        self.word = false;
+        let (w, m) = (std::mem::take(&mut self.w), std::mem::take(&mut self.m));
+        if let Some(op) = self.to.take() {
+            self.part.redirs.push(op + &w);
+        } else {
+            self.part.words.push(w);
+            self.part.plain.push(m);
+        }
+    }
+
+    fn end_part(&mut self, op: &str) {
+        self.end_word();
+        self.part.redirs.extend(self.to.take());
+        let mut p = std::mem::take(&mut self.part);
+        p.op = op.into();
+        self.parts.push(p);
+    }
+
+    fn why(&mut self, why: &'static str) {
+        self.unsplit.get_or_insert(why);
+    }
+
+    fn push(&mut self, c: char, plain: bool) {
+        self.word = true;
+        self.w.push(c);
+        if plain {
+            self.m.push(c);
+        }
+    }
+
+    fn parse(cmd: &str) -> Line {
+        let c: Vec<char> = cmd.chars().collect();
+        let at = |i: usize| c.get(i).copied();
+        let mut l = Line::default();
+        let mut docs: Vec<String> = Vec::new();
+        let mut i = 0;
+        if cmd.contains(".env") {
+            l.why(".env");
+        }
+        while let Some(ch) = at(i) {
+            let n = at(i + 1);
+            i += 1;
+            match ch {
+                '\\' => {
+                    l.push(ch, false);
+                    if let Some(e) = n {
+                        l.push(e, true);
+                        i += 1;
+                    }
+                }
+                '\'' | '"' => {
+                    l.push(ch, false);
+                    while let Some(q) = at(i) {
+                        i += 1;
+                        l.push(q, false);
+                        if q == ch {
+                            break;
+                        }
+                        if ch == '"' && q == '\\' {
+                            l.push(at(i).unwrap_or_default(), false);
+                            i += 1;
+                        } else if ch == '"' && (q == '`' || (q == '$' && at(i) == Some('('))) {
+                            l.why("a subshell");
+                        }
+                    }
+                }
+                '`' => {
+                    l.why("a subshell");
+                    l.push(ch, true);
+                }
+                '$' if n == Some('(') => {
+                    l.why("a subshell");
+                    l.push(ch, true);
+                }
+                '#' if !l.word => {
+                    while at(i).is_some_and(|c| c != '\n') {
+                        i += 1;
+                    }
+                }
+                '(' | ')' => {
+                    l.why("a subshell");
+                    l.end_part(";");
+                }
+                '<' if n == Some('<') && at(i + 1) != Some('<') => {
+                    l.why("a here-doc");
+                    i += 1;
+                    i += usize::from(at(i) == Some('-'));
+                    while at(i).is_some_and(|c| c == ' ' || c == '\t') {
+                        i += 1;
+                    }
+                    let mut d = String::new();
+                    while let Some(q) = at(i).filter(|q| !q.is_whitespace() && !";|&<>()".contains(*q)) {
+                        if !"'\"\\".contains(q) {
+                            d.push(q);
+                        }
+                        i += 1;
+                    }
+                    docs.push(d);
+                }
+                '<' => l.why("stdin (<)"),
+                '>' => {
+                    let fd = if l.word && l.to.is_none() && l.w.chars().all(|c| c.is_ascii_digit()) {
+                        l.word = false;
+                        l.m.clear();
+                        std::mem::take(&mut l.w)
+                    } else {
+                        l.end_word();
+                        String::new()
+                    };
+                    let mut op = fd + ">";
+                    if let Some(e) = n.filter(|e| matches!(e, '>' | '&' | '|')) {
+                        op.push(e);
+                        i += 1;
+                    }
+                    l.to = Some(op);
+                }
+                '&' if n == Some('>') => {
+                    l.end_word();
+                    i += 1;
+                    let mut op = String::from("&>");
+                    if at(i) == Some('>') {
+                        op.push('>');
+                        i += 1;
+                    }
+                    l.to = Some(op);
+                }
+                '&' | '|' if n == Some(ch) => {
+                    i += 1;
+                    l.end_part(&format!("{ch}{ch}"));
+                }
+                '&' => {
+                    l.why("a background job (&)");
+                    l.end_part("&");
+                }
+                '|' => {
+                    i += usize::from(n == Some('&'));
+                    l.end_part("|");
+                }
+                ';' => l.end_part(";"),
+                '\n' => {
+                    l.end_part("\n");
+                    for d in docs.drain(..) {
+                        while i < c.len() {
+                            let row: String = c.iter().skip(i).take_while(|&&c| c != '\n').collect();
+                            i += row.chars().count() + 1;
+                            if row.trim() == d {
+                                break;
+                            }
+                        }
+                    }
+                }
+                c if c.is_whitespace() => l.end_word(),
+                c => l.push(c, true),
+            }
+        }
+        l.end_part("");
+        l
+    }
+}
+
+fn inside(dir: &str, to: &str) -> bool {
+    use std::path::Component;
+    if to == "-" || to.contains(['$', '~', '`']) {
+        return false;
+    }
+    let mut n = std::path::PathBuf::new();
+    for c in Path::new(dir).join(to).components() {
+        match c {
+            Component::ParentDir if !n.pop() => return false,
+            Component::ParentDir | Component::CurDir => {}
+            c => n.push(c),
+        }
+    }
+    n.starts_with(dir)
 }
 
 /// Whether shell pattern `p` (`*` any text) matches `s`.
@@ -63,27 +291,74 @@ pub fn hits(p: &str, s: &str) -> bool {
     crate::config::glob(p.replace('*', "**").as_bytes(), s.as_bytes())
 }
 
+fn matches(ps: &[String], p: &Part) -> bool {
+    let s = p.plain();
+    ps.iter().any(|q| hits(q, &s))
+}
+
+/// The kind whose `[remote.<kind>]` route a fleet's gate checks, done checks and `drover hold` take.
+pub const GATE_KIND: &str = "cargo";
+
 impl Heavy {
-    /// The first kind with a pattern matching one of `cmd`'s commands (leading `VAR=value` words skipped).
+    /// Fleet `f`'s kinds, routes and never-routed list under host `h`'s slot limits.
+    pub fn of(f: &crate::config::Fleet, h: Option<&crate::config::HostCfg>) -> Heavy {
+        Heavy {
+            kinds: f.heavy_kinds(),
+            max: h.and_then(|h| h.heavy_max).unwrap_or(3),
+            kind_max: h.map(|h| h.heavy_kind_max.clone()).unwrap_or_default(),
+            wait_minutes: h.and_then(|h| h.heavy_wait_minutes).unwrap_or(30),
+            routes: f.remote.clone(),
+            never: f.never_routed(),
+        }
+    }
+
+    /// Whether `cmd` goes whole to the `cargo` route's build machines: it has a `cargo` command and no never-routed one.
+    pub fn gated(&self, cmd: &str) -> bool {
+        let line = Line::parse(cmd);
+        let ps = self.kinds.get(GATE_KIND).map_or(&[][..], Vec::as_slice);
+        let never = |p: &Part| (self.never.iter()).any(|n| hits(n, &p.plain()) || hits(n, &p.text()));
+        self.routes.contains_key(GATE_KIND)
+            && line.unsplit.is_none()
+            && line.parts.iter().any(|p| matches(ps, p))
+            && !line.parts.iter().any(never)
+    }
+
+    /// Gate check `cmd` as a shell line: under `exe heavy` on the `cargo` route's build machines from worktree `dir` when `gated`, else unchanged.
+    pub fn gate(&self, exe: &str, cmd: &str, dir: &str) -> String {
+        if self.gated(cmd) {
+            self.wrap(exe, GATE_KIND, cmd, Some(dir))
+        } else {
+            cmd.into()
+        }
+    }
+
+    /// Fleet `f`'s heavy kinds under host `host`'s slot limits (None or unknown: the main host's).
+    pub fn at(cfg: &crate::config::Config, f: &crate::config::Fleet, host: Option<&str>) -> Heavy {
+        let main = || cfg.hosts.values().find(|h| h.machine.is_none());
+        Self::of(f, host.and_then(|n| cfg.hosts.get(n)).or_else(main))
+    }
+
+    /// `run` as a check's `sh -c` argv in `wt` at background priority: on the `cargo` route when `gated`, else in a slot of the kind it matches.
+    pub fn check(&self, exe: &str, run: &str, wt: &str) -> Vec<String> {
+        let line = match self.kind(run) {
+            _ if self.gated(run) => self.wrap(exe, GATE_KIND, run, Some(wt)),
+            Some(kind) => self.wrap(exe, kind, run, None),
+            None => run.to_string(),
+        };
+        let sh = format!("renice -n 19 -p $$ >/dev/null 2>&1; cd \"$0\" && {line}");
+        crate::runner::argv(&["-c", &sh, wt])
+    }
+
+    /// The first kind with a pattern matching one of `cmd`'s commands (leading `VAR=value` words, quoted text, comments and here-doc bodies skipped).
     pub fn kind(&self, cmd: &str) -> Option<&str> {
-        let segs = segments(cmd);
-        let hit = |p: &String| segs.iter().any(|s| hits(p, s));
+        let line = Line::parse(cmd);
         self.kinds
             .iter()
-            .find(|(_, ps)| ps.iter().any(hit))
+            .find(|(_, ps)| line.parts.iter().any(|p| matches(ps, p)))
             .map(|(k, _)| k.as_str())
     }
 
-    /// `kind`'s route for `cmd`, unless the line or one of its commands is never routed.
-    pub fn route(&self, kind: &str, cmd: &str) -> Option<&Route> {
-        let mut segs = segments(cmd);
-        segs.push(cmd.trim().into());
-        let never = |n: &String| segs.iter().any(|s| hits(n, s));
-        self.routes.get(kind).filter(|_| !self.never.iter().any(never))
-    }
-
-    /// `cmd` as a shell line that runs it under `exe heavy`, holding a `kind` slot; with a route and the lane's worktree `dir`, on a build machine first.
-    pub fn wrap(&self, exe: &str, kind: &str, cmd: &str, dir: Option<&str>) -> String {
+    fn slot(&self, exe: &str, kind: &str, on: Option<(&Route, &str)>, cmd: &str) -> String {
         let mut a = [
             exe,
             "heavy",
@@ -98,7 +373,7 @@ impl Heavy {
         if let Some(m) = self.kind_max.get(kind) {
             a.extend(["--kind-max".into(), m.to_string()]);
         }
-        if let (Some(r), Some(dir)) = (self.route(kind, cmd), dir) {
+        if let Some((r, dir)) = on {
             a.extend(["--remote".into(), r.tag.clone(), "--dir".into(), dir.into()]);
             a.extend(r.flags("--remote-wait"));
         }
@@ -106,23 +381,73 @@ impl Heavy {
         let q = |w: &String| format!("'{}'", w.replace('\'', r"'\''"));
         a.iter().map(q).collect::<Vec<_>>().join(" ")
     }
+
+    /// `cmd` as a shell line under `exe heavy` in a `kind` slot; with a route and the lane's worktree `dir`, its `kind` commands on a build machine first and, in a line mixing them with never-routed ones, only those.
+    pub fn wrap(&self, exe: &str, kind: &str, cmd: &str, dir: Option<&str>) -> String {
+        let here = self.slot(exe, kind, None, cmd);
+        let (Some(r), Some(dir)) = (self.routes.get(kind), dir) else {
+            return here;
+        };
+        let line = Line::parse(cmd);
+        let ps = self.kinds.get(kind).map_or(&[][..], Vec::as_slice);
+        let never = |p: &Part| (self.never.iter()).any(|n| hits(n, &p.plain()) || hits(n, &p.text()));
+        let routed: Vec<bool> = line.parts.iter().map(|p| matches(ps, p) && !never(p)).collect();
+        let (mut prev, mut piped, mut split) = ("", false, false);
+        for (p, r) in line.parts.iter().zip(&routed) {
+            piped |= *r && prev == "|";
+            split |= *r && (p.op == "|" || !p.redirs.is_empty());
+            prev = &p.op;
+        }
+        if !routed.contains(&true) {
+            return here;
+        }
+        let away = line.parts.iter().flat_map(Part::dirs).any(|to| !inside(dir, to));
+        let why = line.unsplit.or(piped.then_some("a pipe"));
+        if let Some(why) = why.or(away.then_some("another checkout")) {
+            return format!("echo 'heavy: {why} in the line, running here' >&2; {here}");
+        }
+        if !split && !line.parts.iter().any(never) {
+            return self.slot(exe, kind, Some((r, dir)), cmd);
+        }
+        let part = |(p, on): (&Part, &bool)| {
+            let t = match on {
+                true => [self.slot(exe, kind, Some((r, dir)), &p.words.join(" "))]
+                    .into_iter()
+                    .chain(p.redirs.iter().cloned())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                false => p.text(),
+            };
+            match p.op.as_str() {
+                "" | "\n" => format!("{t}{}", p.op),
+                op => format!("{t} {op} "),
+            }
+        };
+        line.parts
+            .iter()
+            .zip(&routed)
+            .map(part)
+            .collect::<String>()
+            .trim_end()
+            .into()
+    }
 }
 
-/// `runners run` for `cmd` in worktree `dir` on route `r`: `Some(code)` once it ran there (the command's own code), else `None` with the reason printed: run it here.
-pub fn remote(run: &dyn Runner, r: &Route, dir: &str, cmd: &str) -> Option<i32> {
+/// `runners run` for `cmd` in worktree `dir` on route `r`: `Ok(code)` once it ran there (the command's own code), else the reason, printed: run it here.
+pub fn remote(run: &dyn Runner, r: &Route, dir: &str, cmd: &str) -> Result<i32, String> {
     let mut a: Vec<String> = ["run", "--tag", &r.tag, "--dir", dir].map(String::from).to_vec();
     a.extend(r.flags("--wait"));
     a.extend(["--", "bash", "-c", cmd].map(String::from));
     let why = match run.attached("runners", &a) {
         Ok(c @ (75 | 76 | 64 | 78)) => format!("exit {c}"),
-        Ok(c) => return Some(c),
+        Ok(c) => return Ok(c),
         Err(e) => match e.downcast_ref::<std::io::Error>().map(std::io::Error::kind) {
             Some(std::io::ErrorKind::NotFound) => "not found".into(),
             _ => format!("{e:#}"),
         },
     };
     crate::stderr!("runners: {why}, running here");
-    None
+    Err(why)
 }
 
 /// `drover heavy`: a lane's heavy command, its host slot limits and its route's build machines.
@@ -144,20 +469,23 @@ pub struct Args {
 }
 
 impl Args {
-    /// Run it on its route's build machines, else as `who` in slot folder `dir`'s line.
+    /// Run it on its route's build machines, else as `who` in slot folder `dir`'s line; `fell` gets a routed run that falls back here.
     pub fn run(
         self,
         r: &dyn Runner,
         dir: &Path,
         who: String,
+        fell: impl FnOnce(&Ticket),
         late: impl FnOnce(&Ticket, &str) -> Option<i32>,
     ) -> Result<i32> {
+        let mut me = Ticket::new(who, self.kind, self.cmd, self.kind_max);
         if let (Some(route), Some(wt)) = (&self.route, &self.dir) {
-            if let Some(code) = remote(r, route, wt, &self.cmd) {
-                return Ok(code);
+            match remote(r, route, wt, &me.cmd) {
+                Ok(code) => return Ok(code),
+                Err(why) => me.here = Some(why),
             }
+            fell(&me);
         }
-        let me = Ticket::new(who, self.kind, self.cmd, self.kind_max);
         run(r, dir, me, self.max, self.wait, &|| None, late)
     }
 }
@@ -183,6 +511,9 @@ pub struct Ticket {
     pub since: u64,
     pub running: bool,
     pub kind_max: Option<usize>,
+    /// Why a routed command runs here instead of on its build machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub here: Option<String>,
 }
 
 impl Ticket {
@@ -196,6 +527,7 @@ impl Ticket {
             since,
             running: false,
             kind_max,
+            here: None,
         }
     }
 }
@@ -303,7 +635,7 @@ pub fn run(
     code
 }
 
-/// `drover hold`: run `cmd` as holder `ci:<repo>` once the main host passes spawn admission and a heavy slot is free; 75 past `wait` minutes.
+/// `drover hold`: run `cmd` on its fleet's (the lane's, else the repo's) `cargo` route's build machines when `gated`, else as holder `ci:<repo>` once the main host passes spawn admission and a heavy slot is free; 75 past `wait` minutes.
 pub fn hold(ctx: &crate::Ctx, r: &dyn crate::runner::Runner, wait: u64, cmd: &[String]) -> Result<i32> {
     let (prog, args) = cmd.split_first().context("hold: no command")?;
     let cfg = crate::config::Config::load(&ctx.config)?;
@@ -320,13 +652,18 @@ pub fn hold(ctx: &crate::Ctx, r: &dyn crate::runner::Runner, wait: u64, cmd: &[S
             )
         })
         .unwrap_or_default();
+    let line = crate::hosts::quote(prog, args);
+    let of_lane = crate::config::env("DROVER_LANE").and_then(|l| Some(l.split(':').next()?.to_string()));
+    let fleet = (of_lane.and_then(|l| cfg.fleet.get(&l)))
+        .or_else(|| (cfg.fleet.values()).find(|f| f.repo.rsplit('/').next() == Some(repo.as_str())));
+    let heavy = fleet.map(|f| Heavy::of(f, host)).filter(|h| h.gated(&cmd.join(" ")));
+    let route = heavy.as_ref().and_then(|h| h.routes.get(GATE_KIND));
+    let here = std::env::current_dir()?;
+    if let Some(Ok(code)) = route.map(|rt| remote(r, rt, &here.to_string_lossy(), &line)) {
+        return Ok(code);
+    }
     let kind_max = host.and_then(|h| h.heavy_kind_max.get("ci").copied());
-    let me = Ticket::new(
-        format!("ci:{repo}"),
-        "ci".into(),
-        crate::hosts::quote(prog, args),
-        kind_max,
-    );
+    let me = Ticket::new(format!("ci:{repo}"), "ci".into(), line, kind_max);
     let max = host.and_then(|h| h.heavy_max).unwrap_or(3);
     let on = crate::hosts::On::new(r, None);
     let busy = || {

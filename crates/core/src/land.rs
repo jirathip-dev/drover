@@ -392,10 +392,10 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
     }
     prs.sort_by_key(|p| p.0);
     let (dir, wt) = (f.local_path(), ctx.state.with_file_name(format!("update-{fleet}")));
-    let (wts, into) = (wt.to_string_lossy(), format!("origin/{}", f.integration));
+    let into = format!("origin/{}", f.integration);
     crate::clone::fetch_branches(ctx, r, &dir)?;
     let base = git(r, &dir, &["rev-parse", &into])?;
-    let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
+    let heavy = crate::heavy::Heavy::at(cfg, f, None);
     let (p, mut seen) = (gh::cache_path(ctx, "update", fleet, 0), serde_json::Map::new());
     let old = crate::usage::load::<Value>(&p).unwrap_or_default();
     for (_, s) in prs {
@@ -416,16 +416,11 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
             continue;
         }
         let clean = clean && {
-            tree(&["remove", "--force", "--force", &wts]).ok();
-            tree(&["add", "-f", "--detach", &wts, &from])?;
+            crate::gate::scratch(r, &dir, &wt, &from)?;
             git(r, &wt, &["merge", "--no-edit", &into]).is_ok()
         };
-        let checks = if clean {
-            crate::gate::premerge_checks(ctx, f, &wt)
-        } else {
-            vec![]
-        };
-        let fail = crate::gate::run_checks(r, &wt, &into, &checks);
+        let checks = if clean { crate::gate::premerge_checks(f) } else { vec![] };
+        let fail = crate::gate::run_checks(r, (&heavy, &ctx.exe), &wt, &into, &checks);
         let res = if !clean {
             crate::drive::update_lane(ctx, cfg, r, out, &events, fleet, s.issue).map(drop)
         } else if let Some((c, o)) = fail {
@@ -447,7 +442,6 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
                 crate::gate::sync_label(ctx, cfg, r, out, &s, &pr)
             })
         };
-        tree(&["remove", "--force", &wts]).ok();
         res?;
     }
     Ok(())

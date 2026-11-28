@@ -269,15 +269,22 @@ fn page(
     }
 }
 
-/// API v1 `thread/<t>?before=<seq>&n=30`: the page of messages before `before`.
+/// API v1 `thread/<t>?before=<seq>&n=30`: the page of messages before `before`; `?after=<seq>`: every message after it.
 pub fn older(ctx: &Ctx, events: &[Event], id: &str, q: &BTreeMap<String, String>) -> Option<ThreadPage> {
     let t = conductor::find(events, id)
         .ok()
         .or_else(|| conductor::attached(events, id))?;
     let cfg = Config::kept(ctx).ok()?;
-    let before = q.get("before").and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
-    let n = q.get("n").and_then(|v| v.parse().ok()).unwrap_or(30);
-    Some(page(ctx, &cfg, events, t, (before, u64::MAX, n), u64::MAX))
+    let num = |k: &str| q.get(k).and_then(|v| v.parse().ok());
+    let before = num("before").unwrap_or(u64::MAX);
+    let Some(after) = num("after") else {
+        let n = num("n").and_then(|n| usize::try_from(n).ok()).unwrap_or(30);
+        return Some(page(ctx, &cfg, events, t, (before, u64::MAX, n), u64::MAX));
+    };
+    let mut p = page(ctx, &cfg, events, t, (before, u64::MAX, usize::MAX), u64::MAX);
+    p.msgs.retain(|m| m.seq > after);
+    p.older = None;
+    Some(p)
 }
 
 fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, at): (&[Session], u64)) -> ThreadView {
@@ -369,7 +376,13 @@ fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Session]) -> (u64, Thre
     (at, row)
 }
 
-pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Session], rw: bool) -> ChatTab {
+pub fn tab(
+    ctx: &Ctx,
+    cfg: Result<&Config, &str>,
+    events: &[Event],
+    agents: &[Session],
+    (rw, q): (bool, &BTreeMap<String, String>),
+) -> ChatTab {
     let mut tab = ChatTab {
         now: ctx.now,
         rw,
@@ -388,6 +401,9 @@ pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Se
         let (mut rows, mut arch) = (vec![], vec![]);
         for t in threads.iter().filter(|t| t.fleet == repo) {
             let on = conductor::archived(events, t.str("thread").unwrap_or_default());
+            if on && !q.contains_key("archived") {
+                continue;
+            }
             if on { &mut arch } else { &mut rows }.push(row(ctx, events, t, agents));
         }
         rows.sort_by_key(|r| std::cmp::Reverse(r.0));
@@ -404,16 +420,31 @@ pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Se
             ),
         });
     }
-    tab.threads = threads
-        .iter()
+    let open = q.get("thread").and_then(|id| conductor::find(events, id).ok());
+    tab.threads = open
         .map(|t| thread(ctx, cfg, events, t, (agents, u64::MAX)))
+        .into_iter()
         .collect();
     tab
 }
 
 impl super::Server<'_> {
-    pub(super) fn chat_tab(&self, ctx: &Ctx, rw: bool) -> Value {
+    pub(super) fn chat_tab(&self, ctx: &Ctx, rw: bool, q: &BTreeMap<String, String>) -> Value {
         let agents = self.sessions(ctx.now).map(|s| s.running()).unwrap_or_default();
+        if !q.is_empty() {
+            let (cfg, events) = (
+                Config::kept(ctx),
+                crate::events::working(&ctx.state).unwrap_or_default(),
+            );
+            let cfg = cfg.map_err(|e| format!("{e:#}"));
+            return wire(&tab(
+                ctx,
+                cfg.as_ref().map_err(String::as_str),
+                &events,
+                &agents,
+                (rw, q),
+            ));
+        }
         let seen: Vec<_> = agents
             .iter()
             .map(|a| [a.name.as_str(), a.status().map_or("", Status::word)])
@@ -429,7 +460,13 @@ impl super::Server<'_> {
             };
             *c = (
                 key,
-                wire(&tab(ctx, cfg.as_ref().map_err(String::as_str), &events, &agents, rw)),
+                wire(&tab(
+                    ctx,
+                    cfg.as_ref().map_err(String::as_str),
+                    &events,
+                    &agents,
+                    (rw, q),
+                )),
             );
         }
         c.1.clone()
@@ -452,6 +489,17 @@ pub fn file(ctx: &Ctx, events: &[Event], id: &str, name: &str, demo: bool) -> Op
     conductor::inside(ctx, &Config::kept(ctx).ok()?, id, p)
 }
 
+pub(super) fn attachments(name: &str, data: &str) -> Result<Vec<(String, Vec<u8>)>> {
+    let mut names = name.split('/').map(|n| n.replace(char::is_control, ""));
+    let decode = |d| {
+        Ok((
+            names.next().unwrap_or_default(),
+            B64.decode(d).context("a file is not base64")?,
+        ))
+    };
+    data.split(',').filter(|d| !d.is_empty()).map(decode).collect()
+}
+
 pub fn post(
     ctx: &Ctx,
     r: &dyn Runner,
@@ -464,15 +512,7 @@ pub fn post(
     let id = g("t");
     match g("op") {
         "new" | "say" | "queue" | "steer" => {
-            let mut names = g("name").split('/').map(|n| n.replace(char::is_control, ""));
-            let data = g("data").split(',').filter(|d| !d.is_empty());
-            let decode = |d| {
-                Ok((
-                    names.next().unwrap_or_default(),
-                    B64.decode(d).context("a file is not base64")?,
-                ))
-            };
-            let files = data.map(decode).collect::<Result<Vec<_>>>()?;
+            let files = attachments(g("name"), g("data"))?;
             let all: Vec<&str> = files.iter().map(|f| f.0.as_str()).collect();
             let all = all.join(", ");
             let text = or(g("text").trim().is_empty(), &all, g("text"));
@@ -664,9 +704,33 @@ fn row_block((at, r): &(u64, ThreadRow), repo: Option<&str>, act: &str) -> k::Bl
     v.block()
 }
 
+fn archived_screen(ctx: &Ctx, events: &[Event], agents: &[Session]) -> k::Block {
+    let threads = conductor::threads(events);
+    let gone = threads
+        .iter()
+        .filter(|t| conductor::archived(events, t.str("thread").unwrap_or_default()));
+    let mut rows: Vec<_> = gone
+        .map(|t| {
+            let name = or(t.fleet == "all", "all repos", &t.fleet).to_string();
+            (row(ctx, events, t, agents), name)
+        })
+        .collect();
+    rows.sort_by_key(|r| std::cmp::Reverse(r.0 .0));
+    let rows: Vec<k::Block> = rows
+        .iter()
+        .map(|(r, name)| row_block(r, Some(name), "restore"))
+        .collect();
+    k::Screen::new()
+        .id("threads-archived")
+        .title("Archived")
+        .stream("/screens/threads/archived/stream")
+        .blocks(vec![k::List::new(rows).id("l-archived").block()])
+        .block()
+}
+
 pub fn list_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Session]) -> k::Block {
     let threads = conductor::threads(events);
-    let (mut blocks, mut older, mut arch) = (vec![], vec![], vec![]);
+    let (mut blocks, mut older, mut arch) = (vec![], vec![], 0);
     for repo in std::iter::once("all").chain(cfg.fleet.keys().map(String::as_str)) {
         let name = or(repo == "all", "all repos", repo);
         let mut all: Vec<_> = (threads.iter().filter(|t| t.fleet == repo))
@@ -681,7 +745,7 @@ pub fn list_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Session]
         let mut rows = vec![];
         for (i, (on, r)) in all.iter().enumerate() {
             match (on, i < 3) {
-                (true, _) => arch.push((r.0, row_block(r, Some(name), "restore"))),
+                (true, _) => arch += 1,
                 (false, true) => rows.push(row_block(r, None, "archive")),
                 (false, false) => older.push((r.0, row_block(r, Some(name), "archive"))),
             }
@@ -704,20 +768,28 @@ pub fn list_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Session]
             .header(format!("{name} · {count}"));
         blocks.push(section.block());
     }
-    for (id, word, mut rows) in [
-        ("older-threads", "older threads", older),
-        ("archived", "archived", arch),
-    ] {
-        if !rows.is_empty() {
-            rows.sort_by_key(|r| std::cmp::Reverse(r.0));
-            let rows: Vec<k::Block> = rows.into_iter().map(|r| r.1).collect();
-            let fold = k::Fold {
-                line: format!("▸ {} {word}", rows.len()),
-                main: None,
-            };
-            let list = k::List::new(rows).id(format!("l-{id}"));
-            blocks.push(k::Card::new().id(id).fold(fold).blocks(vec![list.block()]).block());
-        }
+    if !older.is_empty() {
+        older.sort_by_key(|r| std::cmp::Reverse(r.0));
+        let rows: Vec<k::Block> = older.into_iter().map(|r| r.1).collect();
+        let fold = k::Fold {
+            line: format!("▸ {} older threads", rows.len()),
+            main: None,
+        };
+        let list = k::List::new(rows).id("l-older-threads");
+        blocks.push(
+            k::Card::new()
+                .id("older-threads")
+                .fold(fold)
+                .blocks(vec![list.block()])
+                .block(),
+        );
+    }
+    if arch > 0 {
+        let row = kit::titled("archived-row", "archived")
+            .accessory(k::Accessory::Chevron)
+            .value(arch.to_string())
+            .tap(open("/screens/threads/archived"));
+        blocks.push(k::List::new(vec![row.block()]).id("archived").block());
     }
     k::Screen::new()
         .id("threads")
@@ -759,6 +831,7 @@ fn owner_card(ctx: &Ctx, events: &[Event], e: &Event) -> Option<Msg> {
     };
     match e.kind.as_str() {
         "config-propose" => match crate::propose::settled(events, &s("id")) {
+            None if e.str("reason").is_some() => Some(m("config", s("id"), format!("✗ {}", s("reason")), false)),
             None => Some(m("config", s("id"), s("diff"), !crate::propose::stale(ctx, e))),
             Some(d) if d.val("applied") == true => Some(Msg {
                 answer: Some(Answered {
@@ -780,11 +853,51 @@ fn owner_card(ctx: &Ctx, events: &[Event], e: &Event) -> Option<Msg> {
     }
 }
 
+pub(super) fn drawn(ctx: &Ctx, events: &[Event], e: &Event, row: &crate::thread::Row, id: &str) -> Value {
+    use crate::thread::RowKind as K;
+    let landed = (e.kind == "epic-landed").then(|| serde_json::from_value(Value::Object(e.data.clone())).ok());
+    let m = Msg {
+        seq: e.seq,
+        ts: e.ts,
+        kind: "note".into(),
+        text: (landed.flatten()).map_or(row.text.clone(), |l| {
+            format!("{}\n{}", row.text, crate::epic::summary(&l))
+        }),
+        link: link(e),
+        ..Msg::default()
+    };
+    let m = match row.kind {
+        K::Ask | K::Decision => ask(
+            events,
+            e,
+            Msg {
+                kind: "ask".into(),
+                ..m
+            },
+        ),
+        K::RunCard => Msg {
+            kind: "run".into(),
+            run: Some(run_card(ctx, events, e)),
+            ..m
+        },
+        K::ConfigCard | K::SecretCard => owner_card(ctx, events, e).unwrap_or(m),
+        K::Said => Msg {
+            kind: "msg".into(),
+            from: "owner".into(),
+            ..m
+        },
+        _ => m,
+    };
+    wire(&msg_body(ctx.now, id, &m, true, None).block())
+}
+
 pub(super) fn owner_cards(ctx: &Ctx, events: &[Event], paired: bool) -> Vec<Value> {
     let all = crate::events::of_kind(events, &["config-propose", "secret-request"]);
     let card = |e: &Event| {
         let m = owner_card(ctx, events, e).filter(|m| m.answer.is_none())?;
-        Some(wire(&msg_body(ctx.now, e.str("thread")?, &m, paired, None).block()))
+        Some(wire(
+            &msg_body(ctx.now, e.str("thread").unwrap_or_default(), &m, paired, None).block(),
+        ))
     };
     all.into_iter().filter_map(card).collect()
 }
@@ -985,17 +1098,23 @@ fn config_body(now: u64, key: &str, id: &str, m: &Msg, age: k::Time) -> k::Card 
         if m.open {
             buttons.insert(0, button("apply", "primary", "config-card", v("apply")).block());
         }
-        let sub = or(
-            m.open,
-            "a fleet.toml change for you to apply",
-            "stale: fleet.toml changed since, it can no longer apply",
-        );
+        let (sub, body) = match m.text.strip_prefix("✗ ") {
+            Some(_) => ("drover could not build this rollout: nothing to apply", m.text.clone()),
+            None => (
+                or(
+                    m.open,
+                    "a fleet.toml change for you to apply",
+                    "stale: fleet.toml changed since, it can no longer apply",
+                ),
+                format!("```diff\n{}\n```", m.text.trim_end()),
+            ),
+        };
         card("config")
             .tone(if m.open { k::Tone::Warn } else { k::Tone::Bad })
             .title(format!("config proposal {}", m.from))
             .subtitle(sub)
             .meta(age)
-            .blocks(vec![text("d", &format!("```diff\n{}\n```", m.text.trim_end()))])
+            .blocks(vec![text("d", &body)])
             .buttons(buttons)
     }
 }
@@ -1279,6 +1398,7 @@ impl super::Server<'_> {
         let agents = self.sessions(ctx.now).map(|s| s.running()).unwrap_or_default();
         match sub {
             "" => Some(list_screen(ctx, &cfg, &events, &agents)),
+            "/archived" => Some(archived_screen(ctx, &events, &agents)),
             s if s.starts_with("/new/") => new_screen(&cfg, &s[5..], ctx.now),
             s => {
                 let id = s.strip_prefix('/')?;

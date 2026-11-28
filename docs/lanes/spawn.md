@@ -2,10 +2,13 @@
 
 `drover spawn` refuses before creating anything:
 
-- `HOST_BUSY`: memory pressure warn or worse, load per CPU over `[limits]`, or a sustained
+- `HOST_BUSY`: memory pressure warn or worse, CPU idle over a 1 s sample under `min_cpu_idle` (#1780: macOS's
+  load average counts waiting threads, so it is no gate), or a sustained
   swap-out rate (the median of the last 5 samples) over `[limits]` while pressure is warn or worse;
   one spike admits. `--force` overrides and logs an `override` event with `by` (`owner` or `orchestrator-<id>`);
   only the owner and orchestrators pass it, the lane hook refuses it in any other lane (#908).
+  A `[hosts.<n>]` may set its own `min_cpu_idle`, `min_free_mem_gb` and `swapout_rate` over `[limits]`; `drover doctor`
+  shows a `limits <name>` row per host with its last values against its limits.
 - `MEM_LOW`: free + inactive memory under `[limits] min_free_mem_gb` (default 2 GB); a lane needs about 0.5–1.5 GB.
 - `DISK_LOW`: free disk on `/` under `[limits] min_free_gb` (default 10 GB). `drover clean --yes`
   frees the build folders (`target/`, `node_modules/`, `.next/`, `dist/`) of merged or closed lanes,

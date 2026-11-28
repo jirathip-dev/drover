@@ -38,6 +38,16 @@ macro_rules! each {
             ChatRepo,
             Chip,
             ThreadRow,
+            Rows,
+            RowView,
+            drover_server::thread::Row,
+            drover_server::thread::Target,
+            drover_server::thread::RowKind,
+            drover_server::thread::Push,
+            drover_server::epic::Epic,
+            drover_server::epic::Member,
+            drover_server::epic::Landed,
+            drover_server::epic::Kid,
             Link,
             ThreadView,
             QueuedMsg,
@@ -110,6 +120,10 @@ macro_rules! each {
             Job,
             ConductorAttach,
             AttachEnv,
+            Said,
+            Manifest,
+            Place,
+            Threads,
             propose::ConfigView,
             propose::ConfigField,
             propose::ConfigChange,
@@ -144,6 +158,12 @@ fn bindings() -> String {
 fn export_bindings() {
     std::fs::create_dir_all(Path::new(OUT).parent().unwrap()).unwrap();
     std::fs::write(OUT, bindings()).unwrap();
+}
+
+#[test]
+fn export_plugin_manifest() {
+    let out = concat!(env!("CARGO_MANIFEST_DIR"), "/../../cooee-plugin.toml");
+    std::fs::write(out, drover_server::manifest::plugin_toml().unwrap()).unwrap();
 }
 
 struct Canned(std::collections::BTreeMap<String, String>);
@@ -229,7 +249,7 @@ fn serde_json_fits_the_types() {
     ));
     checks.extend(fold(&events).values().map(|s| ("IssueState", json!(s))));
     let row = hosts::Row {
-        load_cpu: Some(0.4),
+        cpu_idle: Some(60.0),
         pressure: Some(1),
         procs: Some([1, 2, 3, 4, 5]),
         ..Default::default()

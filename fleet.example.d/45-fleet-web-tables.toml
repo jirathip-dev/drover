@@ -19,6 +19,15 @@ paths = ["supabase/migrations/**"]
 # fast = ["lint", "unit"]   # names of existing CI checks; `doctor` warns about names no recent PR reports
 # full_first_paths = ["supabase/migrations/**", ".github/workflows/**"]   # a PR touching these waits for the full suite
 
+# #1756: scheduled jobs (docs/config/jobs.md): built in lesson 7d, triage 1d, deps 30d, advisory 1d; "off" opts out.
+# [fleet.web.job.triage]
+# every = "off"
+# [job.audit]   # a job of your own, for every fleet
+# every = "30d"
+# title = "audit: {fleet} {month}"
+# body = "Review the auth paths. One PR; list what you checked in its body."
+# role = "impl"
+
 # Per-fleet notifiers replace the global [[notify]] for this fleet's events (same fields).
 [[fleet.web.notify]]
 cmd = "notify <chat>:<thread>"   # e.g. one thread per repo
@@ -38,7 +47,7 @@ harness = "claude"
 profile = "lane-design"
 
 # #417: the optional verify stage (docs/pipeline.md): after rev's PASS, a read-only lane drives the real app at the
-# head from the repo's .drover/verify.md and screenshots it against the approved design; FAILs use rev's rounds.
+# head from the repo's .drover/verify.md and screenshots it against the approved design; no round limit (#1809).
 # [fleet.web.role.verify]
 # harness = "claude"
 # model = "claude-opus-5-5"

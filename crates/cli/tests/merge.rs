@@ -13,7 +13,7 @@ fn setup(name: &str, config: &str, verdicts: &[(&str, &str)]) -> (std::path::Pat
     append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", spawn)).unwrap();
     for (i, (v, sha)) in verdicts.iter().enumerate() {
         let e = Event::new(
-            20 + i as u64,
+            20 + u64::try_from(i).unwrap(),
             "sendmeter",
             Some(12),
             "verdict",
@@ -120,20 +120,19 @@ fn run_cli(c: &drover::Ctx, r: &Fake) -> (i32, String) {
 }
 
 #[test]
-fn refuses_when_round_limit_exceeded() {
-    let (a, b) = (
-        "3333333333333333333333333333333333333333",
-        "4444444444444444444444444444444444444444",
-    );
-    let v = [("FAIL", OLD), ("FAIL", a), ("FAIL", b), ("PASS", HEAD)];
+fn a_pass_after_many_fails_merges_with_no_round_limit() {
+    let fails: Vec<String> = (3..9).map(|k| k.to_string().repeat(40)).collect();
+    let mut v: Vec<(&str, &str)> = fails.iter().map(|f| ("FAIL", f.as_str())).collect();
+    v.push(("PASS", HEAD));
     let (_d, c) = setup("rounds", CONFIG, &v);
-    assert_refused(&c, &pr("staging", &green()), "ROUND_LIMIT");
-    let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
-    assert_eq!(st.state, "needs-human");
+    let r = pr("staging", &green());
+    let (exit, out) = run_cli(&c, &r);
+    assert_eq!(exit, 0, "{out}");
+    assert!(r.called("gh pr merge 34"), "{out}");
 }
 
 #[test]
-fn update_round_does_not_count_toward_review_rounds() {
+fn update_round_does_not_count_as_a_review_round() {
     let (a, b) = (
         "3333333333333333333333333333333333333333",
         "4444444444444444444444444444444444444444",
@@ -431,108 +430,31 @@ const OVER: [(&str, &str); 4] = [
     ("PASS", HEAD),
 ];
 
-fn over(c: &drover::Ctx, r: &Fake) -> (i32, String) {
-    run(c, r, &["merge", "sendmeter", "12", "--owner-override"])
-}
-
 #[test]
-fn owner_override_merges_past_round_limit_and_says_so() {
+fn owner_override_is_gone_with_the_round_limit() {
     let (_d, c) = setup("override", CONFIG, &OVER);
     let r = pr("staging", &green());
-    let (exit, out) = over(&c, &r);
-    assert_eq!(exit, 0, "{out}");
-    assert!(r.called("gh pr merge 34"));
-    let all = read(&c.state).unwrap();
-    let m = all.iter().find(|e| e.kind == "merged").unwrap();
-    assert_eq!((m.str("by"), m.str("override")), (Some("owner"), Some("ROUND_LIMIT")));
-    assert!(out.contains("Owner override: ROUND_LIMIT"), "closing comment: {out}");
-    let post = format!("gh api -X POST repos/jirathip-dev/sendmeter/statuses/{HEAD} -f state=success -f context=drover/override -f description=ROUND_LIMIT overridden at 1111111 · by: owner");
-    assert!(r.called(&post), "{:?}", r.calls.borrow());
-    assert!(!r.called(&format!(
-        "gh api -X POST repos/jirathip-dev/sendmeter/statuses/{HEAD} -f state=success -f context=drover/review"
-    )));
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12", "--owner-override"]);
+    assert_eq!(exit, 2, "{out}");
+    assert!(!r.called("gh pr merge"));
 }
 
 #[test]
-fn owner_override_still_refuses_red_ci_and_a_stale_verdict() {
-    let red = json!([{"__typename": "CheckRun", "name": "test", "status": "COMPLETED", "conclusion": "FAILURE"}]);
-    let (_d, c) = setup("override-red", CONFIG, &OVER);
-    let r = pr("staging", &red);
-    let (exit, out) = over(&c, &r);
-    assert!(exit == 3 && out.contains("REFUSED CI_NOT_GREEN"), "{out}");
-    assert!(!r.called("gh pr merge"));
-
-    let stale = [
-        OVER[0],
-        OVER[1],
-        OVER[2],
-        ("PASS", "5555555555555555555555555555555555555555"),
-    ];
-    let (_d, c) = setup("override-stale", CONFIG, &stale);
+fn an_old_fleet_toml_with_review_rounds_loads_and_the_key_is_ignored() {
+    let old = CONFIG.replace(
+        "stall_minutes = 30",
+        "stall_minutes = 30\nreview_rounds = 1\nupdate_rounds = 1",
+    );
+    assert!(old.contains("review_rounds = 1"));
+    let (_d, c) = setup("old-rounds", &old, &OVER);
     let r = pr("staging", &green());
-    let (exit, out) = over(&c, &r);
-    assert!(exit == 3 && out.contains("REFUSED STALE_VERDICT"), "{out}");
-    assert!(!r.called("gh pr merge"));
-}
-
-fn extended(name: &str, rounds: usize, at: usize) -> (std::path::PathBuf, drover::Ctx) {
-    let (d, c) = setup(name, &CONFIG.replace("review_rounds = 3", "review_rounds = 9"), &[]);
-    for i in 1..=rounds {
-        let (v, sha) = if i == rounds {
-            ("PASS", HEAD.to_string())
-        } else {
-            ("FAIL", format!("{i:040}"))
-        };
-        append(
-            &c.state,
-            &Event::new(20, "sendmeter", Some(12), "verdict", json!({"verdict": v, "sha": sha})),
-        )
-        .unwrap();
-        if i == at {
-            append(
-                &c.state,
-                &Event::new(30, "sendmeter", Some(12), "round-extended", json!({"by": "owner"})),
-            )
-            .unwrap();
-        }
-    }
-    (d, c)
-}
-
-#[test]
-fn round_extended_allows_exactly_one_more_round() {
-    let (_d, c) = extended("extend-10", 10, 9);
-    let s = st(&c);
-    let cfg = drover::config::Config::load(&c.config).unwrap();
-    let (limit, of) = drover::gate::limit(cfg.fleet("sendmeter").unwrap(), "rev", Some(&s));
-    assert_eq!(
-        format!("round {}{of}", s.stage_rounds["rev"]),
-        "round 10 of 9+1 (owner extended)"
-    );
-    assert_eq!(limit, 10);
-    let (exit, out) = run_cli(&c, &pr("staging", &green()));
-    assert_eq!(exit, 0, "round 10 of 9+1 merges: {out}");
-
-    let (_d, c) = extended("extend-11", 11, 9);
-    let (exit, out) = run_cli(&c, &pr("staging", &green()));
-    assert!(
-        out.contains("review rounds ran out (11 of 9+1 (owner extended))"),
-        "{out}"
-    );
-    assert_eq!(exit, 3, "{out}");
-    assert_refused(&c, &pr("staging", &green()), "ROUND_LIMIT");
-}
-
-#[test]
-fn an_extend_after_an_overrun_round_grants_the_next_one() {
-    let (_d, c) = extended("extend-overrun", 11, 10);
-    let (exit, out) = run_cli(&c, &pr("staging", &green()));
-    assert_eq!(exit, 0, "round 11 of 9+2: {out}");
+    let (exit, out) = run_cli(&c, &r);
+    assert_eq!(exit, 0, "three FAILs past review_rounds = 1 still merge: {out}");
 }
 
 fn needs_human(name: &str) -> (std::path::PathBuf, drover::Ctx) {
     let (d, c) = setup(name, CONFIG, &OVER[..3]);
-    let e = Event::new(30, "sendmeter", Some(12), "needs-human", json!({"code": "ROUND_LIMIT"}));
+    let e = Event::new(30, "sendmeter", Some(12), "needs-human", json!({"code": "STUCK"}));
     append(&c.state, &e).unwrap();
     (d, c)
 }
@@ -542,12 +464,12 @@ fn st(c: &drover::Ctx) -> drover::events::IssueState {
 }
 
 #[test]
-fn extend_no_spawn_records_one_round_and_the_next_pass_merges_without_override() {
+fn extend_no_spawn_records_one_round_and_the_next_pass_merges() {
     let (_d, c) = needs_human("cli-extend");
     let r = pr("staging", &green());
     let (exit, out) = run(&c, &r, &["extend", "sendmeter", "12", "--no-spawn", "--by", "owner"]);
     assert_eq!(exit, 0, "{out}");
-    assert_eq!((st(&c).extra, st(&c).state.as_str()), (1, "fix(3)"));
+    assert_eq!(st(&c).state, "fix(3)");
     let all = read(&c.state).unwrap();
     assert_eq!(
         all.iter().filter(|e| e.kind == "spawn").count(),
@@ -566,7 +488,12 @@ fn extend_no_spawn_records_one_round_and_the_next_pass_merges_without_override()
         let (exit, out) = run(&c, &r, args);
         assert!(exit == 3 && out.contains("REFUSED NOT_NEEDS_HUMAN"), "{args:?}: {out}");
     }
-    assert_eq!(st(&c).extra, 1, "a repeat extends nothing");
+    let extends = read(&c.state)
+        .unwrap()
+        .iter()
+        .filter(|e| e.kind == "round-extended")
+        .count();
+    assert_eq!(extends, 1, "a repeat extends nothing");
     assert!(r.calls.borrow().is_empty(), "a refused extend spawns nothing");
 
     let e = Event::new(
@@ -578,9 +505,8 @@ fn extend_no_spawn_records_one_round_and_the_next_pass_merges_without_override()
     );
     append(&c.state, &e).unwrap();
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
-    assert_eq!(exit, 0, "round 4 of 3+1 merges with no override: {out}");
+    assert_eq!(exit, 0, "{out}");
     assert!(r.called("gh pr merge 34"));
-    assert!(!out.contains("Owner override"), "{out}");
 }
 
 #[test]
@@ -672,15 +598,19 @@ fn merge_without_a_human_summary_gives_the_facts_line_only() {
     assert!(read(&c.state).unwrap().iter().any(|e| e.kind == "no-human-summary"));
 }
 
-fn premerge_setup(name: &str, cap: bool, extra: &str) -> (std::path::PathBuf, drover::Ctx, String, String) {
+fn premerge_setup(name: &str, check: bool, extra: &str) -> (std::path::PathBuf, drover::Ctx, String, String) {
     let d = tmpdir(name);
     let local = d.join("local");
     std::fs::create_dir_all(local.join("ci")).unwrap();
-    if cap {
-        std::fs::write(local.join("ci/cap.toml"), "[fleet.x]\nline_cap = 1\n").unwrap();
-    }
     let local = local.to_string_lossy().to_string();
-    let c = ctx(&d, &(CONFIG.replace("/tmp/does-not-matter/sendmeter", &local) + extra));
+    let mut cfg = CONFIG.replace("/tmp/does-not-matter/sendmeter", &local);
+    if check {
+        cfg = cfg.replace(
+            "integration = \"staging\"",
+            "integration = \"staging\"\npremerge = [\"make lint\"]",
+        );
+    }
+    let c = ctx(&d, &(cfg + extra));
     let spawn = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"});
     append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", spawn)).unwrap();
     let v = json!({"verdict": "PASS", "sha": HEAD, "round": 1});
@@ -697,48 +627,15 @@ fn premerge_fake(local: &str) -> Fake {
 }
 
 #[test]
-fn premerge_cap_failure_refuses_without_merging_and_goes_to_fix() {
-    let (_d, c, local, wt) = premerge_setup("pre-cap", true, "");
-    let r = premerge_fake(&local).once("sh -c", 1, "src lines (formatted): 14885 / cap 14700\n");
-    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
-    assert_eq!(exit, 3, "{out}");
-    let want = "REFUSED STAGING_WOULD_BREAK: /opt/drover/bin/drover cap-check --config ci/cap.toml: src lines (formatted): 14885 / cap 14700";
-    assert!(out.contains(want), "{out}");
-    assert!(!r.called("gh pr merge"), "{:#?}", r.calls.borrow());
-    assert!(r.called(&format!("git -C {wt} merge --no-ff --no-edit {HEAD}")));
-    let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
-    assert_eq!((st.state.as_str(), st.rounds), ("fix(1)", 1), "not a new review round");
-    let ev = read(&c.state).unwrap();
-    let v = ev.iter().rfind(|e| e.kind == "verdict").unwrap();
-    assert!(v.str("body").unwrap().contains("14885 / cap 14700"), "{v:?}");
-}
-
-#[test]
 fn premerge_passing_merges_and_logs_its_time() {
     let (_d, c, local, _) = premerge_setup("pre-ok", true, "");
-    let r = premerge_fake(&local).reply("sh -c", "src lines (formatted): 10 / cap 14700\n");
+    let r = premerge_fake(&local).reply("sh -c", "ok\n");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
     assert!(r.index("sh -c").unwrap() < r.index("gh pr merge").unwrap());
     let ev = read(&c.state).unwrap();
     let m = ev.iter().find(|e| e.kind == "merged").unwrap();
     assert!(m.val("premerge_secs").is_u64(), "{:?}", m.data);
-}
-
-#[test]
-fn premerge_runs_the_cap_through_the_gatekeeper_wrapper() {
-    let (_d, c, local, wt) = premerge_setup("pre-gk-cap", true, "");
-    std::fs::create_dir_all(format!("{wt}/.gatekeeper")).unwrap();
-    std::fs::write(format!("{wt}/.gatekeeper/run"), "").unwrap();
-    let r = premerge_fake(&local).once("sh -c", 1, "FAIL core/cap: 14885 / cap 14700\n");
-    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
-    assert_eq!(exit, 3, "{out}");
-    let want = "REFUSED STAGING_WOULD_BREAK: ./.gatekeeper/run check --gate core/cap: FAIL core/cap: 14885 / cap 14700";
-    assert!(out.contains(want), "{out}");
-    let cap = format!("sh -c cd \"$0\" && ./.gatekeeper/run check --gate core/cap {wt}");
-    assert!(r.called(&cap), "{:#?}", r.calls.borrow());
-    assert!(!r.called("cap-check"), "{:#?}", r.calls.borrow());
-    assert!(!r.called("gh pr merge"));
 }
 
 #[test]
@@ -794,8 +691,9 @@ fn premerge_rechecks_when_staging_moved() {
 }
 
 #[test]
-fn premerge_default_needs_cap_toml() {
+fn a_pr_past_an_old_line_cap_merges_with_no_premerge_check() {
     let (_d, c, local, _) = premerge_setup("pre-none", false, "");
+    std::fs::write(format!("{local}/ci/cap.toml"), "[fleet.sendmeter]\nline_cap = 1\n").unwrap();
     let r = premerge_fake(&local);
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
@@ -816,7 +714,7 @@ fix   = "Rename the migration so its version is after {min}; output: {output}"
 
 #[test]
 fn named_premerge_skips_when_its_paths_are_unchanged() {
-    let (_d, c, local, wt) = premerge_setup("pre-when-skip", true, NAMED);
+    let (_d, c, local, wt) = premerge_setup("pre-when-skip", false, NAMED);
     let diff = format!("git -C {wt} diff --name-only base1 HEAD");
     let r = premerge_fake(&local).once(&diff, 0, "src/a.rs\n");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
@@ -828,7 +726,7 @@ fn named_premerge_skips_when_its_paths_are_unchanged() {
 
 #[test]
 fn named_premerge_failure_refuses_with_its_code_and_a_fix_round() {
-    let (_d, c, local, wt) = premerge_setup("pre-when-fail", true, NAMED);
+    let (_d, c, local, wt) = premerge_setup("pre-when-fail", false, NAMED);
     let o = "migration 20260101_x.sql is behind the dev ledger\nmin_version=20261104000000\nSUPABASE_ACCESS_TOKEN=sbp9f8e7d6c5b4a\n";
     let r = premerge_fake(&local)
         .once(
@@ -841,7 +739,7 @@ fn named_premerge_failure_refuses_with_its_code_and_a_fix_round() {
     assert_eq!(exit, 3, "{out}");
     let want = "REFUSED BACKDATED_MIGRATION: migration 20260101_x.sql is behind the dev ledger";
     assert!(out.contains(want), "{out}");
-    assert!(r.called("sh -c cd \"$0\" && node scripts/check-migrations.mjs --base origin/staging --ledger"));
+    assert!(r.called("sh -c renice -n 19 -p $$ >/dev/null 2>&1; cd \"$0\" && node scripts/check-migrations.mjs --base origin/staging --ledger"));
     assert!(!r.called("gh pr merge"), "{:#?}", r.calls.borrow());
     let ev = read(&c.state).unwrap();
     let st = &fold(&ev)[&("sendmeter".to_string(), 12)];
@@ -866,13 +764,7 @@ fn named_premerge_failure_refuses_with_its_code_and_a_fix_round() {
 
 #[test]
 fn list_form_premerge_still_runs_its_checks() {
-    let (_d, c, local, wt) = premerge_setup("pre-list", false, "");
-    let cfg = std::fs::read_to_string(&c.config).unwrap();
-    let cfg = cfg.replace(
-        "integration = \"staging\"",
-        "integration = \"staging\"\npremerge = [\"make lint\"]",
-    );
-    std::fs::write(&c.config, cfg).unwrap();
+    let (_d, c, local, wt) = premerge_setup("pre-list", true, "");
     let r = premerge_fake(&local).once("sh -c", 2, "lint: error: unused import\n");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 3, "{out}");
@@ -880,7 +772,7 @@ fn list_form_premerge_still_runs_its_checks() {
         out.contains("REFUSED STAGING_WOULD_BREAK: make lint: lint: error: unused import"),
         "{out}"
     );
-    assert!(r.called("sh -c cd \"$0\" && make lint"));
+    assert!(r.called("sh -c renice -n 19 -p $$ >/dev/null 2>&1; cd \"$0\" && make lint"));
     assert!(!r.called(&format!("git -C {wt} diff")), "no `when`, no diff");
     assert!(!r.called("gh pr merge"));
     let p = read(&c.state)
@@ -911,54 +803,117 @@ fn a_concluded_check_github_still_lists_in_progress_is_green() {
 }
 
 #[test]
-fn a_squash_merge_keeps_the_cap_trailer_so_cap_check_passes() {
-    let (d, c) = setup("msg-cap", CONFIG, &[("PASS", HEAD)]);
-    let view = json!({"number": 34, "title": "cap: raise to 200", "body": "Closes #12",
-        "files": [{"path": "ci/cap.toml", "additions": 1, "deletions": 1}],
-        "commits": [{"oid": HEAD, "messageHeadline": "cap: raise to 200",
-            "messageBody": "Why it grows.\n\nCap: 100 → 200 (#12, q7)"}]});
-    let r = pr("staging", &green()).once(
-        "gh pr view 34 -R jirathip-dev/sendmeter --json number",
-        0,
-        &view.to_string(),
+fn a_merge_closes_each_issue_its_pr_body_names_and_skips_one_with_its_own_open_pr() {
+    let (_d, c) = setup("named", CONFIG, &[("PASS", HEAD)]);
+    let _sh = FakeShed::attached(&c);
+    let body = "Closes #12\n- Closes #5\n\nMoot: #6, #7, #8\n";
+    let open = json!({"number": 34, "state": "OPEN", "baseRefName": "staging", "headRefOid": HEAD, "statusCheckRollup": green()});
+    let r = Fake::default()
+        .reply("gh pr view issue-12", &open.to_string())
+        .reply(
+            "gh pr view issue-8",
+            &json!({"number": 41, "state": "OPEN"}).to_string(),
+        )
+        .reply("gh pr merge 34", "")
+        .reply(
+            "gh pr view 34",
+            &json!({"mergeCommit": {"oid": "m3rg3"}, "body": body}).to_string(),
+        )
+        .once("gh issue comment 7", 1, "")
+        .reply("gh issue", "");
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 0, "{out}");
+    let repo = "-R jirathip-dev/sendmeter";
+    assert_eq!(r.count("gh issue comment 12 "), 1, "{:?}", r.calls.borrow());
+    assert!(r.called(&format!(
+        "gh issue comment 5 {repo} --body Closed by PR #34 (#12) → `staging` @ `m3rg3`"
+    )));
+    assert!(r.called(&format!(
+        "gh issue comment 6 {repo} --body Moot by PR #34 (#12) → `staging` @ `m3rg3`"
+    )));
+    assert_eq!(r.count("gh issue comment 7 "), 2, "retried once");
+    assert!(r.called(&format!("gh issue close 5 {repo} --reason completed")));
+    for n in [6, 7] {
+        assert!(
+            r.called(&format!("gh issue close {n} {repo} --reason not planned")),
+            "#{n}"
+        );
+    }
+    assert!(
+        !r.called("gh issue comment 8 ") && !r.called("gh issue close 8 "),
+        "#8 has its own PR"
     );
+    assert!(out.contains("skipped #8: it has an open PR"), "{out}");
+}
+
+#[test]
+fn a_merge_files_each_follow_up_once_as_a_queued_issue_linking_the_pr() {
+    let (d, c) = setup("follow-ups", CONFIG, &[]);
+    let rev = json!({"role": "rev", "agent": "sendmeter-rev-12", "branch": "issue-12"});
+    append(&c.state, &Event::new(15, "sendmeter", Some(12), "spawn", rev)).unwrap();
+    let file = d.join("verdict.md");
+    let body = "PASS\n\n- follow-up [tests] src/a.rs:3: no edge case\n- follow-up [style] src/b.rs:9: long fn\n\
+- follow-up [docs] README.md:1: stale line\n";
+    std::fs::write(&file, body).unwrap();
+    let args = [
+        "verdict",
+        "sendmeter",
+        "12",
+        "PASS",
+        "--sha",
+        HEAD,
+        "--file",
+        &file.to_string_lossy(),
+    ];
+    let (code, out) = run(&c, &Fake::default().reply("gh api", HEAD), &args);
+    assert_eq!(code, 0, "{out}");
+    let again =
+        json!({"verdict": "PASS", "sha": HEAD, "stage": "rev", "follow_ups": ["[tests] src/a.rs:3: no edge case"]});
+    append(&c.state, &Event::new(40, "sendmeter", Some(12), "verdict", again)).unwrap();
+    let filed = json!({"sha": HEAD, "finding": "[docs] README.md:1: stale line", "filed": 40});
+    append(
+        &c.state,
+        &Event::new(41, "sendmeter", Some(12), "follow-up-filed", filed),
+    )
+    .unwrap();
+    let r = pr("staging", &green())
+        .once(
+            "gh issue create",
+            0,
+            "https://github.com/jirathip-dev/sendmeter/issues/41\n",
+        )
+        .once(
+            "gh issue create",
+            0,
+            "https://github.com/jirathip-dev/sendmeter/issues/42\n",
+        );
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
     let calls = r.calls.borrow();
-    let call = calls.iter().find(|c| c.starts_with("gh pr merge 34")).unwrap();
-    let (rest, body) = call.split_once(" --body ").unwrap();
-    let subject = rest.split_once(" --subject ").unwrap().1;
-    let repo = d.join("repo");
-    std::fs::create_dir_all(repo.join("ci")).unwrap();
-    let git = |args: &[&str]| {
-        let o = std::process::Command::new("git")
-            .arg("-C")
-            .arg(&repo)
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(
-            o.status.success(),
-            "git {args:?}: {}",
-            String::from_utf8_lossy(&o.stderr)
-        );
-        String::from_utf8_lossy(&o.stdout).trim().to_string()
-    };
-    git(&["init", "-q", "-b", "staging"]);
-    git(&["config", "user.email", "t@example.com"]);
-    git(&["config", "user.name", "t"]);
-    std::fs::write(repo.join("ci/cap.toml"), "[fleet.x]\nline_cap = 100\n").unwrap();
-    git(&["add", "."]);
-    git(&["commit", "-qm", "ci: the first cap"]);
-    let base = git(&["rev-parse", "HEAD"]);
-    std::fs::write(repo.join("ci/cap.toml"), "[fleet.x]\nline_cap = 200\n").unwrap();
-    git(&["commit", "-qam", &format!("{subject}\n\n{body}")]);
-    let o = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
-        .args(["cap-check", "--config", "ci/cap.toml", "--base", &base])
-        .current_dir(&repo)
-        .output()
-        .unwrap();
-    let out = String::from_utf8_lossy(&o.stdout);
-    assert_eq!(o.status.code(), Some(0), "{body}\n{out}");
-    assert!(body.contains("\nCap: 100 → 200 (#12, q7)"), "{body}");
+    let creates: Vec<&String> = calls.iter().filter(|c| c.starts_with("gh issue create")).collect();
+    assert_eq!(creates.len(), 2, "one per finding, none twice at one head: {creates:?}");
+    assert_eq!(
+        creates[0].as_str(),
+        format!(
+            "gh issue create -R jirathip-dev/sendmeter --title follow-up #12: [tests] src/a.rs:3: no edge case \
+--body Follow-up from PR #34 (#12) at `{HEAD}`, filed by `drover merge`:\n\n- [tests] src/a.rs:3: no edge case\n"
+        )
+    );
+    assert!(
+        creates[1].contains("--title follow-up #12: [style] src/b.rs:9: long fn"),
+        "{}",
+        creates[1]
+    );
+    let all = read(&c.state).unwrap();
+    let queued: Vec<u64> = drover::queue::replay(&all, "sendmeter")
+        .iter()
+        .map(|i| i.issue)
+        .collect();
+    assert_eq!(queued, vec![41, 42]);
+    let logged = all
+        .iter()
+        .filter(|e| e.kind == "follow-up-filed" && e.str("pr") == Some("34"))
+        .count();
+    assert_eq!(logged, 2);
+    assert_eq!(fold(&all)[&("sendmeter".to_string(), 12)].state, "merged");
 }

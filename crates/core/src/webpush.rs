@@ -238,6 +238,7 @@ pub fn send(log: &Path, sub: &str, ev: &Event, only: Option<&str>) -> Result<Str
     }
     let (wk, said) = match (ev.kind.as_str(), ev.issue) {
         ("merged", Some(n)) => ("merged", format!("#{n} merged")),
+        ("epic-landed", Some(n)) => ("merged", format!("#{n} landed")),
         ("needs-human" | "needs-decision", Some(n)) => ("needs", format!("{} #{n} needs you", ev.fleet)),
         _ => ("", String::new()),
     };

@@ -185,7 +185,7 @@ Each slice is one PR that leaves staging green and the app usable. The ADR allow
 | 2 | The Board tab, read-only: the frame with two tabs, the feed, `lay` for every block, navigation, 40x18 | `drover board` live, every screen, no actions yet | +1,000 |
 | 3 | Actions: the two-press panel shared with Threads, forms, choice notes, run cards, paging, docs, the hook test | the complete client; then the phone check | +650 |
 
-About +1,800 lines against a headroom of 3,211 once the open PRs land (`drover cap herdsman`, 2026-11-19). The
+About +1,800 lines against a headroom of 3,211 once the open PRs land (the removed cap view (#1812), 2026-11-19). The
 cap raise of q2307 counted this issue; the impl lane asks only if its own PR would cross the cap.
 
 ## What the design stage decides, and what it may not

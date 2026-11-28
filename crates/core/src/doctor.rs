@@ -20,12 +20,17 @@ fn mode(path: &Path) -> String {
 
 pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config_only: bool) -> Result<i32> {
     let mut rows = vec![];
-    if !config_only {
-        let sample = crate::host::sample(r);
-        let host = sample.pressure.is_some() && sample.swap_count.is_some() && sample.load_per_cpu.is_some();
-        match sample.not_found(&["sysctl", "vm_stat"]).filter(|_| !host) {
+    let sample = (!config_only).then(|| crate::host::sample(r));
+    if let Some(sample) = &sample {
+        let host = sample.pressure.is_some() && sample.swap_count.is_some() && sample.cpu_idle.is_some();
+        match sample.not_found(&["sysctl", "vm_stat", "iostat"]).filter(|_| !host) {
             Some(why) => rows.push(format!("? host — {why}")),
-            None => row(&mut rows, host, '✗', "host — sysctl + vm_stat → put /usr/sbin on PATH"),
+            None => row(
+                &mut rows,
+                host,
+                '✗',
+                "host — sysctl + vm_stat + iostat → put /usr/sbin on PATH",
+            ),
         }
         let gh = ok(r, "gh", &["auth", "status"]).is_ok();
         row(&mut rows, gh, '✗', "gh — auth status → gh auth login");
@@ -34,6 +39,7 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
         Ok(cfg) if config_only => config_rows(ctx, &cfg, r, &mut rows),
         Ok(cfg) => {
             checks(ctx, &cfg, r, &mut rows);
+            rows.extend(sample.iter().flat_map(|s| limit_rows(ctx, &cfg, r, s)));
             rows.extend(just_rows(ctx, &cfg, r));
             rows.extend(crate::status::doctor(ctx, &cfg));
             rows.extend(crate::roots::caches(ctx, &cfg).iter().map(|l| format!("✓ {l}")));
@@ -110,6 +116,46 @@ fn hygiene(
     }
 }
 
+fn limit_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, main: &crate::host::Host) -> Vec<String> {
+    let seen = crate::hosts::cached(ctx);
+    let n = |x: Option<f64>, p: usize| x.map_or("?".into(), |x| format!("{x:.p$}"));
+    let mut rows = vec![];
+    for (name, h) in crate::hosts::cards(cfg, r) {
+        let machine = h.and_then(|h| h.machine.as_deref());
+        let (l, s) = (cfg.limits_on(machine), seen.get(&name).cloned().unwrap_or_default());
+        if machine.is_some() && !s.up {
+            continue;
+        }
+        let at = |p: u8| {
+            ["normal", "warn", "critical"]
+                .get(usize::from(p))
+                .map(|w| (*w).to_string())
+        };
+        let h = match machine {
+            None => main.clone(),
+            Some(_) => crate::host::Host {
+                cpu_idle: s.idle,
+                free_mem_gb: s.mem,
+                swapout: s.swap,
+                pressure: s.pressure.and_then(at),
+                ..crate::host::Host::default()
+            },
+        };
+        let low = h.free_mem_gb.is_some_and(|g| g < l.min_free_mem_gb);
+        let text = format!(
+            "limits {name} — cpu idle {}% (min {}%) · mem {} GB free (min {}) · swap-out {} pages/2s (max {}) → raise [hosts.{name}] or [limits] only if it has room",
+            n(h.cpu_idle, 0),
+            l.min_cpu_idle,
+            n(h.free_mem_gb, 1),
+            l.min_free_mem_gb,
+            n(h.swapout, 0),
+            l.swapout_rate
+        );
+        row(&mut rows, !low && crate::host::admit(&h, &l).is_ok(), '!', &text);
+    }
+    rows
+}
+
 fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     rows.push(format!("✓ config — {}", ctx.config.display()));
     rows.extend(cfg.warnings().iter().map(|(k, w)| format!("! config — {k} is {w}")));
@@ -117,9 +163,27 @@ fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) 
     rows.extend(crate::hygiene::doctor(ctx, cfg, r));
 }
 
+fn housekeep(ctx: &Ctx, cfg: &Config, rows: &mut Vec<String>) {
+    let last = crate::housekeep::last(ctx);
+    let fresh = last
+        .as_ref()
+        .is_some_and(|(at, secs, _)| ctx.now <= at + secs + crate::timer::stuck_secs(cfg));
+    let line = last.map_or("housekeep — never ran".into(), |(at, secs, late)| {
+        let late = if late.is_empty() {
+            String::new()
+        } else {
+            format!(" · past budget: {}", late.join(", "))
+        };
+        format!(
+            "housekeep — ran {} ago, took {secs} s{late}",
+            crate::events::age(ctx.now.saturating_sub(at))
+        )
+    });
+    row(rows, fresh, '✗', &format!("{line} → drover timer install"));
+}
+
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     config_rows(ctx, cfg, r, rows);
-    rows.extend(crate::proxy::status(ctx, cfg, r).map(|f| f.join(" · ")));
     let line = crate::drive::spawns_line(ctx, cfg, r, &crate::events::working(&ctx.state).unwrap_or_default());
     row(rows, !line.contains(" · stale"), '!', &line);
     let (n401, n503) = crate::devices::denials(ctx);
@@ -311,7 +375,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     let line = format!("push — {subs} subscriptions, notifier {notifier} → turn alerts on; add a webpush [[notify]]");
     row(rows, subs > 0 && notifier, '!', &line);
     let running = crate::timer::running(ctx, cfg);
-    for (what, file) in [("check", "check.at"), ("drive", "drive-fast.at")] {
+    for (what, file) in [("tick", "tick.at"), ("drive", "drive-fast.at")] {
         let stamp = std::fs::read_to_string(ctx.state.with_file_name(file));
         let at: Option<u64> = stamp.ok().and_then(|t| t.split_whitespace().next()?.parse().ok());
         let age = at.map_or("never".into(), |at| crate::events::age(ctx.now.saturating_sub(at)));
@@ -323,6 +387,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line = format!("watchdog {what} — {ran} → drover timer install");
         row(rows, fresh || running.is_some(), '✗', &line);
     }
+    housekeep(ctx, cfg, rows);
     let stuck = crate::timer::stuck_step(ctx, cfg);
     let line = stuck.as_ref().map_or("tick step — advancing".into(), |(step, secs)| {
         let age = crate::events::age(*secs);
@@ -333,12 +398,13 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line = format!("timer — {label} {state} → drover timer install (the owner or an orchestrator)");
         row(rows, state == "loaded", '✗', &line);
     }
-    for name in cfg.hosts.iter().filter(|h| h.1.cloud.is_some()).map(|h| h.0) {
-        if let Err(e) = crate::cloud::doctor(ctx, cfg, r, name, rows) {
-            rows.push(format!("✗ cloud {name} — {e:#}"));
-        }
+    let has = |l: &str| crate::timer::has_job(ctx, l);
+    let pid = crate::service::up(ctx).filter(|_| has(crate::timer::SERVICE));
+    let line = pid.map_or_else(|| service_down(ctx, cfg, r), |p| format!("service — running (pid {p})"));
+    row(rows, pid.is_some(), '✗', &line);
+    if has(crate::timer::FAST) && has(crate::timer::SERVICE) {
+        rows.push("✗ fast job — replaced by the service → drover timer install".into());
     }
-    crate::cloud::includes(ctx, rows);
     if cfg.shed().is_some() {
         shed_rows(ctx, cfg, r, rows);
     }
@@ -352,7 +418,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             continue;
         };
         crate::hosts::went(ctx, m, true);
-        let (tags, own) = ([tags, h.tags.clone()].concat(), h.watches_token());
+        let tags = [tags, h.tags.clone()].concat();
         let bad = host_rows(ctx, cfg, &on, &tags, &home);
         let h = crate::providers::lanes().filter_map(|h| h.health_check());
         let logins: String = h.map(|c| format!("{}, ", c.0)).collect();
@@ -364,7 +430,6 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         rows.extend(shed.map(|b| at(&crate::shed::line(&on, &b.wire))));
         rows.extend(login_token(&on, Some(name)));
         rows.push(crate::hosts::sshd_row(&on, name));
-        rows.extend(own.then(|| crate::cloud::github(&on, ctx.now).1).flatten());
         let conf = crate::hosts::rehome(vec![ctx.config.display().to_string()], Some(&home)).remove(0);
         if on.exists(Path::new(&conf)) {
             rows.push(format!("! stale fleet.toml on {name}: no longer read → rm {conf}"));
@@ -377,7 +442,7 @@ fn just_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<String> {
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled) {
         let on = crate::hosts::On::new(r, h.machine.as_deref());
         let (path, fix) = match on.machine {
-            Some(_) => (crate::cloud::SH.to_string(), format!("drover hosts bootstrap {name}")),
+            Some(_) => (String::new(), format!("install just on {name}")),
             None => (
                 format!("export PATH='{}'; ", crate::timer::job_path(ctx, cfg, r)),
                 "install just into a folder on the timer's PATH (apt-get install just, brew install just)".into(),
@@ -460,6 +525,24 @@ fn serve_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>, a
     }
 }
 
+fn service_down(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
+    let api = crate::timer::API;
+    let held = crate::timer::listeners(r, api);
+    if held.is_empty() {
+        return "service — not running → drover timer install".into();
+    }
+    let serve = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
+    let runs = |l: &&str| matches!(crate::timer::job_pid(ctx, r, l), Ok(Some(p)) if held.contains(&p));
+    let pids = held.iter().map(u32::to_string).collect::<Vec<_>>().join(" ");
+    match [serve, crate::timer::STAGING].into_iter().find(runs) {
+        Some(job) => format!(
+            "service — not running: {api} is held by {job} (pid {pids}) → move [serve] hooks_addr off {api}, then {}",
+            crate::timer::restart_cmd(ctx, job)
+        ),
+        None => format!("service — not running: {api} is held by pid {pids} → kill {pids}"),
+    }
+}
+
 /// The launchd job: a plist under ~/Library/LaunchAgents that runs `drover serve`.
 pub fn serve_plist(ctx: &Ctx) -> Option<std::path::PathBuf> {
     serve_plists(ctx).into_iter().next()
@@ -478,6 +561,30 @@ fn serve_plists(ctx: &Ctx) -> Vec<std::path::PathBuf> {
     found
 }
 
+fn agent_row(ctx: &Ctx, cfg: &Config, events: &[crate::Event], id: &str, version: &str) -> String {
+    let mine = |e: &&crate::Event| e.str("acp") == Some(id);
+    let rounds = (events.iter().filter(mine)).filter(|e| e.kind == "spawn" && e.str("guard") != Some("hooked"));
+    let unasked: u64 = (events.iter().filter(mine))
+        .filter(|e| e.kind == "acp-unasked")
+        .filter_map(|e| e.data.get("n")?.as_u64())
+        .sum();
+    match crate::acp::probe::latest(events, id, version) {
+        Some((w, _)) if w == "guarded" => {
+            format!(
+                "✓ agent {id} {version} — guarded, {} judged rounds, {unasked} unasked",
+                rounds.count()
+            )
+        }
+        Some((w, why)) => {
+            if let Err(e) = crate::acp::probe::retest(ctx, cfg, id) {
+                crate::stderr!("drover doctor: {e:#}");
+            }
+            format!("✗ agent {id} {version} — {w}: {why} → no lane starts on it; the next spawn tests it again")
+        }
+        None => format!("! agent {id} {version} — not tested yet; its first judged spawn tests it"),
+    }
+}
+
 fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     let path = crate::timer::job_path(ctx, cfg, r);
     let find = |b: &str| path.split(':').map(|d| Path::new(d).join(b)).find(|p| p.is_file());
@@ -485,7 +592,8 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         || "✗ shed — not on the timer's PATH → drover timer install from a shell where `which shed` finds it".into(),
         |p| format!("✓ shed — {} on the timer's PATH", p.display()),
     ));
-    let ids: BTreeSet<String> = cfg.fleet.keys().filter_map(|n| cfg.shed_for(n)?.acp).collect();
+    let named = crate::agents::named(cfg);
+    let ids: BTreeSet<String> = named.keys().cloned().collect();
     if !ids.is_empty() {
         rows.push(if crate::spawn::shed_meta(r) {
             "✓ shed run --meta — ACP lanes get their provider's session options".into()
@@ -497,12 +605,27 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             )
         });
     }
+    if named.values().any(|g| *g != crate::acp::Guard::Hooked) {
+        rows.push(crate::acp::ready(ctx, r).map_or_else(
+            |w| format!("✗ shed judge — {w}"),
+            |()| "✓ shed judge — judged lanes start under `shed run --policy judge`".into(),
+        ));
+    }
+    let catalog = crate::agents::Catalog::read(r).unwrap_or_default();
+    let events = crate::events::working(&ctx.state).unwrap_or_default();
     for id in ids {
-        let adapter = crate::shed::adapter(r, &id).ok().flatten().unwrap_or_default();
-        let Some(cmd) = adapter.first() else {
-            rows.push(format!("✗ shed agent {id} — not installed → shed agents add {id}"));
+        let agent = catalog.get(&id);
+        let Some(i) = agent.and_then(|a| a.installed.as_ref()) else {
+            let fix = agent
+                .and_then(|a| a.install.clone())
+                .unwrap_or_else(|| format!("shed agents add {id}"));
+            rows.push(format!("✗ shed agent {id} — not installed → {fix}"));
             continue;
         };
+        if named.get(&id).is_some_and(|g| *g != crate::acp::Guard::Hooked) {
+            rows.push(agent_row(ctx, cfg, &events, &id, &i.version));
+        }
+        let Some(cmd) = i.cmd.first() else { continue };
         let found = if cmd.contains('/') {
             Path::new(cmd).is_file()
         } else {
@@ -511,6 +634,15 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line =
             format!("shed agent {id} — {cmd} not on the timer's PATH → install {cmd} in a folder on it ({path})");
         row(rows, found, '✗', &line);
+    }
+    let acp = cfg.fleet.iter().filter(|(n, _)| cfg.shed_for(n).is_some());
+    let roles = acp.flat_map(|(_, f)| f.role.values().map(|role| role.harness.as_str()));
+    let agents: BTreeSet<String> = (roles.chain(cfg.chat.harness.as_deref()))
+        .filter(|h| crate::providers::get(h).acp().is_some())
+        .map(str::to_string)
+        .collect();
+    if let Some(s) = cfg.shed().filter(|_| !agents.is_empty()) {
+        rows.extend(crate::shed::account_rows(r, &s.wire, &agents));
     }
     if let Ok(n) = crate::top::normal(ctx, cfg, r) {
         rows.push(n.first().map_or_else(

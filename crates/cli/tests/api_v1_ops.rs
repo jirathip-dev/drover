@@ -49,7 +49,7 @@ fn send_prompts_a_lane_with_the_boards_refusals_and_rate_limit() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let msg = json!({"agent": IMPL, "text": "run the tests again"});
     assert_eq!(post(&s, "send", &msg.clone(), "").1, "UNPAIRED");
-    assert_eq!(r.1.sent(IMPL), [] as [std::string::String; 0]);
+    assert_eq!(r.1.sent(IMPL), <[std::string::String; 0]>::default());
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     assert_eq!(
         post(&s, "send", &msg.clone(), &ck),
@@ -263,8 +263,8 @@ fn set_takes_json_and_chat_writes_the_new_thread_defaults() {
 fn a_backlog_issue_gets_a_thread_or_closes() {
     let sh = FakeShed::new();
     let cfg = format!(
-        "{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\naccount = \"C\"\n\n\
-         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        "{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\n\n\
+         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n",
         sh.sock.display()
     );
     let mut c = ctx(&tmpdir("v1-backlog"), &cfg);

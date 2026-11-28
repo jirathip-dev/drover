@@ -53,7 +53,10 @@ fn setup(name: &str, budget_bytes: u64) -> (drover::Ctx, PathBuf) {
     let root = d.join("worktrees/.build");
     let cfg = CONFIG.replace(
         "build_root = \"\"",
-        &format!("build_budget_gb = {}", budget_bytes as f64 / 1_073_741_824.0),
+        &format!(
+            "build_budget_gb = {}",
+            budget_bytes.to_string().parse::<f64>().unwrap() / 1_073_741_824.0
+        ),
     );
     (ctx(&d, &cfg), root.join(".scratch"))
 }
@@ -354,11 +357,11 @@ fn air_setup(name: &str) -> (drover::Ctx, PathBuf, PathBuf) {
     (c, home, s)
 }
 
-fn tick(c: &drover::Ctx, home: &Path, air: &[(&str, &str)], free_kb: u64) -> (Vec<String>, String) {
-    tick_hanging(c, home, air, free_kb, None)
+fn housekeep(c: &drover::Ctx, home: &Path, air: &[(&str, &str)], free_kb: u64) -> (Vec<String>, String) {
+    housekeep_hanging(c, home, air, free_kb, None)
 }
 
-fn tick_hanging(
+fn housekeep_hanging(
     c: &drover::Ctx,
     home: &Path,
     air: &[(&str, &str)],
@@ -387,7 +390,7 @@ fn tick_hanging(
         home: home.into(),
         hang,
     };
-    let (code, out) = run(c, &r, &["tick"]);
+    let (code, out) = run(c, &r, &["housekeep"]);
     assert_eq!(code, 0, "{out}");
     assert!(
         air_sh.methods().contains(&"ls".to_string()),
@@ -398,7 +401,7 @@ fn tick_hanging(
 }
 
 #[test]
-fn a_remote_hosts_ended_and_orphan_scratch_goes_at_the_tick() {
+fn a_remote_hosts_ended_and_orphan_scratch_goes_at_housekeeping() {
     let (c, home, s) = air_setup("scratch-remote");
     air_spawn(&c, 12, "impl", "sendmeter-impl-12");
     merged(&c, 12);
@@ -409,7 +412,7 @@ fn a_remote_hosts_ended_and_orphan_scratch_goes_at_the_tick() {
     let [built, building, unknown] =
         ["sendmeter-impl-12", "sendmeter-impl-13", "sendmeter-rev-9-r1"].map(|a| blob(b, &format!("{a}/debug")));
     let air = [("sendmeter-impl-12", "done"), ("sendmeter-impl-13", "working")];
-    let (calls, out) = tick(&c, &home, &air, 200 * 1_048_576);
+    let (calls, out) = housekeep(&c, &home, &air, 200 * 1_048_576);
     assert!(!ended.exists() && !orphan.exists(), "{out}");
     assert!(working.exists(), "a working lane's scratch stays: {out}");
     assert!(!built.parent().unwrap().exists(), "{out}");
@@ -458,7 +461,7 @@ fn a_host_short_of_disk_drops_non_working_scratch_largest_first() {
         ("sendmeter-rev-13-r1", "done"),
         ("sendmeter-impl-14", "working"),
     ];
-    let (_, out) = tick(&c, &home, &air, 1_048_576);
+    let (_, out) = housekeep(&c, &home, &air, 1_048_576);
     assert!(!small.exists() && !big.exists(), "{out}");
     assert!(busy.exists(), "a working lane's scratch is never touched: {out}");
     let at = |a: &str| {
@@ -585,32 +588,6 @@ fn a_disabled_hosts_scratch_stays_only_for_its_own_live_agents() {
 }
 
 #[test]
-fn a_tick_past_its_budget_still_sweeps_an_enabled_hosts_finished_scratch() {
-    let (c, home, s) = air_setup("scratch-overrun");
-    let text = std::fs::read_to_string(&c.config).unwrap();
-    std::fs::write(
-        &c.config,
-        text.replace("build_budget_gb = 1000", "build_budget_gb = 1000\nslow_secs = 0"),
-    )
-    .unwrap();
-    air_spawn(&c, 12, "rev", "sendmeter-rev-12-r1");
-    merged(&c, 12);
-    air_spawn(&c, 13, "impl", "sendmeter-impl-13");
-    let [ended, working] = ["sendmeter-rev-12-r1", "sendmeter-impl-13"].map(|a| blob(&s, &format!("{a}/debug")));
-    let air = [("sendmeter-impl-13", "working")];
-    let (_, out) = tick(&c, &home, &air, 200 * 1_048_576);
-    assert!(out.contains("tick: past its 0 s budget"), "{out}");
-    assert!(!ended.exists(), "{out}");
-    assert!(working.exists(), "a live lane's scratch stays: {out}");
-    assert!(
-        out.contains(&format!(
-            "scratch: air: removed {AIR_ROOT}/.build/.scratch/sendmeter-rev-12-r1 "
-        )),
-        "{out}"
-    );
-}
-
-#[test]
 fn reclaim_sweeps_an_enabled_hosts_finished_scratch_and_spares_live_lanes() {
     let (c, home, s) = air_setup("scratch-on-reclaim");
     air_spawn(&c, 12, "rev", "sendmeter-rev-12-r1");
@@ -675,7 +652,7 @@ fn a_lane_no_longer_running_in_shed_is_swept_without_a_verdict() {
     let [crashed_build, idle_build] =
         ["sendmeter-rev-12-r1", "sendmeter-impl-13"].map(|a| blob(b, &format!("{a}/debug")));
     let air = [("sendmeter-impl-13", "idle")];
-    let (_, out) = tick(&c, &home, &air, 200 * 1_048_576);
+    let (_, out) = housekeep(&c, &home, &air, 200 * 1_048_576);
     assert!(!crashed.exists(), "{out}");
     assert!(!crashed_build.parent().unwrap().exists(), "{out}");
     assert!(
@@ -699,7 +676,7 @@ fn locked(b: &Path, agent: &str, kb: usize) -> PathBuf {
 }
 
 #[test]
-fn a_tick_trims_a_remote_build_folder_over_budget_but_never_a_live_lanes() {
+fn housekeeping_trims_a_remote_build_folder_over_budget_but_never_a_live_lanes() {
     let (c, home, s) = air_setup("build-remote-trim");
     let text = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(
@@ -711,7 +688,7 @@ fn a_tick_trims_a_remote_build_folder_over_budget_but_never_a_live_lanes() {
     air_spawn(&c, 13, "impl", "sendmeter-impl-13");
     let old = locked(b, "sendmeter-impl-1099", 512);
     let live = locked(b, "sendmeter-impl-13", 1024);
-    let (_, out) = tick(&c, &home, &[("sendmeter-impl-13", "idle")], 200 * 1_048_576);
+    let (_, out) = housekeep(&c, &home, &[("sendmeter-impl-13", "idle")], 200 * 1_048_576);
     assert!(!old.exists(), "an old lane's build goes over budget: {out}");
     assert!(live.exists(), "a live lane's build is never trimmed: {out}");
     assert!(
@@ -746,7 +723,7 @@ fn a_remote_lane_done_past_the_stall_is_no_live_lane_to_the_build_trim() {
         json!({"agent": "sendmeter-impl-13", "state": "done", "since": 10}),
     );
     let done = locked(b, "sendmeter-impl-13", 1024);
-    let (_, out) = tick(&c, &home, &[("sendmeter-impl-13", "done")], 200 * 1_048_576);
+    let (_, out) = housekeep(&c, &home, &[("sendmeter-impl-13", "done")], 200 * 1_048_576);
     assert!(!done.exists(), "a done lane's build is trimmed: {out}");
     assert!(!out.contains("a live lane"), "{out}");
 }
@@ -761,7 +738,7 @@ fn a_lane_ending_on_a_remote_host_loses_its_build_folder_in_that_pass() {
     let ended = locked(b, "sendmeter-impl-12", 64);
     let live = locked(b, "sendmeter-impl-13", 64);
     let air = [("sendmeter-impl-12", "idle"), ("sendmeter-impl-13", "idle")];
-    let (_, out) = tick(&c, &home, &air, 200 * 1_048_576);
+    let (_, out) = housekeep(&c, &home, &air, 200 * 1_048_576);
     assert!(!ended.parent().unwrap().exists(), "{out}");
     assert!(live.exists(), "{out}");
     assert!(
@@ -781,7 +758,7 @@ fn a_remote_trim_that_times_out_says_so_and_the_ended_lane_still_goes() {
     air_spawn(&c, 12, "impl", "sendmeter-impl-12");
     merged(&c, 12);
     let ended = locked(b, "sendmeter-impl-12", 64);
-    let (_, out) = tick_hanging(&c, &home, &[], 200 * 1_048_576, Some("is building"));
+    let (_, out) = housekeep_hanging(&c, &home, &[], 200 * 1_048_576, Some("is building"));
     assert!(
         out.contains(&format!("builds: air: trim of {AIR_ROOT}/.build timed out")),
         "{out}"

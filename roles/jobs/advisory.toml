@@ -1,0 +1,24 @@
+every = "1d"
+check = """
+{ [ ! -f Cargo.lock ] || cargo deny check advisories; } &&
+{ [ ! -f pnpm-lock.yaml ] || pnpm audit; } &&
+{ [ ! -f package-lock.json ] || npm audit; }"""
+title = "deps: advisories {date}"
+body = """
+Security advisories against `{fleet}`'s `{integration}` head, worked by a `deps` lane at once (#1488).
+
+```
+{report}
+```
+
+For every advisory above, in one PR:
+
+1. Bump its package (and what it needs to move with it) to the fixed version or later.
+2. Fix what breaks; add no dependency and remove none. No fixed version: say so in the PR body with the mitigation
+   (an ignore in the advisory config with its reason is an owner ask).
+3. The PR body carries a table: each dependency, its old and new version, and each lockfile's package count before
+   and after.
+
+Nothing to fix (the check failed for another reason): `drover done --no-change "no advisory to fix" {fleet} <this issue>`."""
+role = "deps"
+empty = "no advisory to fix"

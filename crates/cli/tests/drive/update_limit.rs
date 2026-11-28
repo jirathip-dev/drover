@@ -10,7 +10,7 @@ fn an_extend_during_a_pass_only_requeues_it() {
         "verdict",
         json!({"verdict": "FAIL", "sha": sha("3"), "body": "FAIL"}),
     );
-    ev(&c, 14, "needs-human", json!({"code": "ROUND_LIMIT"}));
+    ev(&c, 14, "needs-human", json!({"code": "STUCK"}));
     lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
     let r = fake(NONE)
         .reply("gh pr view issue-12", &pr(&sha("3"), "green"))
@@ -38,7 +38,7 @@ fn at_update_limit(name: &str) -> (drover::Ctx, Fake) {
         "verdict",
         json!({"verdict": "PASS", "sha": sha("a1"), "body": "PASS"}),
     );
-    for k in 1..=3 {
+    for k in 1..=2 {
         let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "workspace": "",
             "runtime": "shed", "worktree": wt, "branch": "issue-12", "update": true});
         ev(&c, 20 + k, "spawn", d);
@@ -51,7 +51,7 @@ fn at_update_limit(name: &str) -> (drover::Ctx, Fake) {
         );
     }
     let r = fake(NONE)
-        .reply("gh pr view issue-12", &stale_pr(&sha("c3"), "CONFLICTING", "DIRTY"))
+        .reply("gh pr view issue-12", &stale_pr(&sha("c2"), "CONFLICTING", "DIRTY"))
         .reply("git -C", "");
     (c, r)
 }
@@ -65,17 +65,17 @@ fn nh(c: &drover::Ctx) -> usize {
 }
 
 #[test]
-fn an_extend_on_update_limit_grants_one_update_round() {
+fn an_extend_on_a_stuck_update_grants_one_update_round() {
     let (c, r) = at_update_limit("drive-extend-update");
     let (out, _) = drive(&c, &r);
-    assert!(out.contains("REFUSED UPDATE_LIMIT"), "{out}");
+    assert!(out.contains("REFUSED STUCK"), "{out}");
     assert_eq!(state(&c), "needs-human");
     let (code, out) = run(&c, &r, &["extend", "sendmeter", "12"]);
     assert_eq!(code, 0, "{out}");
     let runs = started("sendmeter-impl-12").len();
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["conflict"], "{out}");
-    assert_eq!(state(&c), "fix(1)+u4");
+    assert_eq!(state(&c), "fix(1)+u3");
     assert_eq!(started("sendmeter-impl-12").len(), runs + 1, "{:?}", r.calls.borrow());
     ev(
         &c,
@@ -91,23 +91,23 @@ fn an_extend_on_update_limit_grants_one_update_round() {
     assert_eq!(state(&c), "needs-human");
     let all = read(&c.state).unwrap();
     let last = all.iter().rfind(|e| e.kind == "needs-human").unwrap();
-    assert_eq!(last.str("code"), Some("UPDATE_LIMIT"));
+    assert_eq!(last.str("code"), Some("STUCK"));
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--supersede", "--update"]);
-    assert!(code == 3 && out.contains("REFUSED UPDATE_LIMIT"), "{out}");
+    assert!(code == 3 && out.contains("REFUSED STUCK"), "{out}");
     assert_eq!(started("sendmeter-impl-12").len(), runs + 1, "no second update lane");
 }
 
 #[test]
-fn an_update_limit_refusal_while_extended_spends_no_extension() {
+fn a_review_extend_grants_no_update_round() {
     let (c, r) = at_update_limit("drive-extend-round");
-    ev(&c, 50, "needs-human", json!({"code": "ROUND_LIMIT"}));
+    ev(&c, 50, "needs-human", json!({"code": "STUCK"}));
     let (code, out) = run(&c, &r, &["extend", "sendmeter", "12"]);
     assert_eq!(code, 0, "{out}");
     let (extended, before) = (state(&c), nh(&c));
     let s = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
-    assert_eq!((s.extra, s.updates), (1, 3), "a review round, as before");
+    assert_eq!(s.updates, 2, "a review round, as before");
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--supersede", "--update"]);
-    assert!(code == 3 && out.contains("REFUSED UPDATE_LIMIT"), "{out}");
+    assert!(code == 3 && out.contains("REFUSED STUCK"), "{out}");
     assert_eq!(state(&c), extended);
     assert_eq!(nh(&c), before, "no needs-human logged");
     assert_eq!(started("sendmeter-impl-12"), Vec::<String>::new());

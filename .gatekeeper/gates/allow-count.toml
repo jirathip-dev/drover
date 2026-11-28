@@ -1,0 +1,9 @@
+about = "at most 10 #[allow] attributes in crates/ (#808)"
+fix = "drop an #[allow]: fix the lint, or give the narrowest scope a reason in the PR body"
+budget_secs = 5
+paths = ["crates/**"]
+run = '''
+n=$(grep -rE '#!?\[allow\(' crates | wc -l)
+echo "#[allow] attributes in crates/: $n of 10"
+test "$n" -le 10
+'''

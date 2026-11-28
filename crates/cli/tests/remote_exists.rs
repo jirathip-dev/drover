@@ -141,11 +141,11 @@ fn checks(r: &Air) -> usize {
 }
 
 #[test]
-fn a_drive_pass_checks_500_remote_worktrees_with_one_ssh_call() {
-    let (c, _sh) = setup("exists-drive");
+fn housekeepings_clean_checks_500_remote_worktrees_with_one_ssh_call() {
+    let (c, _sh) = setup("exists-housekeep");
     let r = air(&[], false);
-    let (code, out) = run(&c, &r, &["drive"]);
-    eprintln!("drive: {} existence ssh call(s) to the Air", checks(&r));
+    let (code, out) = run(&c, &r, &["housekeep", "--only", "clean"]);
+    eprintln!("housekeep: {} existence ssh call(s) to the Air", checks(&r));
     assert_eq!(code, 0, "{out}");
     assert_eq!(
         checks(&r),

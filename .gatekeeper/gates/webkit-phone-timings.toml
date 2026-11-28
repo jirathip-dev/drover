@@ -1,0 +1,7 @@
+about = "phone timings on the large board (#1312, hard gate: tab, lane sheet, thread open, send and answer each a median <= 150 ms)"
+fix = "fix the page or the flow the test names; a timing budget is raised only in its own issue"
+budget_secs = 600
+leg = "ui-webkit"
+setup = ["rust", "node"]
+paths = ["web/**", "assets/**", "crates/server/**", "crates/cli/tests/support/webview.mjs", "scripts/webkit.sh", "crates/cli/tests/phone_timings.rs", "crates/cli/tests/ui/timings.mjs", "crates/cli/tests/common/large.rs"]
+run = "scripts/webkit.sh cargo test --locked --test phone_timings -- --nocapture"

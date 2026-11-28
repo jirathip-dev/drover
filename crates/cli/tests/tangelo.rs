@@ -250,19 +250,6 @@ fn unmarked_pr_touching_serial_path_is_refused() {
 }
 
 #[test]
-fn owner_override_still_refuses_an_unmarked_serial_pr() {
-    let c = ctx(&tmpdir("serial-override"), &config(SERIAL));
-    let sh = FakeShed::new();
-    sh.attach(&c);
-    spawned(&c, 12, "impl");
-    log(&c, 12, "verdict", json!({"verdict": "PASS", "sha": HEAD}));
-    let r = merge_fake("supabase/migrations/x.sql\n");
-    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12", "--owner-override"]);
-    assert!(exit == 3 && out.contains("REFUSED SERIAL_UNMARKED"), "{out}");
-    assert!(!r.called("gh pr merge"));
-}
-
-#[test]
 fn marked_pr_touching_serial_path_merges() {
     let (exit, out, r) = merge(true, "supabase/migrations/x.sql\n");
     assert_eq!(exit, 0, "{out}");

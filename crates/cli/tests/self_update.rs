@@ -311,13 +311,13 @@ fn the_staging_serve_runs_the_staging_head_and_cannot_write_the_live_state() {
         let req = format!("POST {path} HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\n{body}", body.len());
         std::io::Write::write_all(&mut s, req.as_bytes()).unwrap();
         let mut res = String::new();
-        let _ = std::io::Read::read_to_string(&mut s, &mut res);
+        std::io::Read::read_to_string(&mut s, &mut res).ok();
         res
     };
     let paused = post("/pause");
     let queued = post("/queue");
-    let _ = p.kill();
-    let _ = p.wait();
+    p.kill().ok();
+    p.wait().ok();
     assert!(paused.starts_with("HTTP/1.1 405"), "{paused}");
     assert!(queued.starts_with("HTTP/1.1 405"), "{queued}");
     assert_eq!(
@@ -514,7 +514,7 @@ fn pause_and_resume_are_logged_and_pause_stops_the_job() {
 }
 
 #[test]
-fn scheduled_clean_keeps_its_age_cap_and_live_dirty_rules_and_alerts_a_failure_once() {
+fn housekeeping_clean_removes_every_merged_lane_but_live_and_dirty_ones_and_alerts_a_failure_once() {
     let d = tmpdir("clean-sched");
     let c = ctx(&d, CONFIG);
     let sh = FakeShed::new();
@@ -546,18 +546,20 @@ fn scheduled_clean_keeps_its_age_cap_and_live_dirty_rules_and_alerts_a_failure_o
     let r = git(Fake::default()
         .once(&format!("git -C {dirty} status"), 0, "?? notes.md\n")
         .once_err(&format!("git -C {dirty} add -A"), 1, "add failed"));
-    let (code, out) = run(&c, &r, &["clean", "--scheduled"]);
+    let (code, out) = run(&c, &r, &["housekeep", "--only", "clean"]);
     assert_eq!(code, 0, "{out}");
     let cleaned: Vec<String> = kinds(&c, "clean")
         .iter()
         .map(|e| e.str("worktree").unwrap().into())
         .collect();
-    assert_eq!(cleaned.len(), 10, "10 a run: {out}");
-    assert!(cleaned.iter().all(|w| removable.contains(w)), "{cleaned:?}");
-    assert!(out.contains("stop: 10 removed this run"), "{out}");
+    assert_eq!(
+        cleaned.len(),
+        13,
+        "every merged lane but the live and dirty ones: {out}"
+    );
     assert!(
-        !out.contains(&fresh) && !cleaned.contains(&fresh),
-        "merged a day ago stays: {out}"
+        cleaned.iter().all(|w| removable.contains(w) || *w == fresh),
+        "{cleaned:?}"
     );
     assert!(out.contains(&format!("keep {live}: live agent")), "{out}");
     assert!(out.contains(&format!("keep {dirty}: wip save failed")), "{out}");
@@ -582,14 +584,17 @@ fn scheduled_clean_keeps_its_age_cap_and_live_dirty_rules_and_alerts_a_failure_o
 
     sh.remove("impl-21");
     let r = || git(Fake::default());
-    let (code, out) = run(&c, &r(), &["clean", "--scheduled"]);
+    let (code, out) = run(&c, &r(), &["housekeep", "--only", "clean"]);
     assert_eq!(code, 0, "{out}");
-    assert_eq!(kinds(&c, "clean").len(), 14, "{out}");
-    assert!(!kinds(&c, "clean").iter().any(|e| e.str("worktree") == Some(&fresh)));
+    assert_eq!(
+        kinds(&c, "clean").len(),
+        15,
+        "the live and the dirty lane go once free: {out}"
+    );
     drop(sh);
-    let (code, out) = run(&c, &r(), &["clean", "--scheduled"]);
+    let (code, out) = run(&c, &r(), &["housekeep", "--only", "clean"]);
     assert_eq!(code, 1, "{out}");
-    assert_eq!(run(&c, &r(), &["clean", "--scheduled"]).0, 1);
+    assert_eq!(run(&c, &r(), &["housekeep", "--only", "clean"]).0, 1);
     let failed = kinds(&c, "clean-failed");
     assert_eq!(failed.len(), 1);
     assert!(
@@ -599,31 +604,33 @@ fn scheduled_clean_keeps_its_age_cap_and_live_dirty_rules_and_alerts_a_failure_o
 }
 
 #[test]
-fn setup_and_timer_write_the_update_and_daily_clean_jobs() {
+fn setup_and_timer_write_the_update_and_housekeeping_jobs() {
     let c = ctx(&tmpdir("upd-jobs"), FLEET);
     let r = Fake::default().reply("which", "/opt/bin/x\n");
     let (code, out) = run(&c, &r, &["timer", "install", "--no-load"]);
     assert_eq!(code, 0, "{out}");
     assert!(
-        out.contains("✓ wrote dev.drover.update") && out.contains("✓ wrote dev.drover.clean"),
+        out.contains("✓ wrote dev.drover.update") && out.contains("✓ wrote dev.drover.housekeep"),
         "{out}"
     );
-    let (update, clean) = if cfg!(target_os = "macos") {
+    assert!(
+        !out.contains("dev.drover.clean"),
+        "no old clean job, nothing to remove: {out}"
+    );
+    let (update, housekeep) = if cfg!(target_os = "macos") {
         let p = |l: &str| std::fs::read_to_string(c.home.join(format!("Library/LaunchAgents/{l}.plist"))).unwrap();
-        (p("dev.drover.update"), p("dev.drover.clean"))
+        (p("dev.drover.update"), p("dev.drover.housekeep"))
     } else {
         let p = |l: &str| std::fs::read_to_string(c.home.join(format!(".config/systemd/user/{l}.timer"))).unwrap();
-        (p("dev.drover.update"), p("dev.drover.clean"))
+        (p("dev.drover.update"), p("dev.drover.housekeep"))
     };
-    assert!(update.contains("300") && !update.contains("03:30"), "{update}");
-    let daily = [
-        "<key>Hour</key><integer>3</integer><key>Minute</key><integer>30</integer>",
-        "OnCalendar=*-*-* 03:30:00",
-    ];
-    assert!(daily.iter().any(|d| clean.contains(d)), "{clean}");
+    assert!(
+        update.contains("300") && housekeep.contains("300"),
+        "{update}\n{housekeep}"
+    );
     let (_, out) = run(&c, &r, &["timer", "remove"]);
     assert!(
-        out.contains("✓ removed dev.drover.update") && out.contains("✓ removed dev.drover.clean"),
+        out.contains("✓ removed dev.drover.update") && out.contains("✓ removed dev.drover.housekeep"),
         "{out}"
     );
 }
@@ -659,7 +666,7 @@ fn a_job_launchd_refuses_is_rebootstrapped_after_the_swap() {
             ["is-active", "disable --now", "enable --now"].map(|a| format!("systemctl --user {a} {label}.{unit}"))
         }
     };
-    let [clean_probe, clean_down, clean_up] = ctl("dev.drover.clean", "timer");
+    let [clean_probe, clean_down, clean_up] = ctl("dev.drover.housekeep", "timer");
     let [serve_probe, serve_down, serve_up] = ctl("dev.drover.serve", "service");
     let r = Fake::default()
         .reply(&clean_probe, "job state = spawn failed\n")
@@ -687,11 +694,11 @@ fn a_job_launchd_refuses_is_rebootstrapped_after_the_swap() {
     );
     let tick = ctl("dev.drover.tick", "timer");
     assert!(!r.called(&tick[1]), "a healthy job is left alone");
-    assert!(out.contains("dev.drover.clean"), "{out}");
+    assert!(out.contains("dev.drover.housekeep"), "{out}");
 }
 
 #[test]
-fn scheduled_clean_lists_a_worktree_git_kept_dirty_and_exits_zero_but_fails_on_a_real_git_error() {
+fn housekeeping_clean_lists_a_worktree_git_kept_dirty_and_exits_zero_but_fails_on_a_real_git_error() {
     let d = tmpdir("clean-kept");
     let c = ctx(&d, CONFIG);
     let sh = FakeShed::new();
@@ -720,7 +727,7 @@ fn scheduled_clean_lists_a_worktree_git_kept_dirty_and_exits_zero_but_fails_on_a
     };
     let refusal = format!("fatal: '{kept}' contains modified or untracked files, use --force to delete it");
     let r = git(Fake::default().once_err(&remove(&kept), 128, &refusal));
-    let (code, out) = run(&c, &r, &["clean", "--scheduled"]);
+    let (code, out) = run(&c, &r, &["housekeep", "--only", "clean"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains(&format!("keep {kept}: ")), "{out}");
     assert!(out.contains("contains modified or untracked files"), "{out}");
@@ -739,10 +746,49 @@ fn scheduled_clean_lists_a_worktree_git_kept_dirty_and_exits_zero_but_fails_on_a
     let r = Fake::default()
         .once_err(&remove(&broken), 128, "fatal: not a git repository: '/gone/.git'")
         .reply(&format!("git -C {broken} rev-list"), "0\n");
-    let (code, out) = run(&c, &git(r), &["clean", "--scheduled"]);
+    let (code, out) = run(&c, &git(r), &["housekeep", "--only", "clean"]);
     assert_eq!(code, 1, "{out}");
     assert!(out.contains(&format!("failed {broken}: ")), "{out}");
     assert!(c.state.with_file_name("clean.failed").exists(), "{out}");
     assert_eq!(kinds(&c, "clean-failed").len(), 1, "{out}");
     drop(sh);
+}
+
+#[test]
+fn a_failed_run_at_mains_head_is_rerun_once_then_its_green_release_installs() {
+    let (c, live) = setup("upd-flaky");
+    let red = |updated: &str| {
+        let runs =
+            json!([{"databaseId": 99, "conclusion": "failure", "workflowName": "ui-webkit", "updatedAt": updated}]);
+        base(&c, &live)
+            .reply("git -C /x/drover rev-parse origin/main", &format!("{SHA}\n"))
+            .reply(
+                &format!("gh run list -R jirathip-dev/herdsman -c {SHA}"),
+                &runs.to_string(),
+            )
+            .reply("gh run rerun", "")
+    };
+    let r = red("1970-01-12T13:40:00Z");
+    let (code, out) = run(&c, &Disk(&r), &["self-update"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(r.count("gh run rerun 99 --failed -R jirathip-dev/herdsman"), 1, "{out}");
+    let rerun = kinds(&c, "ci-rerun");
+    assert_eq!(
+        (rerun.len(), rerun[0].str("why"), rerun[0].str("sha")),
+        (1, Some("failed"), Some(SHA))
+    );
+    assert!(!has(&live, SHA));
+
+    let r = red("1970-01-12T13:50:00Z");
+    let (code, out) = run(&at(&c, c.now + 600), &Disk(&r), &["self-update"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!r.called("gh run rerun"), "one re-run a head: {out}");
+
+    let r = heads(&c, &live, &[("main", SHA)]);
+    let (code, out) = run(&at(&c, c.now + 1200), &Disk(&r), &["self-update"]);
+    assert!(code == 0 && out.contains("✓ installed abcdef1 at "), "{out}");
+    assert!(has(&live, SHA));
+    let flaky = kinds(&c, "ci-flaky?");
+    assert_eq!(flaky.len(), 1);
+    assert_eq!(flaky[0].val("checks"), &json!(["ui-webkit"]));
 }

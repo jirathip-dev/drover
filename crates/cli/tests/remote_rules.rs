@@ -26,7 +26,6 @@ fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let sh = FakeShed::new();
     sh.attach(&c);
-    remote::proxied(&c);
     (c, sh)
 }
 
@@ -78,7 +77,7 @@ fn lane_env(r: &Fake, remote: &Path) -> BTreeMap<String, String> {
 
 fn hook_there(env: &BTreeMap<String, String>, remote: &Path, toml: Option<&str>, cmd: &str) -> String {
     let conf = remote.join("fleet.toml");
-    let _ = std::fs::remove_file(&conf);
+    std::fs::remove_file(&conf).ok();
     if let Some(t) = toml {
         std::fs::write(&conf, t).unwrap();
     }
@@ -152,7 +151,7 @@ fn a_missing_or_unreadable_rules_file_fails_closed_naming_it() {
     let remote = tmpdir("remote-rules-closed");
     let rules = remote.join("issue-12.rules.json");
     for text in [None, Some("not json"), Some("{\"branches\": 3}")] {
-        let _ = std::fs::remove_file(&rules);
+        std::fs::remove_file(&rules).ok();
         if let Some(t) = text {
             std::fs::write(&rules, t).unwrap();
         }
@@ -276,42 +275,6 @@ fn spawn_syncs_the_lanes_profile_on_a_host_with_no_fleet_toml() {
     );
 }
 
-#[test]
-fn a_remote_cap_lane_may_write_the_cap_file_and_no_other_lane_may() {
-    for (name, title, allowed) in [
-        ("remote-rules-cap", Some("cap: raise the src/ line cap to 53,500"), true),
-        ("remote-rules-nocap", Some("Fix the meter"), false),
-        ("remote-rules-untitled", None, false),
-    ] {
-        let (c, _sh) = setup(name);
-        let f = match title {
-            Some(t) => remote_fake().once(
-                "gh issue view 12",
-                0,
-                &json!({"title": t, "body": "AC: it works"}).to_string(),
-            ),
-            None => remote_fake(),
-        };
-        let bazzite = FakeShed::new();
-        let r = remote::Acp::over(OverSsh {
-            f: &f,
-            hosts: vec![("bazzite", &bazzite)],
-        });
-        let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
-        assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
-        let remote = tmpdir(&format!("{name}-bazzite"));
-        let env = lane_env(&f, &remote);
-        let out = hook_there(&env, &remote, None, "printf 'line_cap = 53500' > ci/cap.d/x.toml");
-        assert!(!remote.join("state/cache").exists());
-        assert_eq!(out.contains("REFUSED CAP_FILE"), !allowed, "{title:?}: {out}");
-        if allowed {
-            assert_eq!(out, "", "{title:?}");
-        }
-        let (_, board) = run(&c, &r, &["board", "sendmeter"]);
-        assert!(!board.contains("rules stale"), "{board}");
-    }
-}
-
 struct Disk<'a> {
     o: remote::Acp<'a, OverSsh<'a>>,
     root: std::path::PathBuf,
@@ -335,7 +298,7 @@ impl Disk<'_> {
                     ..Default::default()
                 }));
             }
-            let _ = std::fs::remove_file(self.at(p));
+            std::fs::remove_file(self.at(p)).ok();
             return Some(Ok(drover::runner::Out::default()));
         }
         if last.starts_with("'sh' '-c' 'umask 077") {

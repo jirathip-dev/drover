@@ -367,67 +367,42 @@ fn a_paired_device_answers_from_the_card_and_bad_text_is_refused() {
     assert_eq!(run(&c, &Fake::default(), &["asks"]).1, "", "the ask is closed");
 }
 
-fn routine(c: &drover::Ctx, q: &str) -> (i32, String) {
+fn legacy_routine(c: &drover::Ctx, id: &str) {
+    let d = json!({"id": id, "question": "Split the snapshot tests per pane?", "options": ["split", "keep"],
+        "recommend": 2, "agent": LANE, "kind": "routine"});
+    append(&c.state, &Event::new(c.now, "sendmeter", Some(36), "needs-decision", d)).unwrap();
+}
+
+#[test]
+fn kind_routine_is_an_unknown_option_and_logs_no_ask() {
+    let c = ctx(&tmpdir("ask-routine-gone"), CONFIG);
     let args = [
         "ask",
         "sendmeter",
         "36",
-        q,
+        "Split it?",
         "--option",
-        "split",
-        "--option",
-        "keep",
+        "a",
         "--recommend",
-        "2",
+        "1",
         "--kind",
         "routine",
     ];
-    let res = run(c, &Fake::default(), &args);
-    from_lane(c);
-    res
-}
-
-#[test]
-fn routine_needs_a_recommendation_and_no_owner_topic() {
-    let d = tmpdir("ask-routine-bad");
-    let c = ctx(&d, CONFIG);
-    let (code, out) = run(
-        &c,
-        &Fake::default(),
-        &["ask", "sendmeter", "36", "Split it?", "--kind", "routine"],
-    );
-    assert_eq!(code, 3);
-    assert!(out.contains("REFUSED NO_RECOMMENDATION"), "{out}");
-    for q in [
-        "Rotate the token first?",
-        "Push to main?",
-        "Worth $40 a month?",
-        "Add a dependency?",
-        "Store the secrets in the repo?",
-        "Drop the deleted rows?",
-        "Pull in two dependencies?",
-    ] {
-        let (code, out) = routine(&c, q);
-        assert_eq!(code, 3, "{q}");
-        assert!(out.contains("REFUSED OWNER_TOPIC"), "{q}: {out}");
-    }
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
+        .args(args)
+        .env("DROVER_CONFIG", &c.config)
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert_eq!(o.status.code(), Some(2), "{err}");
+    assert!(err.contains("unexpected argument '--kind'"), "{err}");
     assert!(kinds(&c, "needs-decision").is_empty());
-    assert_eq!(
-        routine(&c, "Split the snapshot tests per pane?").0,
-        0,
-        "maintain/mainly are not `main`"
-    );
-    assert_eq!(kinds(&c, "needs-decision")[0].str("kind"), Some("routine"));
     ask(&c);
-    assert_eq!(
-        kinds(&c, "needs-decision")[1].str("kind"),
-        Some("owner"),
-        "unmarked asks are owner asks"
-    );
+    assert_eq!(kinds(&c, "needs-decision")[0].str("kind"), Some("owner"));
 }
 
 #[test]
-fn a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does() {
+fn an_open_routine_ask_from_before_defaults_once_at_30_min_and_an_owner_ask_never_does() {
     let d = tmpdir("ask-default");
     let mut c = ctx(&d, CONFIG);
     let sh = shed(&c);
@@ -436,7 +411,7 @@ fn a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does() {
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "36"]).0, 0);
     ask(&c);
     c.now = NOW - 30 * 60;
-    assert_eq!(routine(&c, "Split the snapshot tests per pane?").0, 0);
+    legacy_routine(&c, "q2");
     let r = Fake::default();
     c.now = NOW - 60;
     let page = |c: &drover::Ctx| {
@@ -496,7 +471,7 @@ fn a_manual_answer_before_30_min_prevents_the_default() {
     let sh = shed(&c);
     lane_spawn(&c, NOW - 3600);
     c.now = NOW - 40 * 60;
-    assert_eq!(routine(&c, "Split the snapshot tests per pane?").0, 0);
+    legacy_routine(&c, "q1");
     let r = Fake::default();
     c.now = NOW - 20 * 60;
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "1"]).0, 0);

@@ -35,21 +35,18 @@ fn setup(name: &str, extra: &str, bazzite_up: bool, seen: u64) -> drover::Ctx {
     let cache = json!({
         "mini": {"tags": ["os:macos", "arch:arm64", "xcode"], "home": "/Users/me", "probed": NOW, "seen": NOW, "up": true},
         "bazzite": {"tags": ["os:linux", "arch:x86_64", "docker"], "home": "/home/me", "probed": NOW,
-                    "seen": NOW - seen, "up": bazzite_up, "load": 0.1, "mem": 12.0, "disk": 200.0},
+                    "seen": NOW - seen, "up": bazzite_up, "idle": 97.0, "mem": 12.0, "disk": 200.0},
     });
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
     c
 }
 
-fn fake(mini: f64, remote: f64) -> Fake {
+fn fake(mini: u32, remote: u32) -> Fake {
     Fake::default()
         .reply("which shed", "/opt/shed/bin/shed\n")
-        .reply("sysctl -n vm.loadavg", &format!("{{ {} 1 1 }}", mini * 4.0))
+        .reply("iostat", &iostat(mini))
         .reply("sysctl -n hw.ncpu", "4")
-        .reply(
-            &format!("{SSH}'cat' '/proc/loadavg'"),
-            &format!("{} 1 1 1/9 42", remote * 4.0),
-        )
+        .reply(&format!("{SSH}'vmstat' '1' '2'"), &vmstat(remote))
         .reply(&format!("{SSH}'nproc'"), "4")
         .reply(
             &format!("{SSH}'/opt/drover/bin/drover' 'profiles' 'sync' '--profile'"),
@@ -124,7 +121,7 @@ fn tags_are_detected_cached_and_refreshed_hourly() {
     let c = ctx(&tmpdir("hosts-tags"), &config(""));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
-    let f = healthy(fake(1.0, 1.0))
+    let f = healthy(fake(70, 70))
         .reply("sh -c uname -s", "Darwin\narm64\n/Users/me\nxcode\n")
         .reply(
             &format!("{SSH}'sh' '-c' 'uname -s"),
@@ -134,7 +131,7 @@ fn tags_are_detected_cached_and_refreshed_hourly() {
     let (code, out) = run(&c, &r, &["hosts", "refresh"]);
     assert_eq!(code, 0, "{out}");
     assert!(
-        out.contains("mini · up · tags os:macos,arch:arm64,xcode,fast · load/cpu 1.00"),
+        out.contains("mini · up · tags os:macos,arch:arm64,xcode,fast · cpu idle 70%"),
         "{out}"
     );
     assert!(
@@ -157,7 +154,7 @@ fn tags_are_detected_cached_and_refreshed_hourly() {
 #[test]
 fn needs_pick_the_host_whose_tags_cover_them_else_no_host() {
     let c = setup("hosts-needs", "", true, 0);
-    let r = fake(0.1, 2.0);
+    let r = fake(97, 40);
     assert_eq!(
         placed(&c, &r, 12, "impl", None).as_deref(),
         Ok("mini"),
@@ -190,10 +187,10 @@ fn needs_pick_the_host_whose_tags_cover_them_else_no_host() {
 #[test]
 fn the_least_busy_host_wins() {
     let c = setup("hosts-busy", "", true, 0);
-    assert_eq!(placed(&c, &fake(2.0, 0.2), 12, "impl", None).as_deref(), Ok("bazzite"));
-    assert_eq!(placed(&c, &fake(0.2, 2.0), 12, "impl", None).as_deref(), Ok("mini"));
+    assert_eq!(placed(&c, &fake(40, 94), 12, "impl", None).as_deref(), Ok("bazzite"));
+    assert_eq!(placed(&c, &fake(94, 40), 12, "impl", None).as_deref(), Ok("mini"));
     assert_eq!(
-        placed(&c, &fake(0.2, 2.0), 12, "impl", Some("bazzite")).as_deref(),
+        placed(&c, &fake(94, 40), 12, "impl", Some("bazzite")).as_deref(),
         Ok("bazzite")
     );
 }
@@ -201,9 +198,9 @@ fn the_least_busy_host_wins() {
 #[test]
 fn admission_runs_per_host() {
     let c = setup("hosts-admit", "", true, 0);
-    assert_eq!(placed(&c, &fake(3.0, 2.0), 12, "impl", None).as_deref(), Ok("bazzite"));
+    assert_eq!(placed(&c, &fake(10, 40), 12, "impl", None).as_deref(), Ok("bazzite"));
     let df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 1048576 90% /\n";
-    let low = || fake(1.0, 0.1).reply(&format!("{SSH}'df' '-k' '/'"), df);
+    let low = || fake(70, 97).reply(&format!("{SSH}'df' '-k' '/'"), df);
     assert_eq!(placed(&c, &low(), 12, "impl", None).as_deref(), Ok("mini"));
     let e = placed(&c, &low(), 12, "impl", Some("bazzite")).unwrap_err();
     let nothing =
@@ -211,7 +208,6 @@ fn admission_runs_per_host() {
     assert_eq!(e, format!("DISK_LOW: bazzite: 1.0 GB free < 10; {nothing}"));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let (_sh, bazzite, f) = (FakeShed::attached(&c), FakeShed::new(), low());
-    remote::proxied(&c);
     let (code, out) = run(
         &c,
         &acp(&f, &bazzite),
@@ -219,8 +215,8 @@ fn admission_runs_per_host() {
     );
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("DISK_LOW"), "{out}");
-    let e = placed(&c, &fake(3.0, 4.0), 12, "impl", None).unwrap_err();
-    assert!(e.starts_with("HOST_BUSY: mini: load/cpu 3.00 > 2.5"), "{e}");
+    let e = placed(&c, &fake(10, 0), 12, "impl", None).unwrap_err();
+    assert!(e.starts_with("HOST_BUSY: mini: cpu idle 10% < 15%"), "{e}");
 }
 
 #[test]
@@ -240,18 +236,18 @@ fn host_busy_names_the_lane_holding_the_cpu() {
         };
         lsof += &format!("p{}\ncyes\nfcwd\nn{cwd}\n", 600 + i);
     }
-    let r = fake(3.0, 4.0).reply("ps -Ao", &ps).reply("lsof", &lsof);
+    let r = fake(10, 0).reply("ps -Ao", &ps).reply("lsof", &lsof);
     let e = placed(&c, &r, 12, "impl", Some("mini")).unwrap_err();
-    assert!(e.starts_with("HOST_BUSY: mini: load/cpu 3.00 > 2.5"), "{e}");
+    assert!(e.starts_with("HOST_BUSY: mini: cpu idle 10% < 15%"), "{e}");
     assert!(e.ends_with("; sendmeter-impl-9 holds 60% (24 × yes)"), "{e}");
-    let calm = fake(1.0, 4.0).reply("ps -Ao", &ps).reply("lsof", &lsof);
+    let calm = fake(70, 0).reply("ps -Ao", &ps).reply("lsof", &lsof);
     assert_eq!(placed(&c, &calm, 12, "impl", Some("mini")).as_deref(), Ok("mini"));
 }
 
 fn with_account(c: &drover::Ctx) -> &'static str {
     let toml = std::fs::read_to_string(&c.config).unwrap().replacen(
         "harness = \"claude\"",
-        "harness = \"claude\"\naccount = \"A\"",
+        "harness = \"claude\"\naccount = \"a\"",
         1,
     ) + "\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\n";
     std::fs::write(&c.config, toml).unwrap();
@@ -260,7 +256,7 @@ fn with_account(c: &drover::Ctx) -> &'static str {
 }
 
 fn remote_fake() -> Fake {
-    fake(0.1, 0.1)
+    fake(97, 97)
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
         .reply(&format!("{SSH}'sh' '-c' 'git clone --single-branch"), "")
         .reply(&format!("{SSH}{GIT} '-C'"), "")
@@ -279,7 +275,6 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         &["queue", "sendmeter", "add", "12", "--needs", "docker"],
     );
     let (sh, bazzite, r) = (FakeShed::attached(&c), FakeShed::new(), remote_fake());
-    remote::proxied(&c);
     let o = acp(&r, &bazzite);
     let (code, out) = run(&c, &o, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
@@ -346,8 +341,8 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         (Some("bazzite"), Some("bazzite"), Some(WT), None)
     );
     assert_eq!(
-        placed(&c, &fake(0.1, 3.0), 12, "rev", None).unwrap_err(),
-        "HOST_BUSY: bazzite: load/cpu 3.00 > 2.5"
+        placed(&c, &fake(97, 10), 12, "rev", None).unwrap_err(),
+        "HOST_BUSY: bazzite: cpu idle 10% < 15%"
     );
     let (_, status) = run(&c, &two(&r, &bazzite), &["status"]);
     assert!(status.contains("HOST") && status.contains(" bazzite "), "{status}");
@@ -365,7 +360,7 @@ fn clean_removes_a_remote_worktree_over_its_host() {
         json!({"pr": "34", "merge_sha": "abc", "into": "staging"}),
     );
     let (sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
-    let r = fake(1.0, 1.0)
+    let r = fake(70, 70)
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
         .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'rev-list'"), "0\n")
         .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'status'"), "")
@@ -402,7 +397,7 @@ fn clean_lists_and_removes_a_second_hosts_lane_and_orphan() {
     let old = "/home/me/.herdr/worktrees/old-repo";
     let dirs = format!("2048\t/home/me/.herdr/worktrees/sendmeter\n1048576\t{old}\n");
     let df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 1048576 99% /\n";
-    let r = fake(1.0, 1.0)
+    let r = fake(70, 70)
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
         .reply(&format!("{SSH}'sh' '-c' 'cd && cd"), &dirs)
         .reply(&format!("{SSH}{GIT} '-C' '{wt}' 'rev-list'"), "0\n")
@@ -502,7 +497,7 @@ fn an_offline_host_never_pages_and_shows_grey() {
 #[test]
 fn an_off_host_is_never_chosen_but_drains_its_lanes() {
     let c = setup("hosts-off", "enabled = false", true, 0);
-    let r = fake(2.0, 0.1);
+    let r = fake(40, 97);
     assert_eq!(
         placed(&c, &r, 12, "impl", None).as_deref(),
         Ok("mini"),
@@ -532,7 +527,7 @@ fn an_off_host_is_never_chosen_but_drains_its_lanes() {
 #[test]
 fn after_hosts_off_the_issue_leaves_its_last_host() {
     let c = setup("hosts-off-sticky", "", true, 0);
-    let r = fake(2.0, 0.1);
+    let r = fake(40, 97);
     remote_spawn(&c, NOW - 60);
     assert_eq!(
         placed(&c, &r, 12, "impl", None).as_deref(),
@@ -549,7 +544,7 @@ fn a_sticky_host_refusing_disk_low_yields_unless_its_worktree_has_unpushed_work(
     let c = setup("hosts-sticky-disk", "", true, 0);
     remote_spawn(&c, NOW - 60);
     let df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 1048576 90% /\n";
-    let low = || fake(2.0, 0.1).reply(&format!("{SSH}'df' '-k' '/'"), df);
+    let low = || fake(40, 97).reply(&format!("{SSH}'df' '-k' '/'"), df);
     assert_eq!(placed(&c, &low(), 12, "impl", None).as_deref(), Ok("mini"));
     let kept = low()
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
@@ -576,8 +571,8 @@ fn a_signed_out_sticky_host_yields_unless_its_worktree_has_unpushed_work() {
         "signed-out",
         json!({"host": "bazzite", "machine": "bazzite", "reason": "signed out"}),
     );
-    assert_eq!(placed(&c, &fake(2.0, 0.1), 12, "rev", None).as_deref(), Ok("mini"));
-    let kept = fake(2.0, 0.1)
+    assert_eq!(placed(&c, &fake(40, 97), 12, "rev", None).as_deref(), Ok("mini"));
+    let kept = fake(40, 97)
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
         .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'status'"), "")
         .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'rev-list'"), "2\n");
@@ -591,7 +586,7 @@ fn a_signed_out_sticky_host_yields_unless_its_worktree_has_unpushed_work() {
 #[test]
 fn cli_and_board_toggles_both_log() {
     let c = setup("hosts-toggle", "", true, 0);
-    let (sh, bazzite, f) = (FakeShed::attached(&c), FakeShed::new(), fake(1.0, 1.0));
+    let (sh, bazzite, f) = (FakeShed::attached(&c), FakeShed::new(), fake(70, 70));
     let r = two(&f, &bazzite);
     let w = sh.on(&r);
     assert_eq!(
@@ -675,7 +670,7 @@ fn health_of(c: &drover::Ctx, f: &Fake, tags: &[String]) -> Vec<String> {
 }
 
 fn health_with(c: &drover::Ctx, bad: &str) -> Vec<String> {
-    health_of(c, &healthy(fake(0.1, 0.1)).once(bad, 1, ""), &["docker".into()])
+    health_of(c, &healthy(fake(97, 97)).once(bad, 1, ""), &["docker".into()])
 }
 
 #[test]
@@ -691,12 +686,12 @@ fn each_health_check_says_what_failed_and_how_to_fix_it() {
         let rows = health_with(&c, &bad);
         assert!(rows[0].starts_with(want), "{bad}: {rows:?}");
     }
-    let r = healthy(fake(0.1, 0.1)).once(&format!("{SSH}'sh' '-lc' 'claude auth status'"), 1, "");
+    let r = healthy(fake(97, 97)).once(&format!("{SSH}'sh' '-lc' 'claude auth status'"), 1, "");
     let rows = health_of(&c, &r, &[]);
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert!(rows[0].starts_with("✗ claude — logged out → claude auth login"));
     let cfg = Config::load(&c.config).unwrap();
-    let (here, f) = (FakeShed::new(), healthy(fake(0.1, 0.1)));
+    let (here, f) = (FakeShed::new(), healthy(fake(97, 97)));
     let r = here.on(&f);
     let rows = drover::hosts::health(&c, &cfg, &drover::hosts::On::new(&r, Some("bazzite")), &[], "/h");
     assert_eq!(rows.len(), 1, "{rows:?}");
@@ -706,7 +701,7 @@ fn each_health_check_says_what_failed_and_how_to_fix_it() {
         "a shed that does not answer keeps lanes off with its restart: {rows:?}"
     );
     let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
-    let r = healthy(fake(0.1, 0.1))
+    let r = healthy(fake(97, 97))
         .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
         .once(&format!("{SSH}{GIT} 'ls-remote'"), 128, "");
     let (code, out) = run(&c, &two(&r, &bazzite), &["doctor"]);
@@ -726,7 +721,7 @@ fn each_health_check_says_what_failed_and_how_to_fix_it() {
 fn doctor_names_the_failed_host_check_and_says_unreachable_only_for_ssh() {
     let c = setup("hosts-doctor-why", "", true, 0);
     let _sh = FakeShed::attached(&c);
-    let r = healthy(fake(0.1, 0.1))
+    let r = healthy(fake(97, 97))
         .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
         .once_err(&format!("{SSH}'shed' 'connect'"), 1, "shed: no server on bazzite")
         .once_err(&format!("{SSH}'shed' 'connect'"), 1, "shed: no server on bazzite");
@@ -736,7 +731,7 @@ fn doctor_names_the_failed_host_check_and_says_unreachable_only_for_ssh() {
         "{out}"
     );
     assert!(!out.contains("unreachable"), "{out}");
-    let mut r = fake(0.1, 0.1);
+    let mut r = fake(97, 97);
     r.replies.retain(|p| !p.0.starts_with(SSH));
     let (_, out) = run(&c, &r, &["doctor"]);
     assert!(out.contains("\n✗ host bazzite — unreachable (ssh: "), "{out}");
@@ -752,7 +747,7 @@ fn an_unhealthy_host_takes_no_lanes_and_shows_red() {
         serde_json::to_string(&all).unwrap(),
     )
     .unwrap();
-    let r = fake(2.0, 0.1);
+    let r = fake(40, 97);
     assert_eq!(
         placed(&c, &r, 12, "impl", None).as_deref(),
         Ok("mini"),
@@ -776,7 +771,7 @@ fn an_unhealthy_host_takes_no_lanes_and_shows_red() {
 #[test]
 fn a_host_that_cannot_reach_a_repo_is_skipped_for_that_fleet_only() {
     let c = setup("hosts-reach", "", true, 0);
-    let r = healthy(fake(0.1, 0.1)).once_err(
+    let r = healthy(fake(97, 97)).once_err(
         &format!("{SSH}{GIT} 'ls-remote'"),
         128,
         "remote: Repository not found.\nfatal: repository not found\n",
@@ -796,7 +791,7 @@ fn a_host_that_cannot_reach_a_repo_is_skipped_for_that_fleet_only() {
         )
         .unwrap();
     };
-    let r = fake(2.0, 0.1);
+    let r = fake(40, 97);
     write(vec![rows[0]
         .replace("sendmeter", "shed")
         .replace("jirathip-dev/shed", "jirathip-dev/other")]);
@@ -829,7 +824,6 @@ fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
     );
     std::fs::write(&c.config, text).unwrap();
     let (_sh, bazzite, f) = (FakeShed::attached(&c), FakeShed::new(), remote_fake());
-    remote::proxied(&c);
     let r = acp(&f, &bazzite);
     let cfg = Config::load(&c.config).unwrap();
     drover::gh::spec(&c, &f, cfg.fleet("sendmeter").unwrap(), "sendmeter", 12, true).unwrap();
@@ -890,7 +884,7 @@ fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
 fn design_runs_on_the_main_host_only_and_a_role_pin_holds() {
     let c = setup("hosts-design", "", true, 0);
     remote_spawn(&c, NOW - 900);
-    let r = fake(1.0, 0.1);
+    let r = fake(70, 97);
     assert_eq!(placed(&c, &r, 12, "impl", None).as_deref(), Ok("bazzite"), "history");
     assert_eq!(placed(&c, &r, 12, "design", None).as_deref(), Ok("mini"));
     assert_eq!(placed(&c, &r, 13, "design", Some("mini")).as_deref(), Ok("mini"));
@@ -902,7 +896,7 @@ fn design_runs_on_the_main_host_only_and_a_role_pin_holds() {
     );
     std::fs::write(&c.config, &text).unwrap();
     assert_eq!(
-        placed(&c, &fake(0.1, 2.0), 13, "rev", None).as_deref(),
+        placed(&c, &fake(97, 40), 13, "rev", None).as_deref(),
         Ok("bazzite"),
         "pinned"
     );
@@ -922,7 +916,7 @@ fn design_runs_on_the_main_host_only_and_a_role_pin_holds() {
         .unwrap()
         .replace("host = \"bazzite\"", "host = \"main\"");
     std::fs::write(&c.config, main).unwrap();
-    assert_eq!(placed(&c, &fake(2.0, 0.1), 13, "rev", None).as_deref(), Ok("mini"));
+    assert_eq!(placed(&c, &fake(40, 97), 13, "rev", None).as_deref(), Ok("mini"));
     assert_eq!(placed(&c, &r, 13, "design", None).as_deref(), Ok("mini"));
 }
 
@@ -933,7 +927,7 @@ fn a_remote_review_is_read_over_ssh_and_recorded() {
     let dir = tmpdir("hosts-rev");
     std::fs::write(
         dir.join("verdict.md"),
-        "FAIL\n- blocking [code] a.rs:1\n  Proof: spec\n  > AC 1\n",
+        "FAIL\n- blocking [ac] a.rs:1\n  Proof: spec\n  > AC 1\n",
     )
     .unwrap();
     let rev = dir.to_str().unwrap();
@@ -944,7 +938,7 @@ fn a_remote_review_is_read_over_ssh_and_recorded() {
     ev(&c, NOW - 600, 12, "spawn", d);
     let pr = json!({"number": 34, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
                     "statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "IN_PROGRESS"}]});
-    let r = fake(1.0, 1.0)
+    let r = fake(70, 70)
         .reply("gh pr view issue-12", &pr.to_string())
         .reply(
             "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
@@ -980,7 +974,6 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
     let c = setup("hosts-answer", "", true, 0);
     with_account(&c);
     let (sh, bazzite, r) = (FakeShed::attached(&c), FakeShed::new(), remote_fake());
-    remote::proxied(&c);
     let (code, out) = run(
         &c,
         &acp(&r, &bazzite),
@@ -1066,7 +1059,7 @@ fn asks_stranded_on_a_remote_host_are_imported_once() {
     let remote: String = remote.iter().map(|e| format!("{e}\n")).collect();
     let log = "/home/me/.local/state/drover/events.jsonl";
     let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
-    let f = fake(1.0, 1.0).reply(&format!("{SSH}'cat' '{log}'"), &remote);
+    let f = fake(70, 70).reply(&format!("{SSH}'cat' '{log}'"), &remote);
     let r = two(&f, &bazzite);
     for _ in 0..2 {
         assert_eq!(run(&c, &r, &["check"]).0, 0);
@@ -1098,7 +1091,7 @@ fn live_fake() -> Fake {
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("sysctl -n vm.loadavg", "{ 0.4 1 1 }")
         .reply("sysctl -n hw.ncpu", "4")
-        .reply(&format!("{SSH}'cat' '/proc/loadavg'"), "0.4 1 1 1/9 42")
+        .reply(&format!("{SSH}'vmstat' '1' '2'"), &vmstat(90))
         .reply(&format!("{SSH}'nproc'"), "4")
         .reply(
             &format!("{SSH}'/opt/drover/bin/drover' 'profiles' 'sync' '--profile'"),
@@ -1125,7 +1118,6 @@ fn a_remote_supersede_stays_on_its_host() {
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
         .reply(&format!("{SSH}'sh' '-c' 'umask 077"), "")
         .reply(&format!("{SSH}'rm' '-f'"), "");
-    remote::proxied(&c);
     let (code, out) = run(
         &c,
         &acp(&f, &bazzite),
@@ -1179,7 +1171,7 @@ fn a_lane_moved_off_its_last_host_starts_from_the_pushed_branch_and_its_wip() {
         "lane-killed",
         json!({"role": "impl", "agent": "sendmeter-impl-12"}),
     );
-    let r = fake(2.0, 0.1)
+    let r = fake(40, 97)
         .once("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", 1, "")
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
@@ -1219,7 +1211,7 @@ fn disk_low_on_a_remote_host_trims_its_shared_build_folder_first() {
     let df = |kb: u64| format!("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 {kb} 90% /\n");
     let trim = format!("{SSH}'sh' '-c' 'o=$1 b=$2;");
     let low = |freed: &str| {
-        fake(1.0, 0.1)
+        fake(70, 97)
             .once(&format!("{SSH}'df' '-k' '/'"), 0, &df(1_048_576))
             .reply(&format!("{SSH}'df' '-k' '/'"), &df(30 * 1_048_576))
             .reply(&trim, &format!("{TRIMMED}\n{freed}\n"))
@@ -1253,7 +1245,7 @@ const TRIMMED: &str = "trimmed /home/me/.cache/drover/target/tangelo/debug/ (9 K
 fn remote_shared_build_folders_are_trimmed_with_a_quick_ssh_not_in_the_budget_pass() {
     let c = trim_setup("hosts-budget-trim", "");
     let cfg = Config::load(&c.config).unwrap();
-    let r = fake(1.0, 0.1)
+    let r = fake(70, 97)
         .reply(SWEEP, "")
         .reply(QUICK, &format!("{TRIMMED}\ntotal 9 freed 9\n"));
     let mut out = Vec::new();
@@ -1280,7 +1272,7 @@ fn remote_shared_build_folders_are_trimmed_with_a_quick_ssh_not_in_the_budget_pa
 fn a_disabled_host_gets_no_trim_call() {
     let c = trim_setup("hosts-trim-off", "enabled = false");
     let cfg = Config::load(&c.config).unwrap();
-    let r = fake(1.0, 0.1);
+    let r = fake(70, 97);
     let mut out = Vec::new();
     drover::check::trim_hosts(&c, &cfg, &r, &mut out).unwrap();
     assert!(
@@ -1295,7 +1287,7 @@ fn an_unreachable_host_costs_one_short_attempt_per_pass() {
     let c = trim_setup("hosts-trim-down", "");
     let cfg = Config::load(&c.config).unwrap();
     let down = "ssh: connect to host bazzite port 22: Operation timed out";
-    let r = fake(1.0, 0.1).once_err(QUICK_HOST, 255, down);
+    let r = fake(70, 97).once_err(QUICK_HOST, 255, down);
     let mut out = Vec::new();
     drover::check::trim_hosts(&c, &cfg, &r, &mut out).unwrap();
     let out = String::from_utf8(out).unwrap();
@@ -1307,11 +1299,11 @@ fn an_unreachable_host_costs_one_short_attempt_per_pass() {
 }
 
 #[test]
-fn the_tick_drives_before_it_trims_remote_hosts() {
+fn the_tick_drives_and_leaves_trimming_remote_hosts_to_housekeeping() {
     let c = trim_setup("hosts-tick-trim", "");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let _sh = FakeShed::attached(&c);
-    let r = fake(1.0, 0.1)
+    let r = fake(70, 97)
         .reply(
             "herdr status",
             "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",
@@ -1323,10 +1315,12 @@ fn the_tick_drives_before_it_trims_remote_hosts() {
     let bazzite = FakeShed::new();
     let (code, out) = run_only(&c, &two(&r, &bazzite), &["tick"]);
     assert_eq!(code, 0, "{out}");
-    let calls = r.calls.borrow();
-    let driven = calls.iter().position(|l| l.contains(" drive sendmeter >>"));
-    let trimmed = calls.iter().position(|l| l.starts_with(QUICK));
-    assert!(driven.is_some() && driven < trimmed, "{out} {calls:?}");
+    let trimmed = |r: &Fake| r.calls.borrow().iter().any(|l| l.starts_with(QUICK));
+    let driven = r.calls.borrow().iter().any(|l| l.contains(" drive sendmeter >>"));
+    assert!(driven && !trimmed(&r), "{out} {:?}", r.calls.borrow());
+    let (code, out) = run_only(&c, &two(&r, &bazzite), &["housekeep", "--only", "trim"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(trimmed(&r), "{out} {:?}", r.calls.borrow());
 }
 
 #[test]
@@ -1341,7 +1335,7 @@ fn a_symlinked_drover_reads_back_its_real_install_root() {
     c.exe = dir.join("local/bin/drover").display().to_string();
     let (real, link) = (root.join("bin/drover").display().to_string(), c.exe.clone());
     let cfg = Config::load(&c.config).unwrap();
-    let r = healthy(fake(0.1, 0.1))
+    let r = healthy(fake(97, 97))
         .reply(
             &format!("{SSH}'{link}' '--version'"),
             &format!("drover {}\n", drover::VERSION),
@@ -1369,7 +1363,7 @@ fn health_is_clean_only_when_drover_on_ssh_path_is_this_version() {
     let real = std::fs::canonicalize(&c.exe).map_or(c.exe.clone(), |p| p.display().to_string());
     let mine = format!("drover {}\n", drover::VERSION);
     let rows = |path: &str| {
-        let r = healthy(fake(0.1, 0.1))
+        let r = healthy(fake(97, 97))
             .reply(&format!("{SSH}'{real}' '--version'"), &mine)
             .reply(&format!("{SSH}'drover' '--version'"), path);
         let (here, there) = (FakeShed::new(), FakeShed::new());
@@ -1440,7 +1434,6 @@ fn a_supersede_saves_a_remote_lanes_dirty_work_first() {
             .reply(&format!("{SSH}'rm' '-f'"), "");
         let (r, g) = dirty_remote(live, fail.then_some(1));
         let (sh, bazzite) = (FakeShed::attached(&c), live_on());
-        remote::proxied(&c);
         let (code, out) = run(
             &c,
             &acp(&r, &bazzite),
@@ -1482,7 +1475,7 @@ fn kill_closes_a_remote_lanes_live_pane_and_clean_then_removes_it() {
         "merged",
         json!({"pr": "34", "merge_sha": "abc", "into": "staging"}),
     );
-    let f = fake(1.0, 1.0)
+    let f = fake(70, 70)
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
         .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'rev-list'"), "0\n")
         .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'status'"), "")
@@ -1555,7 +1548,7 @@ fn a_worktree_whose_gitfile_points_at_another_host_is_reported_not_removed() {
         json!({"pr": "34", "merge_sha": "abc", "into": "staging"}),
     );
     let gitdir = "/Users/jkmacmini/src/sendmeter/.git/worktrees/issue-12";
-    let r = fake(1.0, 1.0)
+    let r = fake(70, 70)
         .reply(&format!("{SSH}'cat' '{WT}/.git'"), &format!("gitdir: {gitdir}\n"))
         .once(&format!("{SSH}'sh' '-c' 'test -e \"$1\"' 'sh' '{gitdir}'"), 1, "")
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
@@ -1661,7 +1654,7 @@ fn a_lane_of_the_same_name_on_another_host_keeps_no_worktree_live() {
 fn a_last_host_without_the_needs_tag_yields_unless_its_worktree_has_unpushed_work() {
     let c = setup("hosts-sticky-needs", "", true, 0);
     remote_spawn(&c, NOW - 60);
-    let r = fake(2.0, 0.1);
+    let r = fake(40, 97);
     assert_eq!(
         placed(&c, &r, 12, "impl", None).as_deref(),
         Ok("bazzite"),
@@ -1673,7 +1666,7 @@ fn a_last_host_without_the_needs_tag_yields_unless_its_worktree_has_unpushed_wor
         Ok("mini"),
         "no xcode on bazzite"
     );
-    let kept = fake(2.0, 0.1)
+    let kept = fake(40, 97)
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
         .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'status'"), "")
         .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'rev-list'"), "2\n");
@@ -1703,7 +1696,7 @@ fn disk_low_on_a_remote_host_sweeps_its_finished_lanes_scratch_before_refusing()
     let df = |kb: u64| format!("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 {kb} 90% /\n");
     let sweep = format!("{SSH}'sh' '-c' 'b=$1;");
     let low = |listed: &str| {
-        fake(1.0, 0.1)
+        fake(70, 97)
             .once(&format!("{SSH}'df' '-k' '/'"), 0, &df(1_048_576))
             .reply(&format!("{SSH}'df' '-k' '/'"), &df(30 * 1_048_576))
             .once(&sweep, 0, listed)
