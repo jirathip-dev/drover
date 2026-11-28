@@ -691,9 +691,8 @@ fn premerge_rechecks_when_staging_moved() {
 }
 
 #[test]
-fn a_pr_past_an_old_line_cap_merges_with_no_premerge_check() {
+fn a_merge_with_no_premerge_entry_runs_no_check() {
     let (_d, c, local, _) = premerge_setup("pre-none", false, "");
-    std::fs::write(format!("{local}/ci/cap.toml"), "[fleet.sendmeter]\nline_cap = 1\n").unwrap();
     let r = premerge_fake(&local);
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
