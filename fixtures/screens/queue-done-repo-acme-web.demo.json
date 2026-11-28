@@ -1,0 +1,57 @@
+{
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "id": "age-list",
+          "rows": [
+            {
+              "id": "age",
+              "subtitle": {
+                "text": "as of: not yet known",
+                "tone": "warn"
+              },
+              "title": "Snapshot",
+              "type": "row"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "snapshot",
+      "id": "age",
+      "type": "section"
+    },
+    {
+      "id": "done-list",
+      "rows": [
+        {
+          "accessory": "chevron",
+          "id": "done-39-1793415088",
+          "subtitle": "merged 02:51 UTC · 2828282",
+          "tap": {
+            "sheet": "/screens/issue?repo=acme-web&issue=39"
+          },
+          "title": "#39 Footer links open in the same tab",
+          "type": "row",
+          "value": "4h"
+        },
+        {
+          "accessory": "chevron",
+          "id": "done-36-1793405088",
+          "subtitle": "merged 00:04 UTC · 2525252",
+          "tap": {
+            "sheet": "/screens/issue?repo=acme-web&issue=36"
+          },
+          "title": "#36 Checkout: keep the cart across sign-in",
+          "type": "row",
+          "value": "6h"
+        }
+      ],
+      "type": "list"
+    }
+  ],
+  "id": "done-acme-web",
+  "title": "acme-web · done today",
+  "type": "screen"
+}

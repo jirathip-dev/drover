@@ -1,0 +1,126 @@
+{
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "id": "status-list",
+          "rows": [
+            {
+              "id": "now",
+              "title": "⏸ waiting: decision",
+              "type": "row",
+              "value": {
+                "since": "2026-10-31T06:50:10Z"
+              }
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "status",
+      "id": "status",
+      "type": "section"
+    },
+    {
+      "blocks": [
+        {
+          "action": "answer",
+          "id": "q33",
+          "options": [
+            {
+              "label": "both: Retry-After on a 429, X-RateLimit-Limit, -Remaining and -Reset on every response",
+              "value": "both: Retry-After on a 429, X-RateLimit-Limit, -Remaining and -Reset on every response"
+            },
+            {
+              "label": "Retry-After only",
+              "value": "Retry-After only"
+            },
+            {
+              "label": "headers only behind a ?debug flag",
+              "value": "headers only behind a ?debug flag"
+            }
+          ],
+          "other": {
+            "placeholder": "other…"
+          },
+          "recommended": "both: Retry-After on a 429, X-RateLimit-Limit, -Remaining and -Reset on every response",
+          "type": "choice"
+        }
+      ],
+      "header": "asks: Return 429 with `Retry-After` only, or also the `X-RateLimit-*` headers on every response?",
+      "id": "asks",
+      "type": "section"
+    },
+    {
+      "blocks": [
+        {
+          "id": "links-list",
+          "rows": [
+            {
+              "id": "issue",
+              "style": "link",
+              "tap": {
+                "url": "https://github.com/acme-example/acme-api/issues/21"
+              },
+              "title": "issue #21",
+              "type": "row"
+            },
+            {
+              "id": "asked",
+              "style": "link",
+              "tap": {
+                "thread": "t4"
+              },
+              "title": "asked in Rate limits for /v1/search",
+              "type": "row"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "links",
+      "id": "links",
+      "type": "section"
+    },
+    {
+      "action": "move",
+      "id": "▼",
+      "label": "▼",
+      "type": "button",
+      "values": {
+        "after": 22,
+        "fleet": "acme-api",
+        "issue": 21
+      }
+    },
+    {
+      "action": "top",
+      "id": "Top",
+      "label": "Top",
+      "type": "button",
+      "values": {
+        "fleet": "acme-api",
+        "issue": 21
+      }
+    },
+    {
+      "action": "drop",
+      "confirm": {
+        "ok": "Drop",
+        "title": "Drop #21 from the queue?"
+      },
+      "id": "Drop",
+      "label": "Drop",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "fleet": "acme-api",
+        "issue": 21
+      }
+    }
+  ],
+  "cancel": "Done",
+  "id": "issue-acme-api-21",
+  "title": "#21 Rate-limit the public search endpoint",
+  "type": "sheet"
+}

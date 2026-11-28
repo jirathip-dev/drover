@@ -1,0 +1,322 @@
+{
+  "actions": [
+    {
+      "action": "thread-archive",
+      "label": "archive",
+      "values": {
+        "thread": "t4"
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "figure": {
+        "state": "needs"
+      },
+      "id": "who",
+      "sticky": true,
+      "subtitle": {
+        "text": "! choose · acme-api · claude · opus · awake",
+        "tone": "warn"
+      },
+      "title": "Rate limits for /v1/search · t4",
+      "type": "row"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-87-t",
+          "markdown": "One customer's integration is hammering `/v1/search` and #19's webhook retries keep hitting 429s, see the events. I want proper rate limits. Grill me, then file it.",
+          "type": "text"
+        },
+        {
+          "id": "m-87-i",
+          "items": [
+            {
+              "alt": "IMG_2041.PNG",
+              "src": "/thread/t4/IMG_2041.PNG"
+            }
+          ],
+          "type": "images"
+        }
+      ],
+      "id": "m-87",
+      "kind": "you",
+      "meta": {
+        "label": "✓ {}",
+        "since": "2026-10-31T06:13:30Z"
+      },
+      "title": "you",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-89-t",
+          "markdown": "```\ndrover brief acme-api 19\n```",
+          "type": "text"
+        }
+      ],
+      "fold": {
+        "line": "$ drover brief acme-api 19"
+      },
+      "id": "m-89",
+      "kind": "tool",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-90-t",
+          "markdown": "I see it: #19's retries got `429` from search four times between 14:02 and 14:20. Three questions, one at a time.",
+          "type": "text"
+        }
+      ],
+      "id": "m-90",
+      "kind": "orch",
+      "meta": {
+        "label": "{}",
+        "since": "2026-10-31T06:14:30Z"
+      },
+      "title": "orchestrator",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-91-t",
+          "markdown": "Limit per API key or per client IP?",
+          "type": "text"
+        },
+        {
+          "id": "m-91-a",
+          "markdown": "✓ **per API key** · owner · 38m",
+          "type": "text"
+        }
+      ],
+      "id": "m-91",
+      "kind": "ask",
+      "meta": {
+        "label": "{}",
+        "since": "2026-10-31T06:14:40Z"
+      },
+      "title": "q31",
+      "tone": "",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-94-t",
+          "markdown": "How much per key?",
+          "type": "text"
+        },
+        {
+          "id": "m-94-a",
+          "markdown": "✓ **600 a minute, burst 100** · owner · 35m",
+          "type": "text"
+        }
+      ],
+      "id": "m-94",
+      "kind": "ask",
+      "meta": {
+        "label": "{}",
+        "since": "2026-10-31T06:16:40Z"
+      },
+      "title": "q32",
+      "tone": "",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-97-t",
+          "markdown": "Filing it, and queueing it right after #21 (the per-key auth it builds on).",
+          "type": "text"
+        }
+      ],
+      "id": "m-97",
+      "kind": "orch",
+      "meta": {
+        "label": "{}",
+        "since": "2026-10-31T06:20:00Z"
+      },
+      "title": "orchestrator",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-98-t",
+          "markdown": "```\ngh issue create -R acme-example/acme-api -t \"Rate-limit /v1/search per API key (600/min, burst 100)\" -F -\ndrover queue acme-api add 52 --after 21\n```",
+          "type": "text"
+        }
+      ],
+      "fold": {
+        "line": "$ gh issue create -R acme-example/acme-api -t \"Rate-limit /v1/search per API key (600/min, burst 100)\" -F - …"
+      },
+      "id": "m-98",
+      "kind": "tool",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-100-t",
+          "markdown": "Filed #52 and queued it after #21. Here is the docs page I'd ship with it, and the 429 body.\n\nPrior art: https://docs.github.com/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+          "type": "text"
+        },
+        {
+          "id": "m-100-i",
+          "items": [
+            {
+              "alt": "rate-limits-docs-390.png",
+              "src": "/thread/t4/rate-limits-docs-390.png"
+            }
+          ],
+          "type": "images"
+        },
+        {
+          "id": "m-100-f",
+          "rows": [
+            {
+              "id": "m-100-f0",
+              "tap": {
+                "url": "/thread/t4/429-body.json"
+              },
+              "title": "429-body.json",
+              "type": "row",
+              "value": "1 KB"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "id": "m-100",
+      "kind": "orch",
+      "meta": {
+        "label": "{}",
+        "since": "2026-10-31T06:21:40Z"
+      },
+      "title": "orchestrator",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-101-t",
+          "markdown": "⇄ switched to account B (A resting until 18:40) · same session",
+          "type": "text"
+        }
+      ],
+      "id": "m-101",
+      "kind": "sys",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-102-t",
+          "markdown": "Last one.",
+          "type": "text"
+        }
+      ],
+      "id": "m-102",
+      "kind": "orch",
+      "meta": {
+        "label": "{}",
+        "since": "2026-10-31T06:50:00Z"
+      },
+      "title": "orchestrator",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-103-t",
+          "markdown": "Return 429 with `Retry-After` only, or also the `X-RateLimit-*` headers on every response?",
+          "type": "text"
+        },
+        {
+          "action": "answer",
+          "id": "q33",
+          "options": [
+            {
+              "label": "both: Retry-After on a 429, X-RateLimit-Limit, -Remaining and -Reset on every response",
+              "value": "both: Retry-After on a 429, X-RateLimit-Limit, -Remaining and -Reset on every response"
+            },
+            {
+              "label": "Retry-After only",
+              "value": "Retry-After only"
+            },
+            {
+              "label": "headers only behind a ?debug flag",
+              "value": "headers only behind a ?debug flag"
+            }
+          ],
+          "other": {
+            "placeholder": "other: type an answer"
+          },
+          "recommended": "both: Retry-After on a 429, X-RateLimit-Limit, -Remaining and -Reset on every response",
+          "type": "choice",
+          "values": {
+            "thread": "t4"
+          }
+        }
+      ],
+      "id": "m-103",
+      "kind": "ask",
+      "meta": {
+        "label": "{}",
+        "since": "2026-10-31T06:50:10Z"
+      },
+      "title": "q33",
+      "tone": "warn",
+      "type": "card"
+    },
+    {
+      "action": "thread-say",
+      "acts": {
+        "model": "thread-model",
+        "queue": "thread-queue",
+        "steer": "thread-steer",
+        "stop": "thread-stop",
+        "unqueue": "thread-unqueue"
+      },
+      "chips": [
+        {
+          "all": [
+            "opus",
+            "sonnet"
+          ],
+          "cur": "opus",
+          "name": "model"
+        },
+        {
+          "all": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "cur": null,
+          "name": "effort"
+        }
+      ],
+      "id": "say",
+      "label": "send",
+      "placeholder": "message the orchestrator",
+      "queued": [],
+      "type": "composer",
+      "values": {
+        "thread": "t4"
+      }
+    }
+  ],
+  "focus": true,
+  "id": "thread-t4",
+  "stream": "/screens/threads/t4/stream",
+  "title": "Rate limits for /v1/search",
+  "type": "screen"
+}

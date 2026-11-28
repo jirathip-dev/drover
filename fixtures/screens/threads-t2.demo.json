@@ -1,0 +1,148 @@
+{
+  "actions": [
+    {
+      "action": "thread-archive",
+      "label": "archive",
+      "values": {
+        "thread": "t2"
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "figure": {
+        "state": "idle"
+      },
+      "id": "who",
+      "sticky": true,
+      "subtitle": {
+        "text": "acme-api · claude · opus · asleep",
+        "tone": ""
+      },
+      "title": "OpenAPI spec at /v1/openapi.json, versioned per release and served from the edge cache · t2",
+      "type": "row"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-70-t",
+          "markdown": "Serve the OpenAPI spec, versioned per release.",
+          "type": "text"
+        }
+      ],
+      "id": "m-70",
+      "kind": "you",
+      "meta": {
+        "label": "✓ {}",
+        "since": "2026-10-30T17:07:40Z"
+      },
+      "title": "you",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-72-t",
+          "markdown": "Check it locally once #22 lands:\n\n```sh\ncurl -s localhost:8080/v1/openapi.json\n```\n\nAnd the edge cache rule for it:\n\n```toml\n[[edge.cache]]\npath = \"/v1/openapi.json\"\nheaders = { \"Cache-Control\" = \"public, max-age=86400, stale-while-revalidate=604800\", \"Vary\" = \"Accept-Encoding\" }\n```",
+          "type": "text"
+        }
+      ],
+      "id": "m-72",
+      "kind": "orch",
+      "meta": {
+        "label": "{}",
+        "since": "2026-10-30T17:20:00Z"
+      },
+      "title": "orchestrator",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-73-t",
+          "markdown": "```\ngh issue create -R acme-example/acme-api -t \"Serve /v1/openapi.json per release\" -F -\n```",
+          "type": "text"
+        }
+      ],
+      "fold": {
+        "line": "$ gh issue create -R acme-example/acme-api -t \"Serve /v1/openapi.json per release\" -F -"
+      },
+      "id": "m-73",
+      "kind": "tool",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-74-t",
+          "markdown": "Filed #22 and queued it after #17.",
+          "type": "text"
+        }
+      ],
+      "id": "m-74",
+      "kind": "orch",
+      "meta": {
+        "label": "{}",
+        "since": "2026-10-30T17:23:20Z"
+      },
+      "title": "orchestrator",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-76-t",
+          "markdown": "the orchestrator went to sleep",
+          "type": "text"
+        }
+      ],
+      "id": "m-76",
+      "kind": "sys",
+      "type": "card"
+    },
+    {
+      "action": "thread-say",
+      "acts": {
+        "model": "thread-model",
+        "queue": "thread-queue",
+        "steer": "thread-steer",
+        "stop": "thread-stop",
+        "unqueue": "thread-unqueue"
+      },
+      "chips": [
+        {
+          "all": [
+            "opus",
+            "sonnet"
+          ],
+          "cur": "opus",
+          "name": "model"
+        },
+        {
+          "all": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "cur": null,
+          "name": "effort"
+        }
+      ],
+      "id": "say",
+      "label": "send",
+      "placeholder": "message the orchestrator",
+      "queued": [],
+      "type": "composer",
+      "values": {
+        "thread": "t2"
+      }
+    }
+  ],
+  "focus": true,
+  "id": "thread-t2",
+  "stream": "/screens/threads/t2/stream",
+  "title": "OpenAPI spec at /v1/openapi.json, versioned per release and served from the edge cache",
+  "type": "screen"
+}

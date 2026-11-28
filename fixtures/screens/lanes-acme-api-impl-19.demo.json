@@ -1,0 +1,111 @@
+{
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "id": "facts-list",
+          "rows": [
+            {
+              "id": "f-issue",
+              "title": "issue",
+              "type": "row",
+              "value": "acme-api #19"
+            },
+            {
+              "id": "f-role",
+              "title": "role",
+              "type": "row",
+              "value": "impl"
+            },
+            {
+              "id": "f-state",
+              "title": "state",
+              "type": "row",
+              "value": "dead"
+            },
+            {
+              "id": "f-host",
+              "title": "host",
+              "type": "row",
+              "value": "local"
+            },
+            {
+              "id": "f-branch",
+              "title": "branch",
+              "type": "row",
+              "value": "issue-19"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "lane",
+      "id": "facts",
+      "type": "section"
+    },
+    {
+      "action": "stop",
+      "confirm": {
+        "ok": "Stop",
+        "title": "Stop acme-api-impl-19?"
+      },
+      "id": "act-stop",
+      "label": "Stop",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "acme-api-impl-19"
+      }
+    },
+    {
+      "action": "kill",
+      "id": "act-kill",
+      "label": "Kill",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "acme-api-impl-19"
+      }
+    },
+    {
+      "action": "clean",
+      "id": "act-clean",
+      "label": "Clean",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "acme-api-impl-19"
+      }
+    },
+    {
+      "fields": [
+        {
+          "label": "Say",
+          "name": "text",
+          "placeholder": "a line to the lane",
+          "type": "text",
+          "value": ""
+        }
+      ],
+      "id": "say",
+      "type": "form"
+    },
+    {
+      "blocks": [],
+      "header": "transcript",
+      "id": "transcript",
+      "type": "section"
+    }
+  ],
+  "cancel": "Close",
+  "done": {
+    "action": "send",
+    "label": "Send",
+    "values": {
+      "agent": "acme-api-impl-19"
+    }
+  },
+  "id": "lane-acme-api-impl-19",
+  "title": "acme-api-impl-19",
+  "type": "sheet"
+}

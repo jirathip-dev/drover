@@ -1,0 +1,13 @@
+{
+  "guard": 3,
+  "known": [
+    {
+      "rule": "lint/title-long",
+      "at": "screen#thread-t2"
+    },
+    {
+      "rule": "lint/title-long",
+      "at": "screen#thread-t2/row#who"
+    }
+  ]
+}

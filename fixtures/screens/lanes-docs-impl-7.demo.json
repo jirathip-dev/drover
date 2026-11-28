@@ -1,0 +1,120 @@
+{
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "id": "facts-list",
+          "rows": [
+            {
+              "id": "f-issue",
+              "title": "issue",
+              "type": "row",
+              "value": "docs #7"
+            },
+            {
+              "id": "f-role",
+              "title": "role",
+              "type": "row",
+              "value": "impl"
+            },
+            {
+              "id": "f-state",
+              "title": "state",
+              "type": "row",
+              "value": "parked"
+            },
+            {
+              "id": "f-host",
+              "title": "host",
+              "type": "row",
+              "value": "local"
+            },
+            {
+              "id": "f-branch",
+              "title": "branch",
+              "type": "row",
+              "value": "issue-7"
+            },
+            {
+              "id": "f-pr",
+              "tap": {
+                "url": "https://github.com/acme-example/docs/pull/15"
+              },
+              "title": "PR",
+              "type": "row",
+              "value": "#15"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "lane",
+      "id": "facts",
+      "type": "section"
+    },
+    {
+      "action": "stop",
+      "confirm": {
+        "ok": "Stop",
+        "title": "Stop docs-impl-7?"
+      },
+      "id": "act-stop",
+      "label": "Stop",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "docs-impl-7"
+      }
+    },
+    {
+      "action": "kill",
+      "id": "act-kill",
+      "label": "Kill",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "docs-impl-7"
+      }
+    },
+    {
+      "action": "clean",
+      "id": "act-clean",
+      "label": "Clean",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "docs-impl-7"
+      }
+    },
+    {
+      "fields": [
+        {
+          "label": "Say",
+          "name": "text",
+          "placeholder": "a line to the lane",
+          "type": "text",
+          "value": ""
+        }
+      ],
+      "id": "say",
+      "type": "form"
+    },
+    {
+      "blocks": [],
+      "header": "transcript",
+      "id": "transcript",
+      "type": "section"
+    }
+  ],
+  "cancel": "Close",
+  "done": {
+    "action": "send",
+    "label": "Send",
+    "values": {
+      "agent": "docs-impl-7"
+    }
+  },
+  "id": "lane-docs-impl-7",
+  "title": "docs-impl-7",
+  "type": "sheet"
+}

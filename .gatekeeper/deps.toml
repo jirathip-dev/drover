@@ -5,6 +5,7 @@ aes-gcm = "web push payload encryption, pure-Rust RustCrypto: crypto is never wr
 anyhow = "error context across the CLI and core"
 base64 = "web push keys and payloads, pure-Rust RustCrypto set"
 blocks = "the shed runtime's theme rules (#1339), pinned to a commit"
+blocks-cli = "`blocks check`, the UI guard over the screen fixtures (#1750), at the blocks pin"
 clap = "the CLI's argument parser: a parser of input from outside"
 flate2 = "serve's gzip (#1314, owner-approved)"
 hkdf = "web push key derivation, pure-Rust RustCrypto: crypto is never written in-house"

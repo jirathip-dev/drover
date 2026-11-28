@@ -1,0 +1,87 @@
+{
+  "actions": [
+    {
+      "action": "thread-archive",
+      "label": "archive",
+      "values": {
+        "thread": "t6"
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "figure": {
+        "state": "idle"
+      },
+      "id": "who",
+      "sticky": true,
+      "subtitle": {
+        "text": "no orchestrator yet · acme-api · claude · opus",
+        "tone": ""
+      },
+      "title": "Error codes catalogue · t6",
+      "type": "row"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-58-t",
+          "markdown": "Listed every error code in docs/errors.md.",
+          "type": "text"
+        }
+      ],
+      "id": "m-58",
+      "kind": "orch",
+      "meta": {
+        "label": "{}",
+        "since": "2026-10-28T15:07:40Z"
+      },
+      "title": "orchestrator",
+      "type": "card"
+    },
+    {
+      "action": "thread-say",
+      "acts": {
+        "model": "thread-model",
+        "queue": "thread-queue",
+        "steer": "thread-steer",
+        "stop": "thread-stop",
+        "unqueue": "thread-unqueue"
+      },
+      "chips": [
+        {
+          "all": [
+            "opus",
+            "sonnet"
+          ],
+          "cur": "opus",
+          "name": "model"
+        },
+        {
+          "all": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "cur": null,
+          "name": "effort"
+        }
+      ],
+      "id": "say",
+      "label": "send",
+      "placeholder": "message the orchestrator",
+      "queued": [],
+      "type": "composer",
+      "values": {
+        "thread": "t6"
+      }
+    }
+  ],
+  "focus": true,
+  "id": "thread-t6",
+  "stream": "/screens/threads/t6/stream",
+  "title": "Error codes catalogue",
+  "type": "screen"
+}

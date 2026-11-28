@@ -1,0 +1,378 @@
+{
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "id": "age-list",
+          "rows": [
+            {
+              "id": "age",
+              "subtitle": {
+                "text": "as of: not yet known",
+                "tone": "warn"
+              },
+              "title": "Snapshot",
+              "type": "row"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "snapshot",
+      "id": "age",
+      "type": "section"
+    },
+    {
+      "counts": {
+        "impl": 8,
+        "merged": 4,
+        "needs-human": 1,
+        "queued": 2,
+        "review(n)": 2
+      },
+      "id": "states",
+      "nodes": [],
+      "source": "stateDiagram-v2\n    [*] --> queued\n    state \"queued · 2\" as queued\n    state \"design · 0\" as design\n    state \"design-review · 0\" as design_review\n    state \"impl · 8\" as impl\n    state \"review(n) · 2\" as review\n    state \"fix(n) · 0\" as fix\n    state \"ready · 0\" as ready\n    state \"blocked · 0\" as blocked\n    state \"needs-human · 1\" as needs_human\n    state \"parked · 0\" as parked\n    state \"merged · 4\" as merged\n    state \"closed · 0\" as closed\n    queued --> design : start\n    queued --> impl : start\n    design --> design_review : ended\n    design_review --> queued : decided\n    design_review --> design : decided\n    design_review --> needs_human : decided\n    impl --> merged : merged-outside\n    impl --> needs_human : pr-closed, lane-blocked\n    impl --> review : pushed, no-change\n    impl --> ready : no-change\n    review --> merged : merged-outside\n    review --> needs_human : pr-closed, record\n    review --> ready : record\n    review --> fix : record\n    fix --> merged : merged-outside\n    fix --> needs_human : pr-closed, lane-blocked\n    fix --> review : pushed, no-change\n    fix --> ready : no-change\n    ready --> merged : merged-outside, merge\n    ready --> needs_human : pr-closed, ci-red, conflict\n    ready --> review : next-check\n    ready --> fix : merge, ci-red, conflict\n    blocked --> merged : merged-outside\n    blocked --> needs_human : pr-closed\n    blocked --> ready : back\n    blocked --> review : back\n    blocked --> fix : back\n    needs_human --> queued : decided\n    needs_human --> impl : decided\n    needs_human --> fix : decided\n    needs_human --> parked : decided\n    parked --> needs_human : parked\n    merged --> [*]\n    closed --> [*]\n",
+      "type": "diagram"
+    },
+    {
+      "counts": {},
+      "id": "pass",
+      "nodes": [
+        {
+          "id": "k_slow_secs",
+          "limit": "slow_secs"
+        },
+        {
+          "id": "k_fast_secs",
+          "limit": "fast_secs"
+        },
+        {
+          "id": "k_stall_minutes",
+          "limit": "stall_minutes"
+        },
+        {
+          "id": "k_ask_default_minutes",
+          "limit": "ask_default_minutes"
+        },
+        {
+          "id": "k_ask_waiting_minutes",
+          "limit": "ask_waiting_minutes"
+        },
+        {
+          "id": "k_ask_expire_hours",
+          "limit": "ask_expire_hours"
+        },
+        {
+          "id": "k_outbox_stale_minutes",
+          "limit": "outbox_stale_minutes"
+        },
+        {
+          "id": "k_acp_start_minutes",
+          "limit": "acp_start_minutes"
+        },
+        {
+          "id": "k_idle_reap_minutes",
+          "limit": "idle_reap_minutes"
+        },
+        {
+          "id": "k_done_close_minutes",
+          "limit": "done_close_minutes"
+        },
+        {
+          "id": "k_idle_merged_minutes",
+          "limit": "idle_merged_minutes"
+        },
+        {
+          "id": "k_pass_max_secs",
+          "limit": "pass_max_secs"
+        },
+        {
+          "id": "k_ssh_quick_secs",
+          "limit": "ssh_quick_secs"
+        },
+        {
+          "id": "k_ssh_call_secs",
+          "limit": "ssh_call_secs"
+        },
+        {
+          "id": "k_shed_call_secs",
+          "limit": "shed_call_secs"
+        },
+        {
+          "id": "k_import_max_age_hours",
+          "limit": "import_max_age_hours"
+        },
+        {
+          "id": "k_webhook_poll_minutes",
+          "limit": "webhook_poll_minutes"
+        },
+        {
+          "id": "k_silent_minutes",
+          "limit": "silent_minutes"
+        },
+        {
+          "id": "k_ci_start_minutes",
+          "limit": "ci_start_minutes"
+        },
+        {
+          "id": "k_ci_stuck_minutes",
+          "limit": "ci_stuck_minutes"
+        },
+        {
+          "id": "k_ci_flaky_retries",
+          "limit": "ci_flaky_retries"
+        },
+        {
+          "id": "k_gate_check_minutes",
+          "limit": "gate_check_minutes"
+        },
+        {
+          "id": "k_job_max",
+          "limit": "job_max"
+        },
+        {
+          "id": "k_max_parallel_spawns",
+          "limit": "max_parallel_spawns"
+        },
+        {
+          "id": "k_start_max",
+          "limit": "start_max"
+        },
+        {
+          "id": "k_start_release",
+          "limit": "start_release"
+        },
+        {
+          "id": "k_spawn_pending_max_secs",
+          "limit": "spawn_pending_max_secs"
+        },
+        {
+          "id": "k_respawn_max",
+          "limit": "respawn_max"
+        },
+        {
+          "id": "k_respawn_window_minutes",
+          "limit": "respawn_window_minutes"
+        },
+        {
+          "id": "k_overload_minutes",
+          "limit": "overload_minutes"
+        },
+        {
+          "id": "k_thread_resend_minutes",
+          "limit": "thread_resend_minutes"
+        },
+        {
+          "id": "k_transcript_days",
+          "limit": "transcript_days"
+        },
+        {
+          "id": "k_crash_wave_minutes",
+          "limit": "crash_wave_minutes"
+        },
+        {
+          "id": "k_runtime_down_minutes",
+          "limit": "runtime_down_minutes"
+        },
+        {
+          "id": "k_fetch_fresh_secs",
+          "limit": "fetch_fresh_secs"
+        },
+        {
+          "id": "k_ssh_connect_secs",
+          "limit": "ssh_connect_secs"
+        },
+        {
+          "id": "k_ssh_retry_secs",
+          "limit": "ssh_retry_secs"
+        },
+        {
+          "id": "k_link_beat_secs",
+          "limit": "link_beat_secs"
+        },
+        {
+          "id": "k_link_stale_secs",
+          "limit": "link_stale_secs"
+        },
+        {
+          "id": "k_link_retry_max_secs",
+          "limit": "link_retry_max_secs"
+        },
+        {
+          "id": "k_link_poll_millis",
+          "limit": "link_poll_millis"
+        },
+        {
+          "id": "k_link_sample_secs",
+          "limit": "link_sample_secs"
+        },
+        {
+          "id": "k_link_down_minutes",
+          "limit": "link_down_minutes"
+        },
+        {
+          "id": "k_db_busy_secs",
+          "limit": "db_busy_secs"
+        },
+        {
+          "id": "k_db_retry_millis",
+          "limit": "db_retry_millis"
+        },
+        {
+          "id": "k_notify_secs",
+          "limit": "notify_secs"
+        },
+        {
+          "id": "k_shed_read_millis",
+          "limit": "shed_read_millis"
+        },
+        {
+          "id": "k_acp_judge_secs",
+          "limit": "acp_judge_secs"
+        },
+        {
+          "id": "k_service_call_secs",
+          "limit": "service_call_secs"
+        },
+        {
+          "id": "k_disk_probe_secs",
+          "limit": "disk_probe_secs"
+        },
+        {
+          "id": "k_disk_hung_secs",
+          "limit": "disk_hung_secs"
+        },
+        {
+          "id": "k_disk_sick_secs",
+          "limit": "disk_sick_secs"
+        },
+        {
+          "id": "k_disk_trust_secs",
+          "limit": "disk_trust_secs"
+        },
+        {
+          "id": "k_lane_read_secs",
+          "limit": "lane_read_secs"
+        },
+        {
+          "id": "k_guard_secs",
+          "limit": "guard_secs"
+        },
+        {
+          "id": "k_poll_millis",
+          "limit": "poll_millis"
+        },
+        {
+          "id": "k_hold_sample_secs",
+          "limit": "hold_sample_secs"
+        },
+        {
+          "id": "k_tick_beat_secs",
+          "limit": "tick_beat_secs"
+        },
+        {
+          "id": "k_orchestrator_idle_minutes",
+          "limit": "orchestrator_idle_minutes"
+        },
+        {
+          "id": "k_orchestrator_reply_minutes",
+          "limit": "orchestrator_reply_minutes"
+        },
+        {
+          "id": "k_orchestrator_change_minutes",
+          "limit": "orchestrator_change_minutes"
+        },
+        {
+          "id": "k_host_offline_minutes",
+          "limit": "host_offline_minutes"
+        },
+        {
+          "id": "k_host_down_secs",
+          "limit": "host_down_secs"
+        },
+        {
+          "id": "k_kick_max_secs",
+          "limit": "kick_max_secs"
+        },
+        {
+          "id": "k_serve_shed_secs",
+          "limit": "serve_shed_secs"
+        },
+        {
+          "id": "k_serve_remote_secs",
+          "limit": "serve_remote_secs"
+        },
+        {
+          "id": "k_serve_host_secs",
+          "limit": "serve_host_secs"
+        },
+        {
+          "id": "k_serve_heartbeat_secs",
+          "limit": "serve_heartbeat_secs"
+        },
+        {
+          "id": "k_serve_handover_secs",
+          "limit": "serve_handover_secs"
+        },
+        {
+          "id": "k_slo_api_minutes",
+          "limit": "slo_api_minutes"
+        },
+        {
+          "id": "k_slo_idle_minutes",
+          "limit": "slo_idle_minutes"
+        },
+        {
+          "id": "k_slo_tick_minutes",
+          "limit": "slo_tick_minutes"
+        },
+        {
+          "id": "k_slo_pass_minutes",
+          "limit": "slo_pass_minutes"
+        },
+        {
+          "id": "k_stall_restart_hours",
+          "limit": "stall_restart_hours"
+        },
+        {
+          "id": "k_self_update_wait_minutes",
+          "limit": "self_update_wait_minutes"
+        },
+        {
+          "id": "k_self_update_stage_secs",
+          "limit": "self_update_stage_secs"
+        },
+        {
+          "id": "k_act_minutes",
+          "limit": "act_minutes"
+        },
+        {
+          "id": "k_escalate_minutes",
+          "limit": "escalate_minutes"
+        },
+        {
+          "id": "k_start_minutes",
+          "limit": "start_minutes"
+        },
+        {
+          "id": "k_check_quiet_minutes",
+          "limit": "check_quiet_minutes"
+        },
+        {
+          "id": "k_host_wait_minutes",
+          "limit": "host_wait_minutes"
+        },
+        {
+          "id": "k_card_ttl_minutes",
+          "limit": "card_ttl_minutes"
+        }
+      ],
+      "source": "flowchart TD\n    j0[\"dev.drover.tick: drover tick\"] --> t0\n    j1[\"dev.drover.service: drover service --api 127.0.0.1:7779\"] --> d0\n    j2[\"dev.drover.housekeep: drover housekeep\"] --> h0\n    t0[\"drive\"]\n    h0[\"check\"] --> h1\n    h1[\"clean\"] --> h2\n    h2[\"budget\"] --> h3\n    h3[\"hogs\"] --> h4\n    h4[\"backlog\"] --> h5\n    h5[\"trim\"] --> h6\n    h6[\"jobs\"] --> h7\n    h7[\"soak\"] --> h8\n    h8[\"hotspots\"] --> h9\n    h9[\"compact\"]\n    d0[\"look, repair\"] --> d1\n    d1[\"closed issues\"] --> d2\n    d2[\"PR reads, gates, steps\"] --> d3\n    d3[\"spawns\"]\n    t0 --> d0\n    other[\"other timers: serve, hosts, store\"]\n    j0 -.- k_slow_secs([\"slow_secs = 300\"])\n    j1 -.- k_fast_secs([\"fast_secs = 60\"])\n    j2 -.- k_fast_secs([\"fast_secs = 60\"])\n    h0 -.- k_stall_minutes([\"stall_minutes = 240\"])\n    h0 -.- k_ask_default_minutes([\"ask_default_minutes = 30\"])\n    h0 -.- k_ask_waiting_minutes([\"ask_waiting_minutes = 30\"])\n    h0 -.- k_ask_expire_hours([\"ask_expire_hours = 24\"])\n    h0 -.- k_outbox_stale_minutes([\"outbox_stale_minutes = 5\"])\n    h0 -.- k_acp_start_minutes([\"acp_start_minutes = 3\"])\n    h0 -.- k_idle_reap_minutes([\"idle_reap_minutes = 10\"])\n    h0 -.- k_done_close_minutes([\"done_close_minutes = 5\"])\n    h0 -.- k_idle_merged_minutes([\"idle_merged_minutes = 15\"])\n    d0 -.- k_pass_max_secs([\"pass_max_secs = 60\"])\n    d0 -.- k_ssh_quick_secs([\"ssh_quick_secs = 5\"])\n    d0 -.- k_ssh_call_secs([\"ssh_call_secs = 20\"])\n    d0 -.- k_shed_call_secs([\"shed_call_secs = 30\"])\n    d0 -.- k_import_max_age_hours([\"import_max_age_hours = 24\"])\n    d2 -.- k_webhook_poll_minutes([\"webhook_poll_minutes = 10\"])\n    d2 -.- k_silent_minutes([\"silent_minutes = 10\"])\n    d2 -.- k_ci_start_minutes([\"ci_start_minutes = 10\"])\n    d2 -.- k_ci_stuck_minutes([\"ci_stuck_minutes = 30\"])\n    d2 -.- k_ci_flaky_retries([\"ci_flaky_retries = 1\"])\n    d2 -.- k_gate_check_minutes([\"gate_check_minutes = 30\"])\n    d2 -.- k_job_max([\"job_max = 4\"])\n    d3 -.- k_max_parallel_spawns([\"max_parallel_spawns = 6\"])\n    d3 -.- k_start_max([\"start_max = 2\"])\n    d3 -.- k_start_release([\"start_release = \"started\"\"])\n    d3 -.- k_spawn_pending_max_secs([\"spawn_pending_max_secs = 300\"])\n    d3 -.- k_respawn_max([\"respawn_max = 3\"])\n    d3 -.- k_respawn_window_minutes([\"respawn_window_minutes = 60\"])\n    other -.- k_overload_minutes([\"overload_minutes = 10\"])\n    other -.- k_thread_resend_minutes([\"thread_resend_minutes = 5\"])\n    other -.- k_transcript_days([\"transcript_days = 30\"])\n    other -.- k_crash_wave_minutes([\"crash_wave_minutes = 5\"])\n    other -.- k_runtime_down_minutes([\"runtime_down_minutes = 30\"])\n    other -.- k_fetch_fresh_secs([\"fetch_fresh_secs = 30\"])\n    other -.- k_ssh_connect_secs([\"ssh_connect_secs = 10\"])\n    other -.- k_ssh_retry_secs([\"ssh_retry_secs = 1\"])\n    other -.- k_link_beat_secs([\"link_beat_secs = 5\"])\n    other -.- k_link_stale_secs([\"link_stale_secs = 20\"])\n    other -.- k_link_retry_max_secs([\"link_retry_max_secs = 30\"])\n    other -.- k_link_poll_millis([\"link_poll_millis = 500\"])\n    other -.- k_link_sample_secs([\"link_sample_secs = 30\"])\n    other -.- k_link_down_minutes([\"link_down_minutes = 5\"])\n    other -.- k_db_busy_secs([\"db_busy_secs = 60\"])\n    other -.- k_db_retry_millis([\"db_retry_millis = 10\"])\n    other -.- k_notify_secs([\"notify_secs = 15\"])\n    other -.- k_shed_read_millis([\"shed_read_millis = 300\"])\n    other -.- k_acp_judge_secs([\"acp_judge_secs = 30\"])\n    other -.- k_service_call_secs([\"service_call_secs = 2\"])\n    other -.- k_disk_probe_secs([\"disk_probe_secs = 2\"])\n    other -.- k_disk_hung_secs([\"disk_hung_secs = 6\"])\n    other -.- k_disk_sick_secs([\"disk_sick_secs = 300\"])\n    other -.- k_disk_trust_secs([\"disk_trust_secs = 60\"])\n    other -.- k_lane_read_secs([\"lane_read_secs = 5\"])\n    other -.- k_guard_secs([\"guard_secs = 180\"])\n    other -.- k_poll_millis([\"poll_millis = 20\"])\n    other -.- k_hold_sample_secs([\"hold_sample_secs = 10\"])\n    other -.- k_tick_beat_secs([\"tick_beat_secs = 60\"])\n    other -.- k_orchestrator_idle_minutes([\"orchestrator_idle_minutes = 30\"])\n    other -.- k_orchestrator_reply_minutes([\"orchestrator_reply_minutes = 10\"])\n    other -.- k_orchestrator_change_minutes([\"orchestrator_change_minutes = 30\"])\n    other -.- k_host_offline_minutes([\"host_offline_minutes = 15\"])\n    other -.- k_host_down_secs([\"host_down_secs = 60\"])\n    other -.- k_kick_max_secs([\"kick_max_secs = 300\"])\n    other -.- k_serve_shed_secs([\"serve_shed_secs = 5\"])\n    other -.- k_serve_remote_secs([\"serve_remote_secs = 10\"])\n    other -.- k_serve_host_secs([\"serve_host_secs = 10\"])\n    other -.- k_serve_heartbeat_secs([\"serve_heartbeat_secs = 15\"])\n    other -.- k_serve_handover_secs([\"serve_handover_secs = 300\"])\n    other -.- k_slo_api_minutes([\"slo_api_minutes = 10\"])\n    other -.- k_slo_idle_minutes([\"slo_idle_minutes = 20\"])\n    other -.- k_slo_tick_minutes([\"slo_tick_minutes = 10\"])\n    other -.- k_slo_pass_minutes([\"slo_pass_minutes = 5\"])\n    other -.- k_stall_restart_hours([\"stall_restart_hours = 2\"])\n    other -.- k_self_update_wait_minutes([\"self_update_wait_minutes = 45\"])\n    other -.- k_self_update_stage_secs([\"self_update_stage_secs = 300\"])\n    other -.- k_act_minutes([\"act_minutes = 10\"])\n    other -.- k_escalate_minutes([\"escalate_minutes = 30\"])\n    other -.- k_start_minutes([\"start_minutes = 10\"])\n    other -.- k_check_quiet_minutes([\"check_quiet_minutes = 120\"])\n    other -.- k_host_wait_minutes([\"host_wait_minutes = 30\"])\n    other -.- k_card_ttl_minutes([\"card_ttl_minutes = 15\"])\n",
+      "type": "diagram"
+    }
+  ],
+  "id": "workflow",
+  "title": "Workflow",
+  "type": "screen"
+}

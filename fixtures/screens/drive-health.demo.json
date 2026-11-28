@@ -1,0 +1,20 @@
+{
+  "blocks": [
+    {
+      "id": "health-rows",
+      "rows": [],
+      "type": "list"
+    },
+    {
+      "action": "drive-all",
+      "id": "health-drive",
+      "label": "Drive now",
+      "style": "primary",
+      "type": "button"
+    }
+  ],
+  "cancel": "Done",
+  "id": "drive-health",
+  "title": "Drive health",
+  "type": "sheet"
+}

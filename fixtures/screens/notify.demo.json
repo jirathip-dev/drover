@@ -1,0 +1,49 @@
+{
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "id": "nf-global-list",
+          "rows": [
+            {
+              "id": "nf-global-none",
+              "title": "no notifiers",
+              "type": "row"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "[[notify]]",
+      "id": "nf-global",
+      "type": "section"
+    },
+    {
+      "blocks": [
+        {
+          "id": "nf-telegram-list",
+          "rows": [
+            {
+              "badge": {
+                "text": "off",
+                "tone": "mute"
+              },
+              "id": "telegram",
+              "subtitle": "removed (#557): a command notifier sends to Telegram",
+              "title": "Telegram bridge",
+              "type": "row"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "Telegram",
+      "id": "nf-telegram",
+      "type": "section"
+    }
+  ],
+  "cancel": "Done",
+  "id": "notify",
+  "title": "Notifications",
+  "type": "sheet"
+}

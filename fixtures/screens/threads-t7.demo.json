@@ -1,0 +1,87 @@
+{
+  "actions": [
+    {
+      "action": "thread-archive",
+      "label": "archive",
+      "values": {
+        "thread": "t7"
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "figure": {
+        "state": "idle"
+      },
+      "id": "who",
+      "sticky": true,
+      "subtitle": {
+        "text": "no orchestrator yet · acme-api · claude · opus",
+        "tone": ""
+      },
+      "title": "Pagination for /v1/items · t7",
+      "type": "row"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-60-t",
+          "markdown": "Cursor pagination shipped in #12.",
+          "type": "text"
+        }
+      ],
+      "id": "m-60",
+      "kind": "orch",
+      "meta": {
+        "label": "{}",
+        "since": "2026-10-28T17:54:20Z"
+      },
+      "title": "orchestrator",
+      "type": "card"
+    },
+    {
+      "action": "thread-say",
+      "acts": {
+        "model": "thread-model",
+        "queue": "thread-queue",
+        "steer": "thread-steer",
+        "stop": "thread-stop",
+        "unqueue": "thread-unqueue"
+      },
+      "chips": [
+        {
+          "all": [
+            "opus",
+            "sonnet"
+          ],
+          "cur": "opus",
+          "name": "model"
+        },
+        {
+          "all": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "cur": null,
+          "name": "effort"
+        }
+      ],
+      "id": "say",
+      "label": "send",
+      "placeholder": "message the orchestrator",
+      "queued": [],
+      "type": "composer",
+      "values": {
+        "thread": "t7"
+      }
+    }
+  ],
+  "focus": true,
+  "id": "thread-t7",
+  "stream": "/screens/threads/t7/stream",
+  "title": "Pagination for /v1/items",
+  "type": "screen"
+}

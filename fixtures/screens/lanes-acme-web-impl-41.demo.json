@@ -1,0 +1,126 @@
+{
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "id": "facts-list",
+          "rows": [
+            {
+              "id": "f-issue",
+              "title": "issue",
+              "type": "row",
+              "value": "acme-web #41"
+            },
+            {
+              "id": "f-role",
+              "title": "role",
+              "type": "row",
+              "value": "impl"
+            },
+            {
+              "id": "f-state",
+              "title": "state",
+              "type": "row",
+              "value": "working"
+            },
+            {
+              "id": "f-host",
+              "title": "host",
+              "type": "row",
+              "value": "local"
+            },
+            {
+              "id": "f-branch",
+              "title": "branch",
+              "type": "row",
+              "value": "issue-41"
+            },
+            {
+              "id": "f-pr",
+              "tap": {
+                "url": "https://github.com/acme-example/acme-web/pull/57"
+              },
+              "title": "PR",
+              "type": "row",
+              "value": "#57"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "lane",
+      "id": "facts",
+      "type": "section"
+    },
+    {
+      "action": "stop",
+      "confirm": {
+        "ok": "Stop",
+        "title": "Stop acme-web-impl-41?"
+      },
+      "id": "act-stop",
+      "label": "Stop",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "acme-web-impl-41"
+      }
+    },
+    {
+      "action": "kill",
+      "id": "act-kill",
+      "label": "Kill",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "acme-web-impl-41"
+      }
+    },
+    {
+      "action": "clean",
+      "id": "act-clean",
+      "label": "Clean",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "acme-web-impl-41"
+      }
+    },
+    {
+      "fields": [
+        {
+          "label": "Say",
+          "name": "text",
+          "placeholder": "a line to the lane",
+          "type": "text",
+          "value": ""
+        }
+      ],
+      "id": "say",
+      "type": "form"
+    },
+    {
+      "blocks": [
+        {
+          "id": "t1-1",
+          "markdown": "```\n❯ Implement #41: dark-mode toggle persists across reloads\n⏺ I'll read the settings store first.\n⏺ Read(src/settings/store.ts)\n  ⎿ Read 84 lines\n⏺ The theme is hard-coded on load; I'll read it from storage instead.\n⏺ Update(src/settings/store.ts)\n  ⎿ Updated src/settings/store.ts with 3 additions and 1 removal\n     10   export function initialTheme(): Theme {\n     11 -   return 'light';\n     11 +   const saved = localStorage.getItem('theme');\n     12 +   if (saved === 'dark' || saved === 'light') return saved;\n     13 +   return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';\n     14   }\n⏺ Bash(pnpm test settings)\n  ⎿ ✓ settings/store.test.ts (6 tests) 41ms\n    Test Files 1 passed (1)\n⏺ Tests pass. Adding a test for the saved value, then pushing.\n```",
+          "type": "text"
+        }
+      ],
+      "header": "transcript",
+      "id": "transcript",
+      "type": "section"
+    }
+  ],
+  "cancel": "Close",
+  "done": {
+    "action": "send",
+    "label": "Send",
+    "values": {
+      "agent": "acme-web-impl-41"
+    }
+  },
+  "id": "lane-acme-web-impl-41",
+  "title": "acme-web-impl-41",
+  "type": "sheet"
+}

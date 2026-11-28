@@ -1,0 +1,9 @@
+{
+  "guard": 3,
+  "known": [
+    {
+      "rule": "lint/empty-state",
+      "at": "sheet#hot-acme-api-21/list#hot-paths"
+    }
+  ]
+}

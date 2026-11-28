@@ -1,0 +1,69 @@
+{
+  "blocks": [
+    {
+      "action": "filter",
+      "id": "on",
+      "multi": true,
+      "name": "acme-web.on",
+      "options": [
+        {
+          "label": "new",
+          "value": "new"
+        },
+        {
+          "label": ">30 days",
+          "value": "30"
+        },
+        {
+          "label": ">90 days",
+          "value": "90"
+        },
+        {
+          "label": "has AC",
+          "value": "ac"
+        },
+        {
+          "label": "in a closed PR",
+          "value": "pr"
+        }
+      ],
+      "selected": [],
+      "type": "chips"
+    },
+    {
+      "blocks": [
+        {
+          "fields": [
+            {
+              "label": "Search",
+              "name": "acme-web.q",
+              "placeholder": "search #, title, label",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "label": "#51 Dark mode for the settings page · ui",
+              "name": "acme-web.pick.51",
+              "type": "toggle",
+              "value": false
+            }
+          ],
+          "id": "bl-acme-web",
+          "type": "form"
+        }
+      ],
+      "footer": "read 0s ago · Drive now reads it again; ticked ones queue as needs-check",
+      "header": "open, not queued",
+      "id": "issues",
+      "type": "section"
+    }
+  ],
+  "cancel": "Cancel",
+  "done": {
+    "action": "queue",
+    "label": "Queue ticked"
+  },
+  "id": "backlog-acme-web",
+  "title": "acme-web backlog · 1 open",
+  "type": "sheet"
+}

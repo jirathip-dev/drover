@@ -1,0 +1,35 @@
+{
+  "blocks": [
+    {
+      "markdown": "**Rate-limit the public search endpoint per API key or per client IP?**",
+      "type": "text"
+    },
+    {
+      "action": "answer",
+      "id": "q2",
+      "options": [
+        {
+          "label": "per API key",
+          "value": "per API key"
+        },
+        {
+          "label": "per client IP",
+          "value": "per client IP"
+        },
+        {
+          "label": "both, key first: throttle each API key at 600 requests a minute, then each client IP at 120 a minute for anonymous traffic behind shared NAT",
+          "value": "both, key first: throttle each API key at 600 requests a minute, then each client IP at 120 a minute for anonymous traffic behind shared NAT"
+        }
+      ],
+      "other": {
+        "placeholder": "other…"
+      },
+      "recommended": "per API key",
+      "type": "choice"
+    }
+  ],
+  "cancel": "Done",
+  "id": "asks-33",
+  "title": "acme-api · q2",
+  "type": "sheet"
+}

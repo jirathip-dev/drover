@@ -1,0 +1,21 @@
+{
+  "guard": 3,
+  "known": [
+    {
+      "rule": "lint/empty-state",
+      "at": "screen#queue/card#fleet-acme-api/section#queued-acme-api/list#queued-list-acme-api"
+    },
+    {
+      "rule": "lint/empty-state",
+      "at": "screen#queue/card#fleet-acme-ios/section#inprogress-acme-ios/list#inprogress-list-acme-ios"
+    },
+    {
+      "rule": "lint/empty-state",
+      "at": "screen#queue/card#fleet-acme-ios/section#queued-acme-ios/list#queued-list-acme-ios"
+    },
+    {
+      "rule": "lint/fault",
+      "at": ""
+    }
+  ]
+}

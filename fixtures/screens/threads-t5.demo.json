@@ -1,0 +1,127 @@
+{
+  "actions": [
+    {
+      "action": "thread-archive",
+      "label": "archive",
+      "values": {
+        "thread": "t5"
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "figure": {
+        "state": "needs"
+      },
+      "id": "who",
+      "sticky": true,
+      "subtitle": {
+        "text": "! choose · acme-web · claude · opus · awake",
+        "tone": "warn"
+      },
+      "title": "Settings page follow-ups · t5",
+      "type": "row"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-83-t",
+          "markdown": "The settings save calls /v1/search on every keystroke. Get acme-api to cover it.",
+          "type": "text"
+        }
+      ],
+      "id": "m-83",
+      "kind": "you",
+      "meta": {
+        "label": "✓ {}",
+        "since": "2026-10-31T04:14:20Z"
+      },
+      "title": "you",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-85-t",
+          "markdown": "Hand off \"Search calls from the settings save\" to which acme-api thread? Nothing is delivered until you tap one.",
+          "type": "text"
+        },
+        {
+          "action": "answer",
+          "id": "q30",
+          "options": [
+            {
+              "label": "OpenAPI spec at /v1/openapi.json, versioned per release and served from the edge cache · t2 — Filed #22 and queued it after #17. (10h ago)",
+              "value": "OpenAPI spec at /v1/openapi.json, versioned per release and served from the edge cache · t2 — Filed #22 and queued it after #17. (10h ago)"
+            },
+            {
+              "label": "new thread: Search calls from the settings save",
+              "value": "new thread: Search calls from the settings save"
+            }
+          ],
+          "other": {
+            "placeholder": "other: type an answer"
+          },
+          "type": "choice",
+          "values": {
+            "fleet": "acme-web",
+            "thread": "t5"
+          }
+        }
+      ],
+      "id": "m-85",
+      "kind": "ask",
+      "meta": {
+        "label": "{}",
+        "since": "2026-10-31T04:18:20Z"
+      },
+      "title": "q30",
+      "tone": "warn",
+      "type": "card"
+    },
+    {
+      "action": "thread-say",
+      "acts": {
+        "model": "thread-model",
+        "queue": "thread-queue",
+        "steer": "thread-steer",
+        "stop": "thread-stop",
+        "unqueue": "thread-unqueue"
+      },
+      "chips": [
+        {
+          "all": [
+            "opus",
+            "sonnet"
+          ],
+          "cur": "opus",
+          "name": "model"
+        },
+        {
+          "all": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "cur": "xhigh",
+          "name": "effort"
+        }
+      ],
+      "id": "say",
+      "label": "send",
+      "placeholder": "message the orchestrator",
+      "queued": [],
+      "type": "composer",
+      "values": {
+        "thread": "t5"
+      }
+    }
+  ],
+  "focus": true,
+  "id": "thread-t5",
+  "stream": "/screens/threads/t5/stream",
+  "title": "Settings page follow-ups",
+  "type": "screen"
+}

@@ -1,0 +1,60 @@
+{
+  "actions": [
+    {
+      "action": "thread-restore",
+      "label": "restore",
+      "values": {
+        "thread": "t1"
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "figure": {
+        "state": "idle"
+      },
+      "id": "who",
+      "sticky": true,
+      "subtitle": {
+        "text": "all · claude · opus · asleep",
+        "tone": ""
+      },
+      "title": "Weekly ship notes · t1",
+      "type": "row"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-67-t",
+          "markdown": "good, send it Fridays",
+          "type": "text"
+        }
+      ],
+      "id": "m-67",
+      "kind": "you",
+      "meta": {
+        "label": "✓ {}",
+        "since": "2026-10-29T19:01:40Z"
+      },
+      "title": "you",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-68-t",
+          "markdown": "the orchestrator went to sleep",
+          "type": "text"
+        }
+      ],
+      "id": "m-68",
+      "kind": "sys",
+      "type": "card"
+    }
+  ],
+  "focus": true,
+  "id": "thread-t1",
+  "stream": "/screens/threads/t1/stream",
+  "title": "Weekly ship notes",
+  "type": "screen"
+}

@@ -1,0 +1,9 @@
+{
+  "guard": 3,
+  "known": [
+    {
+      "rule": "lint/title-long",
+      "at": "screen#threads/section#r-acme-api/list#l-acme-api/row#t2"
+    }
+  ]
+}

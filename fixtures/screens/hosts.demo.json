@@ -1,0 +1,66 @@
+{
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "id": "hosts-list",
+          "rows": [
+            {
+              "badge": {
+                "text": "on",
+                "tone": "ok"
+              },
+              "figure": {
+                "load": "calm"
+              },
+              "id": "h-mini",
+              "subtitle": {
+                "text": "main host"
+              },
+              "swipe": [],
+              "title": "mini",
+              "type": "row",
+              "value": "10 lanes"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "footer": "Tap a host for its buttons. Host history and charts live in Beacon.",
+      "header": "hosts (1)",
+      "id": "hosts-sec",
+      "type": "section"
+    },
+    {
+      "blocks": [
+        {
+          "id": "disk-list",
+          "rows": [
+            {
+              "id": "disk-worktrees",
+              "title": "worktrees",
+              "type": "row",
+              "value": "3.0 / 25 GB"
+            },
+            {
+              "id": "disk-orphans",
+              "subtitle": "under the worktree root, no fleet's",
+              "title": "orphan folders",
+              "type": "row",
+              "value": "0"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "footer": "The worktree total is drive's last walk.",
+      "header": "fleet disk",
+      "id": "disk-sec",
+      "type": "section"
+    }
+  ],
+  "cancel": "Close",
+  "id": "hosts",
+  "title": "Hosts",
+  "type": "sheet"
+}

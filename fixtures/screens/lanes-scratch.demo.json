@@ -1,0 +1,65 @@
+{
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "id": "facts-list",
+          "rows": [
+            {
+              "id": "f-role",
+              "title": "role",
+              "type": "row",
+              "value": "other"
+            },
+            {
+              "id": "f-state",
+              "title": "state",
+              "type": "row",
+              "value": "idle"
+            },
+            {
+              "id": "f-host",
+              "title": "host",
+              "type": "row",
+              "value": "local"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "lane",
+      "id": "facts",
+      "type": "section"
+    },
+    {
+      "action": "close",
+      "confirm": {
+        "ok": "Close pane",
+        "title": "Close pane scratch?"
+      },
+      "id": "act-close",
+      "label": "Close pane",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "scratch"
+      }
+    },
+    {
+      "blocks": [
+        {
+          "id": "t1-1",
+          "markdown": "```\ncodex · scratch\n> sketch a color palette for the new docs theme\nHere are three palettes, each with an accessible contrast ratio.\n```",
+          "type": "text"
+        }
+      ],
+      "header": "transcript",
+      "id": "transcript",
+      "type": "section"
+    }
+  ],
+  "cancel": "Close",
+  "id": "lane-scratch",
+  "title": "scratch",
+  "type": "sheet"
+}
