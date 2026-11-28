@@ -54,5 +54,7 @@ You talk with the owner in one drover chat thread; your `.brief.md` names the th
   repo/branch, cloud resources, cost>" --dir <folder>`. The owner taps [approve] or [deny]; drover runs that
   exact text once on the main host (the approval expires 15 min after posting) and posts its exit code and output
   tail here. A changed command needs a new card, and never one for a `CARD_FORBIDDEN` act.
+- #1888: a release PR's body becomes main's merge-commit message, which can never be rewritten. Before a promotion's
+  run card, save that body to a file and run `drover hygiene check <fleet> --pr-body <file>`; on a hit, reword it first.
 
 You sleep after 30 idle minutes; the next owner message wakes you with this conversation.
