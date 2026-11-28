@@ -1194,3 +1194,180 @@ fn a_design_stage_left_with_no_lane_and_its_flag_off_shows_on_waiting() {
     assert_eq!(code, 0, "{w}");
     assert!(w.contains("#12") && w.contains("drover spawn sendmeter 12 impl"), "{w}");
 }
+
+const CARGO: &str = "[dependencies]\nblocks = { git = \"https://github.com/jirathip-dev/blocks\", tag = \"v0.4.0\" }\n\
+swag = { git = \"https://github.com/jirathip-dev/swag\", rev = \"5e1f0c2\" },\n";
+const BLOCKS_DIR: &str = "tree .blocks\n\nguard.json\n";
+
+fn blocks_brief(name: &str, files: &[(&str, &str)], body: &str) -> String {
+    let (c, _sh) = setup(name, "");
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    let issue = format!(r#"{{"title":"t","body":"{body}"}}"#);
+    let mut show = Fake::default().reply("gh issue view", &issue);
+    for (path, text) in files {
+        show = show.reply(
+            &format!("git -C /tmp/does-not-matter/sendmeter show origin/staging:{path}"),
+            text,
+        );
+    }
+    drive(&c, &Both(show, &fake(&c, HEAD)));
+    brief(&c)
+}
+
+#[test]
+fn a_blocks_repo_by_its_folder_its_pinned_dependency_or_its_recipe_gets_a_blocks_design_brief() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let none = "none found in Cargo.toml, package.json or Package.swift";
+    let pin = "`swag = { git = \"https://github.com/jirathip-dev/swag\", rev = \"5e1f0c2\" }`";
+    for (name, files, pack) in [
+        ("design-blocks-dir", vec![(".blocks", BLOCKS_DIR)], none),
+        ("design-blocks-dep", vec![("Cargo.toml", CARGO)], pin),
+        (
+            "design-blocks-recipe",
+            vec![(".drover/design.md", "- medium: blocks\n")],
+            none,
+        ),
+    ] {
+        let b = blocks_brief(name, &files, "b");
+        for want in [
+            "- Medium: Blocks. You write only under `docs/design/`;",
+            &format!("- Images: run `blocks check --shot <fixture>` at 1440 and 390 wide.\n- Blocks: this repo uses Blocks, so draw every screen with Blocks' renderer on the pinned swag pack ({pack}"),
+            "no\n  hand-written CSS and no ad hoc tokens.",
+            "listed in the README\n  under `Stand-ins:` and filed in jirathip-dev/blocks, one issue per missing piece",
+            "- Run `blocks check` on the design screens before you hand off and put its result in the README;",
+        ] {
+            assert!(b.contains(want), "{name}: {want}\n{b}");
+        }
+    }
+}
+
+#[test]
+fn a_recipe_or_issue_naming_another_medium_wins_over_blocks_detection() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    for (name, files, body, want) in [
+        (
+            "design-blocks-recipe-wins",
+            vec![(".blocks", BLOCKS_DIR), (".drover/design.md", SWIFT)],
+            "b",
+            "- Medium: SwiftUI. You write only under `apple/design/`;",
+        ),
+        (
+            "design-blocks-issue-wins",
+            vec![(".blocks", BLOCKS_DIR), ("Cargo.toml", CARGO)],
+            "UIKit screens in `ios/design/y/`.",
+            "- Medium: UIKit. You write only under `docs/design/`, `ios/design/y/`;",
+        ),
+    ] {
+        let b = blocks_brief(name, &files, body);
+        assert!(b.contains(want), "{name}: {b}");
+        assert!(
+            !b.contains("- Blocks: this repo uses Blocks") && !b.contains("blocks check --shot"),
+            "{name}: {b}"
+        );
+    }
+}
+
+fn guarded(c: &drover::Ctx, code: i32, new: &[&str]) -> Fake {
+    let w = wt(c, 12);
+    let found: Vec<Value> = new
+        .iter()
+        .map(|rule| {
+            json!({"rule": rule, "file": "docs/design/meter/queue.json", "at": "screen#queue", "line": 3,
+            "message": "a raw colour", "fix": "Use a scheme token."})
+        })
+        .collect();
+    let outcome = json!({"guard": 1, "pass": new.is_empty(), "new": found, "known": []});
+    Fake::default()
+        .reply(&format!("git -C {w} show {HEAD}:.blocks"), BLOCKS_DIR)
+        .reply(
+            "git -C /tmp/does-not-matter/sendmeter show origin/staging:.blocks",
+            BLOCKS_DIR,
+        )
+        .once("sh -c o=$(mktemp)", code, &outcome.to_string())
+}
+
+#[test]
+fn a_blocks_design_hands_off_with_its_blocks_check_and_new_findings_go_back_to_the_lane_once() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (c, sh) = setup("design-blocks-guard", "");
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    let base = fake(&c, HEAD);
+    drive(
+        &c,
+        &Both(
+            Fake::default().reply(
+                "git -C /tmp/does-not-matter/sendmeter show origin/staging:.blocks",
+                BLOCKS_DIR,
+            ),
+            &base,
+        ),
+    );
+    assert_eq!(state(&c, 12), "design");
+    let lane = "sendmeter-design-12";
+    let before = sh.sent(lane).len();
+
+    let r = Both(guarded(&c, 1, &["lint/raw-colour"]), &base);
+    let out = drive(&c, &r);
+    assert!(
+        out.contains("sendmeter #12 design blocks check: 1 new finding(s), sent to"),
+        "{out}"
+    );
+    assert_eq!(state(&c, 12), "design", "no handoff with new findings");
+    assert!(kinds(&c, "design-review").is_empty() && kinds(&c, "needs-decision").is_empty());
+    let told = sh.sent(lane);
+    assert_eq!(told.len(), before + 1, "{told:?}");
+    assert!(
+        told[before].contains("lint/raw-colour docs/design/meter/queue.json:3 screen#queue: a raw colour"),
+        "{told:?}"
+    );
+    assert_eq!(kinds(&c, "ui-check")[0].val("refused"), &json!(true));
+
+    let r = Both(guarded(&c, 1, &["lint/raw-colour"]), &base);
+    drive(&c, &r);
+    assert_eq!(
+        state(&c, 12),
+        "design-review",
+        "the same findings again hand off with them"
+    );
+    assert_eq!(sh.sent(lane).len(), before + 1, "told once");
+    let review = &kinds(&c, "design-review")[0];
+    assert_eq!(review.val("ui_check")["result"], "new");
+    let ask = &kinds(&c, "needs-decision")[0];
+    assert!(
+        ask.str("question").unwrap().starts_with("`blocks check`: new\n\n"),
+        "{ask:?}"
+    );
+}
+
+#[test]
+fn a_clean_blocks_check_hands_off_at_once_and_a_plain_html_design_runs_none() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (c, _sh) = setup("design-blocks-clean", "");
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    let base = fake(&c, HEAD);
+    let r = Both(guarded(&c, 0, &[]), &base);
+    drive(&c, &r);
+    drive(&c, &r);
+    assert_eq!(state(&c, 12), "design-review");
+    assert_eq!(kinds(&c, "design-review")[0].val("ui_check")["result"], "clean");
+    let (c, _sh) = setup("design-html-no-guard", "");
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    let base = fake(&c, HEAD);
+    drive(&c, &base);
+    drive(&c, &base);
+    assert_eq!(state(&c, 12), "design-review");
+    assert!(!base.called("sh -c o=$(mktemp)") && kinds(&c, "ui-check").is_empty());
+    assert!(kinds(&c, "design-review")[0].val("ui_check").is_null());
+}

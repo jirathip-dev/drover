@@ -23,7 +23,7 @@ pub fn scope(ctx: &Ctx, r: &dyn Runner, input: &Value, fleet: &str, n: Option<u6
         .unwrap_or_default();
     let root = top.map_or_else(|_| cwd.to_string(), |t| t.trim().to_string());
     let text = std::fs::read_to_string(crate::repo_path(&Path::new(&root).join(RECIPE))).unwrap_or_default();
-    let allow = Recipe::of(&text, spec.at("body").as_str().unwrap_or_default()).folders;
+    let allow = Recipe::of(&text, spec.at("body").as_str().unwrap_or_default(), &|_| None).folders;
     crate::hook::Design { root, allow }
 }
 
@@ -39,11 +39,36 @@ pub struct Recipe {
     pub sizes: String,
     pub clip: bool,
     pub tools: Vec<String>,
+    pub blocks: Option<Blocks>,
+}
+
+/// A Blocks repo's design: the swag pack pin its manifest names, if any.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Blocks {
+    pub pack: Option<String>,
+}
+
+const MANIFESTS: [&str; 3] = ["Cargo.toml", "package.json", "Package.swift"];
+
+impl Blocks {
+    fn of(read: &dyn Fn(&str) -> Option<String>, named: Option<bool>) -> Option<Blocks> {
+        let manifests: Vec<String> = MANIFESTS.iter().filter_map(|m| read(m)).collect();
+        let dir = Path::new(crate::guard::CONFIG).parent().and_then(Path::to_str);
+        let pinned = manifests.iter().any(|m| m.contains("jirathip-dev/blocks"));
+        let found = || pinned || dir.and_then(read).is_some();
+        let pin = manifests
+            .iter()
+            .flat_map(|m| m.lines())
+            .find(|l| l.contains("jirathip-dev/swag"));
+        named.unwrap_or_else(found).then(|| Blocks {
+            pack: pin.map(|l| l.trim().trim_end_matches(',').to_string()),
+        })
+    }
 }
 
 impl Recipe {
-    /// The issue `body`'s own design path, else the recipe `text`'s `key: value` lines, else HTML at 1440/390.
-    pub fn of(text: &str, body: &str) -> Recipe {
+    /// The issue `body`'s own design path, else the recipe `text`'s `key: value` lines, else Blocks if the repo (`read` a path) uses it, else HTML at 1440/390.
+    pub fn of(text: &str, body: &str, read: &dyn Fn(&str) -> Option<String>) -> Recipe {
         let mut r = Recipe {
             medium: medium(body).into(),
             folders: paths(body),
@@ -51,10 +76,12 @@ impl Recipe {
             sizes: "1440 and 390 wide".into(),
             clip: false,
             tools: vec![],
+            blocks: None,
         };
         if r.folders.len() > 1 {
             return r;
         }
+        let mut named = None;
         for l in text.lines() {
             let Some((k, v)) = l.trim().trim_start_matches(['-', '*', ' ']).split_once(':') else {
                 continue;
@@ -63,7 +90,10 @@ impl Recipe {
             let key = k.trim().trim_matches('*').to_ascii_lowercase();
             match key.as_str() {
                 _ if v.is_empty() => {}
-                "medium" => r.medium = v.into(),
+                "medium" => {
+                    r.medium = v.into();
+                    named = Some(v.eq_ignore_ascii_case("blocks"));
+                }
                 "folder" if !v.starts_with(['/', '~', '$']) && !v.split('/').any(|c| c == "..") => {
                     r.folders = vec![v.trim_end_matches('/').into()];
                 }
@@ -80,13 +110,21 @@ impl Recipe {
                 _ => {}
             }
         }
+        r.blocks = Blocks::of(read, named);
+        if r.blocks.is_some() {
+            r.medium = "Blocks".into();
+            r.render.get_or_insert_with(|| "blocks check --shot <fixture>".into());
+        }
         r
     }
 
     /// The recipe at `rev` of the checkout `dir`, for an issue `body`.
     pub fn at(r: &dyn Runner, dir: &str, rev: &str, body: &str) -> Recipe {
-        let show = |p: &str| ok(r, "git", &["-C", dir, "show", &format!("{rev}:{p}")]).ok();
-        Recipe::of(&crate::repo_read("design.md", show).unwrap_or_default(), body)
+        let show = |p: &str| {
+            let o = ok(r, "git", &["-C", dir, "show", &format!("{rev}:{p}")]).ok();
+            o.filter(|s| !s.is_empty())
+        };
+        Recipe::of(&crate::repo_read("design.md", show).unwrap_or_default(), body, &show)
     }
 }
 
@@ -174,12 +212,13 @@ pub fn handoff(
         return Ok(());
     }
     let pre = pre(&ev, f, n, role).unwrap_or(head);
-    let dirs = if role == "architect" {
-        vec!["docs/architecture".to_string()]
-    } else {
+    let rc = (role != "architect").then(|| {
         let spec = crate::gh::cached_spec(ctx, f, n).unwrap_or_default();
-        Recipe::at(r, wt, head, spec.at("body").as_str().unwrap_or_default()).folders
-    };
+        Recipe::at(r, wt, head, spec.at("body").as_str().unwrap_or_default())
+    });
+    let dirs = rc
+        .as_ref()
+        .map_or_else(|| vec!["docs/architecture".to_string()], |rc| rc.folders.clone());
     let (range, int) = (
         format!("{pre}..{head}"),
         format!("^origin/{}", cfg.fleet(f)?.integration),
@@ -209,7 +248,15 @@ pub fn handoff(
         .filter(png)
         .map(|l| json!({"name": l, "path": Path::new(wt).join(l)}))
         .collect();
-    let d = json!({"sha": head, "pre": pre, "agent": sp.str("agent"), "files": files, "role": role, "adr": adr});
+    let ui = match rc.filter(|rc| rc.blocks.is_some()) {
+        None => None,
+        Some(_) => match crate::guard::run(ctx, cfg, r, (f, n), (&ev, sp), head)? {
+            Ok(u) => Some(u),
+            Err((count, lines)) => return back(r, out, (f, n), sp, (count, &lines)),
+        },
+    };
+    let d = json!({"sha": head, "pre": pre, "agent": sp.str("agent"), "files": files, "role": role, "adr": adr,
+        "ui_check": ui});
     let review = Event::new(ctx.now, f, Some(n), "design-review", d);
     let mark = |e: &&Event| {
         e.kind == "queue"
@@ -231,14 +278,37 @@ pub fn handoff(
     let link = format!("https://github.com/{}/tree/{head}/{dir}/", cfg.fleet(f)?.repo);
     let summary = summary(r, wt, head, &dir);
     let q = summary.as_ref().map_or(q.clone(), |s| format!("{s}\n\n{link}\n\n{q}"));
+    let q = ui.as_ref().map_or(q.clone(), |u| {
+        format!("`blocks check`: {}\n\n{q}", u.at("result").as_str().unwrap_or_default())
+    });
     let d = json!({"question": q, "options": OPTIONS, "recommend": null, "kind": "owner", "design": true, "files": files,
-        "thread": thread, "role": role, "summary": summary, "link": link});
+        "thread": thread, "role": role, "summary": summary, "link": link, "ui_check": ui});
     let ask = Event::new(ctx.now, f, Some(n), "needs-decision", d);
     let once = crate::action::id(f, n, &format!("{role}-ask"), head);
     if !events::ask(&ctx.state, cfg, vec![review, ask], Some(&once))?.is_empty() {
         writeln!(out, "{f} #{n} design-review: {head:.7}")?;
     }
     Ok(())
+}
+
+fn back(
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (f, n): (&str, u64),
+    sp: &Event,
+    (count, lines): (usize, &str),
+) -> Result<()> {
+    let agent = sp.str("agent").unwrap_or_default();
+    let on = crate::hosts::On::of(r, Some(sp));
+    let msg = format!(
+        "`blocks check` found {count} new finding(s) on your design screens; fix them, put the result in the README, push and end your turn:\n{lines}"
+    );
+    let sent = crate::term::awake(&on, agent).and_then(|()| crate::term::prompt(&on, agent, &msg));
+    let how = sent.map_or_else(|e| format!("not sent: {e:#}"), |_| format!("sent to {agent}"));
+    Ok(writeln!(
+        out,
+        "{f} #{n} design blocks check: {count} new finding(s), {how}"
+    )?)
 }
 
 fn folder(name: &str, dirs: &[String]) -> String {

@@ -74,6 +74,38 @@ pub fn turn(
         return Ok(None);
     };
     writeln!(out, "UI check: {why} is in the diff; running `just guard` in {wt}")?;
+    match run(ctx, cfg, r, (fleet, n), (&events, sp), head)? {
+        Ok(d) => {
+            let result = d.at("result").as_str().unwrap_or_default();
+            if let Some(e) = d.at("error").as_str() {
+                writeln!(out, "UI check {result} ({e}), the turn ends")?;
+            } else if d.get("findings").is_some() {
+                writeln!(
+                    out,
+                    "UI check: the same findings as the refused `done`; the turn goes to review with them"
+                )?;
+            }
+            Ok(Some(d))
+        }
+        Err((count, lines)) => crate::gate::refused(
+            "UI_CHECK",
+            format!("{count} new finding(s) from `just guard`; fix them, then `drover turn done`:\n{lines}"),
+        ),
+    }
+}
+
+/// `just guard` in lane `sp`'s worktree at `head`: `Ok` the result to carry, else `Err` the new findings' count and lines (logged `refused`; the same ones again since the spawn are `Ok`).
+pub fn run(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    (fleet, n): (&str, u64),
+    (events, sp): (&[Event], &Event),
+    head: &str,
+) -> Result<std::result::Result<Value, (usize, String)>> {
+    let f = cfg.fleet(fleet)?;
+    let (on, wt) = (On::of(r, Some(sp)), sp.str("worktree").unwrap_or_default());
+    let agent = sp.str("agent").unwrap_or_default();
     let start = crate::clock::instant();
     let args = argv(&["-c", RUN, "sh", wt, &f.integration]);
     let o = on.run_for("sh", &args, "", Duration::from_secs(cfg.limits.guard_secs));
@@ -97,11 +129,10 @@ pub fn turn(
             .take(200)
             .collect();
         let result = if code == 124 { "timeout" } else { "broken" };
-        writeln!(out, "UI check {result} (exit {code}), the turn ends: {tail}")?;
         d.put("result", json!(result));
         d.put("error", json!(format!("exit {code}: {tail}")));
         log(&d)?;
-        return Ok(Some(d));
+        return Ok(Ok(d));
     };
     d.put("known", json!(list("known", &v).len()));
     let new = list("new", &v);
@@ -109,7 +140,7 @@ pub fn turn(
     if new.is_empty() {
         d.put("result", json!("clean"));
         log(&d)?;
-        return Ok(Some(d));
+        return Ok(Ok(d));
     }
     let key = |v: &Value| {
         ["rule", "file", "at"]
@@ -126,21 +157,11 @@ pub fn turn(
     if again {
         d.put("findings", json!(lines));
         log(&d)?;
-        writeln!(
-            out,
-            "UI check: the same findings as the refused `done`; the turn goes to review with them"
-        )?;
-        return Ok(Some(d));
+        return Ok(Ok(d));
     }
     d.put("refused", json!(true));
     log(&d)?;
-    crate::gate::refused(
-        "UI_CHECK",
-        format!(
-            "{} new finding(s) from `just guard`; fix them, then `drover turn done`:\n{lines}",
-            new.len()
-        ),
-    )
+    Ok(Err((new.len(), lines)))
 }
 
 fn findings(new: &[Value]) -> String {

@@ -17,6 +17,11 @@ under `docs/architecture/`: design within it.
   (`medium:`, `folder:`, `render:`, `sizes:`, `clip:`, `tools:` lines); an issue that names its own design path and
   medium overrides it. Without either: static HTML pages on the repo's own design system (its tokens, CSS and
   components), under `docs/design/<slug>/`, at 1440 and 390 wide. Your brief states which applies.
+- A Blocks repo (`.blocks/`, a pinned `blocks` dependency or `medium: blocks` in the recipe, and no other medium
+  named) draws on Blocks: Blocks' renderer on the repo's pinned swag pack, no hand-written CSS or ad hoc tokens.
+  Anything Blocks can't draw yet is a stand-in, visibly marked in the image, listed in the README under `Stand-ins:`
+  and filed in jirathip-dev/blocks, one issue per missing piece, linked there. Run `blocks check` on the design
+  screens before handoff and put its result in the README; drover's own run sends new findings back to you once.
 - A native medium (SwiftUI, a game, 3D) gets preview-only views, scenes and fixtures in that folder, rendered to
   images. Still no product code wiring: no API client, no app logic. You write only under the design folder; the hook
   refuses the rest. Impl later moves approved views into the product and wires them.
