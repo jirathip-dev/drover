@@ -16,7 +16,7 @@ pub fn git() -> String {
 }
 
 /// The oldest shed protocol drover accepts: any shed at or above it passes, whatever its build.
-pub const MIN_PROTOCOL: u32 = 1;
+pub const MIN_PROTOCOL: u32 = 5;
 
 /// The fix a `SHED_VERSION` refusal names: drover never installs shed.
 pub const UPDATE: &str = "update shed (it updates itself from its own releases and hands serve over)";
@@ -121,24 +121,17 @@ pub fn line(r: &dyn Runner, w: &Wire) -> String {
     }
 }
 
-const ACCOUNTS: u32 = 5;
+/// The accounts shed keeps on `w` (`account.ls`).
+pub fn accounts(r: &dyn Runner, w: &Wire) -> Result<Vec<proto::Account>> {
+    let ls = json!(proto::AccountsParams::default());
+    Ok(serde_json::from_value(call(r, w, Method::AccountLs, ls)?)?)
+}
 
-/// Doctor's account rows from `account.ls` on `w`: per agent, its signed-in named accounts or `✗` with the `shed account add` line; one `✗` row for a shed under protocol 5.
+/// Doctor's account rows from `account.ls` on `w`: per agent, its signed-in named accounts or `✗` with the `shed account add` line.
 pub fn account_rows(r: &dyn Runner, w: &Wire, agents: &std::collections::BTreeSet<String>) -> Vec<String> {
-    let ls = (Method::AccountLs, json!(proto::AccountsParams::default()));
-    let got = exchange(r, w, &[ls]).and_then(|t| answer(&t, 1));
-    let list = match got {
-        Ok((h, _)) if h.protocol < ACCOUNTS => {
-            return vec![format!(
-                "✗ account — shed serve is {}, accounts need protocol {ACCOUNTS} → {UPDATE}",
-                side(&h)
-            )]
-        }
-        Ok((_, mut v)) => v.pop().context("shed: connection closed").and_then(|x| x),
-        Err(e) => Err(e),
-    };
-    let all: Vec<proto::Account> = match list.and_then(|v| Ok(serde_json::from_value(v)?)) {
+    let all = match accounts(r, w) {
         Ok(all) => all,
+        Err(e) if format!("{e:#}").starts_with("SHED_VERSION") => return vec![format!("✗ account — {e:#}")],
         Err(e) => return vec![format!("! account — account.ls: {e:#}")],
     };
     let signed = |a: &&proto::Account| {
@@ -337,14 +330,6 @@ pub fn cli(r: &dyn Runner, a: &[&str]) -> Result<Out> {
         o.stderr.trim()
     );
     Ok(o)
-}
-
-/// An agent's installed adapter command from `shed agents --json`: under `installed` since shed#129, else top level.
-pub fn adapter(r: &dyn Runner, id: &str) -> Result<Option<Vec<String>>> {
-    let agents: Value = serde_json::from_str(&cli(r, &["agents", "--json"])?.stdout)?;
-    let a = agents.as_array().into_iter().flatten().find(|a| a["id"] == id);
-    let a = a.map(|a| a.get("installed").unwrap_or(a));
-    Ok(a.and_then(|a| serde_json::from_value(a.get("cmd")?.clone()).ok()))
 }
 
 /// The kept events after `since` (shed keeps the last 1,000), read until the stream is quiet for `quiet`.

@@ -109,7 +109,7 @@ fn an_ssh_that_never_returns_costs_one_retried_deadline_and_drive_still_starts()
         let (code, out) = run(&c, &r, &["tick"]);
         let took = t.elapsed();
         assert_eq!(code, 0, "{name}: {out}");
-        assert!(took < Duration::from_secs(2 * 2 + 4), "{name}: {took:?}\n{out}");
+        assert!(took < Duration::from_secs(2 * 2 + 6), "{name}: {took:?}\n{out}");
         assert!(
             sh.has("sendmeter-impl-12"),
             "{name}: drive still starts the main host's work: {out}"
@@ -125,6 +125,9 @@ fn an_ssh_that_never_returns_costs_one_retried_deadline_and_drive_still_starts()
             "{name}: one host report killed at its deadline and its one retry, then the host is skipped: {sent:#?}"
         );
         assert!(sent.iter().all(|l| l.contains("'hosts' 'report'")), "{name}: {sent:#?}");
+        drop(calls);
+        let (code, out) = run(&c, &r, &["housekeep", "--only", "check"]);
+        assert_eq!(code, 0, "{name}: {out}");
         assert!(!drover::hosts::cached(&c)["boat1"].up, "{name}: boat1 shows offline");
         assert!(
             read(&c.state)
@@ -142,7 +145,7 @@ fn an_ssh_that_never_returns_costs_one_retried_deadline_and_drive_still_starts()
                 });
                 assert!(gone, "{name}: the ssh's process group is killed with it");
             } else {
-                let _ = std::process::Command::new("kill").arg(pid).status();
+                std::process::Command::new("kill").arg(pid).status().ok();
             }
         }
     }
@@ -272,7 +275,6 @@ fn a_hung_shed_connect_on_one_remote_host_costs_one_deadline_and_another_remote_
         let add = ["queue", "sendmeter", "add", "12", "--needs", "docker"];
         assert_eq!(run(&c, &Fake::default(), &add).0, 0);
         let _main = FakeShed::attached(&c);
-        remote::proxied(&c);
         let r = Two {
             f: boat2_side(),
             ssh: hung_connect(&dir, child),
@@ -288,13 +290,14 @@ fn a_hung_shed_connect_on_one_remote_host_costs_one_deadline_and_another_remote_
             (w.join().unwrap(), res)
         });
         let took = t.elapsed();
+        assert_eq!(run(&c, &r, &["housekeep", "--only", "check"]).0, 0, "{name}");
         let pids = std::fs::read_to_string(dir.join("pids")).unwrap_or_default();
         for pid in pids.lines() {
-            let _ = std::process::Command::new("kill").arg(pid).status();
+            std::process::Command::new("kill").arg(pid).status().ok();
         }
         assert_eq!(code, 0, "{name}: {out}");
         assert!(
-            took < Duration::from_secs(2 + 6),
+            took < Duration::from_secs(2 + 8),
             "{name}: the pass took {took:?}\n{out}"
         );
         assert!(

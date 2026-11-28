@@ -99,8 +99,8 @@ pub fn fix_done<'a>(events: &'a [Event], f: &str, n: u64) -> Option<&'a Event> {
 /// A gone impl/fix lane's wait (`lane gone, no push: respawning impl`); drive respawns no more often than this.
 pub const NO_PUSH: &str = ", no push: ";
 /// A lesson lane ended without a push or `done`: drive prompts it once, then closes the issue.
-pub const LESSON_PROMPT: &str = "lesson lane ended without a push: prompting it once";
-pub const LESSON_CLOSE: &str = "lesson lane ended without a push: closing as no repeated class";
+pub const LESSON_PROMPT: &str = "job lane ended without a push: prompting it once";
+pub const LESSON_CLOSE: &str = "job lane ended without a push: closing its issue";
 const RESPAWN_SECS: u64 = 1800;
 const DRAFT: &str = "PR is a draft";
 /// A build lane's typed turn end, as drive acts on it (`turn`): nudged once, prompted to go on, or blocked.
@@ -283,7 +283,7 @@ pub(crate) fn respawns(events: &[Event], fleet: &str, n: u64) -> (usize, u64) {
 
 /// A gone lane's wait (or `respawn` why) that names a resumable exit cause.
 pub fn resumed(why: &str) -> bool {
-    [Cause::Limit, Cause::Crash, Cause::Refused]
+    [Cause::Limit, Cause::Crash]
         .iter()
         .any(|c| why.contains(&format!("({})", c.word())))
 }
@@ -475,7 +475,7 @@ fn waits(
         .verdicts
         .last()
         .is_some_and(|v| v.0.eq_ignore_ascii_case(base) || v.0.eq_ignore_ascii_case(pushed));
-    let done = passed.is_some() && crate::gate::verified(fc, Some(s), pushed, false).is_ok();
+    let done = passed.is_some() && crate::gate::verified(fc, Some(s), pushed).is_ok();
     let mut outcomes = s
         .verdicts
         .iter()
@@ -701,6 +701,7 @@ pub fn scan_where(
     let listed = view.as_ref().map(crate::link::view::View::sessions).unwrap_or_default();
     let busy = |l: &str| agents.iter().any(|a| a.name == l && a.busy());
     let hung = crate::roots::hung_now(events);
+    let starts = crate::starts::line(cfg, events, ctx.now);
     let mine = |st: &crate::events::States| {
         st.values()
             .filter(|s| cfg.fleet.contains_key(&s.fleet) && !s.settled() && keep(s))
@@ -867,7 +868,7 @@ pub fn scan_where(
         let waiting_turn = turn(mine, &s);
         let quiet = |t: &Event| done_working(ctx, cfg, mine, session, t);
         let ended = ended.or(waiting_turn.filter(|t| idle && quiet(t)).map(|_| "done"));
-        if idle && crate::lesson::no_pr(s.build.as_deref()) && settled() {
+        if idle && crate::jobs::empty(cfg, mine, &s.fleet, s.issue).is_some() && settled() {
             let asked = mine
                 .iter()
                 .rfind(|e| e.kind == "lesson-prompted" && e.str("agent") == Some(built.as_str()));
@@ -875,10 +876,7 @@ pub fn scan_where(
             w.what = match asked {
                 None if !gone && !unconfirmed => LESSON_PROMPT.into(),
                 Some(e) if !gone && ctx.now < e.ts + RESPAWN_SECS => {
-                    format!(
-                        "lesson lane prompted {} ago, closing it after 30 min",
-                        age(ctx.now - e.ts)
-                    )
+                    format!("job lane prompted {} ago, closing it after 30 min", age(ctx.now - e.ts))
                 }
                 _ => LESSON_CLOSE.into(),
             };
@@ -970,6 +968,12 @@ pub fn scan_where(
                 Some(p) => format!("{p}{h}"),
                 None => format!("{} · {h}", w.what),
             };
+        }
+        if let Some((_, at)) = spawn
+            .then(|| crate::starts::place(&starts, (&s.fleet, s.issue)))
+            .flatten()
+        {
+            w.what += &format!(" · {at}");
         }
         let pass = w.what.starts_with("PASS · ");
         let at = pass.then(|| gh::cached_at(ctx, &s.fleet, s.issue)).flatten();

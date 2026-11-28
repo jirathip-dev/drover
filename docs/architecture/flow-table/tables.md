@@ -248,7 +248,7 @@ read `lane`, the asking lane; the others read nothing.
 | `asked` | `settle` | tell-orchestrator | orchestrator | `escalate_minutes` | to-owner | |
 | `raising` | `release` | release | drive | `act_minutes` | | |
 
-`asked` hands the orchestrator `drover cap`'s queue-wide view: it files the one raise issue or tells the lane to
+`asked` hands the orchestrator the removed cap view (#1812)'s queue-wide view: it files the one raise issue or tells the lane to
 trim. `release` is `Queued` behind the raise issue and unblocks the asking issue when it merges.
 
 ## Flows `pass`, `slot` and `host`: drive's own machinery

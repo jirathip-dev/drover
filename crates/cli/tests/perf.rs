@@ -1,4 +1,8 @@
 mod common;
+#[path = "perf/fleet.rs"]
+mod fleet;
+#[path = "perf/idle.rs"]
+mod idle;
 #[path = "perf/screens.rs"]
 mod screens;
 use common::*;
@@ -397,7 +401,7 @@ fn big_with(lanes: u64) -> (drover::Ctx, Fake, &'static FakeShed) {
         sh.lane(&agent, "idle", &format!("/wt/{agent}"));
         sh.screen(&agent, "⏺ Working on it\n\n❯ \n");
     }
-    for i in 0..30_000 - log.len() as u64 {
+    for i in 0..30_000 - u64::try_from(log.len()).unwrap() {
         log.push(ev(
             NOW - 5_000 + i / 10,
             1 + i % lanes,
@@ -526,7 +530,8 @@ fn huge_with(total: u64, old: u64) -> (drover::Ctx, Fake) {
     let mut log = vec![];
     let ev = |ts, f: &str, n: Option<u64>, kind, d| serde_json::to_string(&Event::new(ts, f, n, kind, d)).unwrap();
     for i in 0..old {
-        let (f, n, ts) = (FLEETS[(i / 50) as usize % 5], 1_000 + i / 50, NOW - 500_000 + i);
+        let k = usize::try_from(i / 50 % 5).unwrap();
+        let (f, n, ts) = (FLEETS[k], 1_000 + i / 50, NOW - 500_000 + i);
         let agent = format!("{f}-impl-{n}");
         let (kind, d) = match i % 50 {
             0 => (
@@ -604,7 +609,7 @@ fn huge_with(total: u64, old: u64) -> (drover::Ctx, Fake) {
             sh.screen(&agent, "⏺ Working on it\n\n❯ \n");
         }
     }
-    for i in 0..total - log.len() as u64 {
+    for i in 0..total - u64::try_from(log.len()).unwrap() {
         let f = FLEETS[usize::try_from(i).unwrap() % 5];
         let d = json!({"step": "review", "code": "EXIT", "result": "exit 1: boom"});
         log.push(ev(NOW - 5_000 + i / 30, f, Some(1 + i % 40), "driven", d));
@@ -980,7 +985,7 @@ fn idle_serve_on_the_live_log_with_its_trickle_replayed() {
     report(&format!(
         "#971 perf ({n} events, {} replayed over {secs} s): serve {cpu:.0} ms of CPU, {:.2}% average",
         trickle.len(),
-        cpu / (secs as f64 * 10.0)
+        cpu / (f64::from(u32::try_from(secs).unwrap()) * 10.0)
     ));
 }
 
@@ -1026,24 +1031,24 @@ fn a_fast_step_over_50k_worktree_files_walks_none_of_them() {
         }
     }
     let (fast, fast_ms, out) = walked(&c, &r, &["drive"]);
-    let (slow, slow_ms, slow_out) = walked(&c, &r, &["tick"]);
+    let (_, slow_ms, slow_out) = walked(&c, &r, &["housekeep", "--only", "budget"]);
+    let du = std::fs::read_to_string(c.state.with_file_name("worktrees.du")).unwrap();
+    let bytes: u64 = du.split_whitespace().next().unwrap().parse().unwrap();
     report(&format!(
-        "#949 perf (50,000 worktree files): drive {fast_ms} ms, {fast} entries walked · tick {slow_ms} ms, {slow} walked"
+        "#949 perf (50,000 worktree files): drive {fast_ms} ms, {fast} entries walked · housekeep {slow_ms} ms, {bytes} bytes summed"
     ));
     assert_eq!(fast, 0, "drive walked {fast} entries: {out}");
-    assert!(
-        slow >= 50_000,
-        "the tick's budget walked only {slow} entries: {slow_out}"
-    );
+    assert!(bytes >= 50_000, "summed {bytes} of 50,000 one-byte files: {slow_out}");
 }
 
 #[test]
-fn over_budget_at_the_last_slow_pass_a_fast_pass_starts_no_lane() {
+fn over_budget_at_the_last_housekeeping_a_fast_pass_starts_no_lane() {
     let (c, r, _sh) = disk_fixture("perf-held", "0.000001");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "1"]).0, 0);
     let wt = c.worktrees.join("old");
     std::fs::create_dir_all(&wt).unwrap();
     std::fs::write(wt.join("blob"), vec![0u8; 5000]).unwrap();
+    walked(&c, &r, &["housekeep", "--only", "budget"]);
     let (_, _, out) = walked(&c, &r, &["tick"]);
     assert!(
         out.contains("sendmeter #1 start: REFUSED DISK_BUDGET: worktrees"),
@@ -1080,7 +1085,7 @@ fn pass_log(issues: u64, done: u64, prs: u64) -> (drover::Ctx, Fake) {
             log.push(ev(t + 2, n, "merged", json!({"pr": n})));
         }
     }
-    for i in 0..30_000 - log.len() as u64 {
+    for i in 0..30_000 - u64::try_from(log.len()).unwrap() {
         log.push(ev(
             NOW - 5_000 + i / 10,
             1 + i % issues,
@@ -1127,7 +1132,7 @@ fn a_pass_over_30k_events_and_150_done_issues_stays_fast() {
         cal.push((cpu_ms() - t0).round());
         let t0 = cpu_ms();
         assert_eq!(run(&c, &r, &["drive"]).0, 0);
-        t.push((cpu_ms() - t0).round());
+        t.extend((k > 0).then(|| (cpu_ms() - t0).round()));
     }
     t.sort_by(f64::total_cmp);
     cal.sort_by(f64::total_cmp);
@@ -1235,7 +1240,9 @@ fn fleets5() -> (drover::Ctx, Boats) {
             )
         })
         .collect();
-    let lanes: Vec<(String, u64)> = (1..=40).map(|n| (FLEETS[(n % 5) as usize].into(), n)).collect();
+    let lanes: Vec<(String, u64)> = (1..=40)
+        .map(|n| (FLEETS[usize::try_from(n % 5).unwrap()].into(), n))
+        .collect();
     let (c, r) = boats_in(false, &more, &lanes);
     r.strict.store(false, Relaxed);
     (c, r)
@@ -1273,7 +1280,7 @@ fn boats_in(queued: bool, fleets: &str, lanes: &[(String, u64)]) -> (drover::Ctx
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     std::fs::write(c.state.parent().unwrap().join("hosts.json"), seen.to_string()).unwrap();
     for (fleet, n) in lanes {
-        let (b, sh) = sheds[(n % 4) as usize];
+        let (b, sh) = sheds[usize::try_from(n % 4).unwrap()];
         let wt = format!("/home/me/.herdr/worktrees/{fleet}/issue-{n}");
         let agent = format!("{fleet}-impl-{n}");
         let d = json!({"role": "impl", "agent": agent, "harness": "claude", "pane": agent, "runtime": "shed",

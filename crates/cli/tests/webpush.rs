@@ -26,7 +26,7 @@ fn d(s: &str) -> Vec<u8> {
 }
 
 fn decrypt(body: &[u8], ua: &SecretKey, auth: &[u8]) -> Option<Vec<u8>> {
-    let (salt, idlen) = (&body[..16], body[20] as usize);
+    let (salt, idlen) = (&body[..16], usize::from(body[20]));
     let as_pub = PublicKey::from_sec1_bytes(&body[21..21 + idlen]).ok()?;
     let shared = p256::ecdh::diffie_hellman(ua.to_nonzero_scalar(), as_pub.as_affine());
     let ua_pub = webpush::public(ua);
@@ -161,7 +161,7 @@ fn parity_8_subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
         "unpaired cannot remove"
     );
     assert!(post(&s, "/push/unsubscribe", &body, &cookie).starts_with("HTTP/1.1 303"));
-    assert_eq!(webpush::load(&c.state), [] as [drover::webpush::Sub; 0]);
+    assert_eq!(webpush::load(&c.state), <[drover::webpush::Sub; 0]>::default());
 }
 
 fn fake_curl(dir: &Path) -> std::sync::MutexGuard<'static, ()> {

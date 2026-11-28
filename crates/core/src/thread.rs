@@ -158,13 +158,13 @@ pub fn stamp() -> Option<String> {
     crate::config::env("DROVER_THREAD").filter(|t| on && !t.is_empty())
 }
 
-/// Every row the log makes, oldest first, each with the event it is about (an ask's, a card's); `push` only when `pushes`.
-pub fn rows(events: &[Event], pushes: bool) -> Vec<(&Event, Row)> {
+/// Every row the log makes, oldest first, each with the event it is about (an ask's, a card's).
+pub fn rows(events: &[Event]) -> Vec<(&Event, Row)> {
     let mut reg = Registry::default();
     let mut out = vec![];
     for e in events {
         reg.add(e);
-        if let Some(r) = row(events, &reg, e, pushes) {
+        if let Some(r) = row(events, &reg, e) {
             out.push(r);
         }
     }
@@ -174,7 +174,7 @@ pub fn rows(events: &[Event], pushes: bool) -> Vec<(&Event, Row)> {
 /// Every row whose key is still open, its newest row, with no `prompt` and no `push`.
 pub fn open(events: &[Event]) -> Vec<(&Event, Row)> {
     let mut last = BTreeMap::new();
-    for (i, (s, r)) in rows(events, false).into_iter().enumerate() {
+    for (i, (s, r)) in rows(events).into_iter().enumerate() {
         last.insert(r.key.clone(), (i, s, r));
     }
     let mut v: Vec<_> = last.into_values().filter(|r| r.2.open).collect();
@@ -196,7 +196,7 @@ fn card_kind(kind: &str) -> RowKind {
     }
 }
 
-fn row<'a>(events: &'a [Event], reg: &Registry, e: &'a Event, pushes: bool) -> Option<(&'a Event, Row)> {
+fn row<'a>(events: &'a [Event], reg: &Registry, e: &'a Event) -> Option<(&'a Event, Row)> {
     let s = |k: &str| e.str(k).unwrap_or_default().to_string();
     let thread = |id: &str| Target::Thread { id: id.into() };
     let home = e.str("thread").map_or_else(|| reg.home(&e.fleet, e.issue), thread);
@@ -251,11 +251,12 @@ fn row<'a>(events: &'a [Event], reg: &Registry, e: &'a Event, pushes: bool) -> O
             RowKind::System
         }
         ("thread-msg", Some(f)) if f != "orchestrator" && !crate::orchestrator::is_id(f) => {
-            prompt = Some(s("text"));
+            prompt = (e.str("via") != Some("client")).then(|| s("text"));
             RowKind::Said
         }
         _ if e.kind != "thread-msg" && e.is_push() => {
-            to = if e.issue.is_some() || e.data.contains_key("thread") {
+            let stuck = e.kind == "needs-human" && e.str("code") == Some("STUCK");
+            to = if !stuck && (e.issue.is_some() || e.data.contains_key("thread")) {
                 to
             } else {
                 Target::Owner
@@ -286,9 +287,9 @@ fn row<'a>(events: &'a [Event], reg: &Registry, e: &'a Event, pushes: bool) -> O
         "needs-decision" => s("kind") != "routine" && e.str("routed").is_none(),
         "decision" => s("by") == "default",
         "ask-owner" | "run-card" | "config-propose" | "secret-request" => true,
-        _ => e.is_push(),
+        _ => e.is_push() && e.str("via") != Some("client"),
     };
-    let push = (pushes && rings).then(|| Push {
+    let push = rings.then(|| Push {
         title: e.issue.map_or(e.fleet.clone(), |n| format!("{} #{n}", e.fleet)),
         body: text.clone(),
         tag: key.clone(),

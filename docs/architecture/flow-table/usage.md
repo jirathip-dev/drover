@@ -43,7 +43,7 @@ herdsman #1588  fix(2)   lane done · turn none · pr open        build/lane-end
                          → drive: respawn impl (resume)          due in 4m, then orchestrator t212
 herdsman #1612  review(1) verdict written · host up              review/record     try 1/3
                          → drive: record the verdict             due in 9m
-synergy  #3153  queued   behind #3747 (serial db 1/1)            queued/start      queued
+acme     #3153  queued   behind #3747 (serial db 1/1)            queued/start      queued
                          → drive: start when #3747 merges
 ```
 

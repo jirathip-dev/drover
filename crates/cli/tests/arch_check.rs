@@ -869,3 +869,19 @@ fn generate_gets_the_gate_check_limit_not_the_60s_default() {
     assert_eq!(code, 1, "{out}");
     assert!(out.contains(&format!("`takes {}` exited 124", gate + 1)), "{out}");
 }
+
+#[test]
+fn drovers_own_docs_name_only_real_commands_and_flags() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let d = tmpdir("docs-cli");
+    let config = d.join("arch.toml");
+    let skip = r#"skip = [".drover/**", "roles/usage-tail.md", "scripts/test-shards.txt"]"#;
+    std::fs::write(
+        &config,
+        format!("[docs]\npaths = [\"docs/**/*.md\", \"README.md\"]\ncli = true\n{skip}\n"),
+    )
+    .unwrap();
+    let (code, out) = arch(&root, &["--config", config.to_str().unwrap()]);
+    std::fs::remove_dir_all(&d).ok();
+    assert_eq!(code, 0, "{out}");
+}

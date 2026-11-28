@@ -411,7 +411,7 @@ pub struct Server<'a> {
     timing: Mutex<slo::Timing>,
     phone: Mutex<slo::Timing>,
     rss: std::sync::atomic::AtomicU64,
-    hosts_read: Mutex<(usize, Option<Vec<String>>)>,
+    hosts_read: Mutex<usize>,
     streams: Mutex<BTreeMap<String, usize>>,
     hub: hub::Hub,
     tails: tails::Tails,
@@ -733,8 +733,8 @@ fn wait_of(l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> Option<crate::
 
 fn herd_host(h: Host, lim: &Limits) -> HerdHost {
     HerdHost {
-        load: h.load_per_cpu,
-        limit: lim.load_per_cpu,
+        load: h.cpu_idle.map(|i| 100.0 - i),
+        limit: 100.0 - lim.min_cpu_idle,
         gate: host::admit(&h, lim).err(),
         pressure: h.pressure,
         swapouts: h.swapout,
@@ -1420,7 +1420,7 @@ impl<'a> Server<'a> {
                 &self.r,
                 &mut out,
                 Some(&fleet),
-                (None, Some(agent), false, false),
+                (None, Some(agent), false, false, false),
                 yes,
             )?),
             "close" => crate::check::close(ctx, &cfg, &self.r, &mut out, agent, None)?,
@@ -1618,7 +1618,7 @@ impl<'a> Server<'a> {
         [
             ("needs", json!(self.needs_tab(ctx, paired)).to_string()),
             ("lanes", json!(self.lanes_tab(ctx, paired)).to_string()),
-            ("chat", json!(self.chat_tab(ctx, rw)).to_string()),
+            ("chat", json!(self.chat_tab(ctx, rw, &BTreeMap::new())).to_string()),
         ]
     }
 
@@ -1788,7 +1788,7 @@ impl<'a> Server<'a> {
                 pr: pr_data(ctx, fc, f, n, None),
                 repo: fc.map(|c| c.repo.clone()),
                 mergeable: m.to_lowercase(),
-                merge: fc.is_some_and(|c| gate(c, &pr, Some(s), true).is_ok()) && m == "MERGEABLE",
+                merge: fc.is_some_and(|c| gate(c, &pr, Some(s)).is_ok()) && m == "MERGEABLE",
                 shots: crate::verify::served(events, (f, n), None)
                     .into_iter()
                     .map(|x| x.0)
@@ -2102,12 +2102,6 @@ impl<'a> Server<'a> {
                 card.notes
                     .push(format!("landing paused: {} red since {at}", fc.integration));
             }
-            let cap = gh::cached(ctx, "cap", f, 0).unwrap_or_default();
-            let left = cap.at("cap").as_i64().zip(cap.at("lines").as_i64()).map(|(c, n)| c - n);
-            if let Some(l) = left.filter(|l| *l < cap.at("warn").as_i64().unwrap_or(500)) {
-                card.notes
-                    .push(format!("cap-near: {l} lines of headroom on {}", fc.integration));
-            }
             d.fleets.push(card);
         }
         d.fleets.sort_by_key(|c| c.need == 0);
@@ -2212,7 +2206,7 @@ impl<'a> Server<'a> {
         let h = forced.map_or_else(
             || self.sample(),
             |(k, p)| Host {
-                load_per_cpu: Some(k * lim.load_per_cpu),
+                cpu_idle: Some(100.0 - k * (100.0 - lim.min_cpu_idle)),
                 pressure: Some(p.into()),
                 swapout: Some(0.0),
                 ..Host::default()
@@ -2498,28 +2492,24 @@ impl<'a> Server<'a> {
     }
 
     fn cards(&self, ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], hs: &Host) -> Vec<HostCard> {
-        let (lim, seen, hist, now) = (
-            &cfg.limits,
-            crate::hosts::cached(ctx),
-            crate::hosts::history(ctx),
-            ctx.now,
-        );
+        let (seen, hist, now) = (crate::hosts::cached(ctx), crate::hosts::history(ctx), ctx.now);
         let mut out = vec![];
         for (name, h) in crate::hosts::cards(cfg, r) {
             let (main, on) = (h.is_none_or(|h| h.machine.is_none()), h.is_none_or(|h| h.enabled));
+            let lim = &cfg.limits_on(h.and_then(|h| h.machine.as_deref()));
             let mut mem = vec![];
             let mut s = seen.get(&name).cloned().unwrap_or_default();
             let word = |p: Option<u8>| p.and_then(|p| ["normal", "warn", "critical"].get(usize::from(p)).copied());
             let mut gate = Host {
                 pressure: word(s.pressure).map(String::from),
                 swapout: s.swap,
-                load_per_cpu: s.load,
+                cpu_idle: s.idle,
                 free_mem_gb: s.mem,
                 ..Host::default()
             };
             if main {
                 gate = hs.clone();
-                (s.up, s.seen, s.load, s.mem, s.swap) = (true, now, hs.load_per_cpu, hs.free_mem_gb, hs.swapout);
+                (s.up, s.seen, s.idle, s.mem, s.swap) = (true, now, hs.cpu_idle, hs.free_mem_gb, hs.swapout);
                 ((s.disk, s.disk_total), s.mem_total) = (host::df(r).unzip(), hs.mem_total_gb);
                 let all = crate::session::live_on(r).unwrap_or_default();
                 s.top = host::top(r, &all);
@@ -2548,9 +2538,6 @@ impl<'a> Server<'a> {
             }
             let lanes = crate::hosts::lanes_on(cfg, events, &name);
             let (mut t, mut words) = crate::hosts::shown(on, &s, lanes.len(), now);
-            let cloud = crate::cloud::card(ctx, cfg, events, (&name, lanes.len()));
-            let title = cloud.as_ref().map(|c| c[0].clone()).filter(|w| !w.is_empty());
-            (t, words) = title.map_or((t, words), |w| ("m", w));
             let held = t == "g" && host::admit(&gate, lim).is_err();
             if t == "g" {
                 (t, words) = match host::admit(&gate, lim) {
@@ -2615,11 +2602,11 @@ impl<'a> Server<'a> {
             };
             let of = |l: f64| format!("/ {l}");
             let (lt, lv) = val(
-                s.load,
-                s.load,
-                lim.load_per_cpu,
-                None,
-                (2, "", "", of(lim.load_per_cpu), vec![]),
+                s.idle,
+                s.idle,
+                lim.min_cpu_idle,
+                Some((100.0 - s.idle.unwrap_or(100.0), 100.0)),
+                (0, "idle ", "%", String::new(), vec![]),
             );
             let avg = gate.swap_median.map(|m| format!("· {m:.0} avg"));
             let sw = (0, "", "", of(lim.swapout_rate), avg.into_iter().collect());
@@ -2659,7 +2646,7 @@ impl<'a> Server<'a> {
                 ..Cell::default()
             };
             let mut rows = vec![
-                row("load/cpu", "load", grey(lt), lv, Some(lim.load_per_cpu)),
+                row("cpu", "idle", grey(lt), lv, Some(lim.min_cpu_idle)),
                 row("swap-out", "swap", grey(st), sv, Some(lim.swapout_rate)),
                 row("memory", "mem", grey(mt), mv, Some(lim.min_free_mem_gb)),
             ];
@@ -2678,7 +2665,6 @@ impl<'a> Server<'a> {
                     at.into_iter().collect(),
                 ));
             }
-            rows.extend(cloud.map(|c| plain("cloud", &c[1], None, c[2].clone(), vec![])));
             let ls = if lanes.is_empty() {
                 "none".into()
             } else {
@@ -2692,7 +2678,7 @@ impl<'a> Server<'a> {
             let worst = [lt, st, mt, dt].map(rank).into_iter().max().unwrap_or(0);
             let dot = grey("gar".get(worst..=worst).unwrap_or("g"));
             let why: Vec<String> = [
-                (lt, "load", "limit"),
+                (lt, "cpu idle", "floor"),
                 (st, "swap-out", "limit"),
                 (mt, "memory", "floor"),
                 (dt, "disk", "floor"),
@@ -2749,7 +2735,7 @@ LOGIN_NEEDED|a|held|{why}
 CAP|a|waiting|{why} · starts when a lane finishes
 NO_HOST HOST_OFFLINE|a|waiting|{why}
 SERIAL_BUSY|a|waiting|{slots} full ({busy} must merge first)
-ROUND_LIMIT UPDATE_LIMIT|r|needs you|#{n}: {why} · your call on its card
+STUCK|r|needs you|#{n}: {why} · your call on its card
 WORKTREE_DIRTY|r|needs you|#{n}: {why} · `drover kill` it, or spawn `--supersede`
 CI_NOT_GREEN|a|waiting|#{n}'s CI is not green yet
 NO_VERDICT STALE_VERDICT VERDICT_FAIL|a|waiting|#{n} has no PASS for its head · a new round
@@ -3233,10 +3219,6 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
     let path = ctx.config.display().to_string();
     let home = crate::config::home().display().to_string();
     let l = &cfg.limits;
-    let line_cap = std::fs::read_to_string(fc.local_path().join("ci/cap.toml"))
-        .ok()
-        .and_then(|t| t.parse::<toml::Table>().ok())
-        .and_then(|t| t.get("fleet")?.get(fleet)?.get("line_cap")?.as_integer());
     let notify = |n: &[crate::config::Notify]| {
         let on = |n: &crate::config::Notify| {
             if n.on.is_empty() {
@@ -3256,10 +3238,7 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
         model: r.model.clone(),
         effort: r.effort.clone(),
         efforts: strs(crate::providers::get(&r.harness).efforts()),
-        model_default: crate::providers::get(&r.harness)
-            .model_default()
-            .unwrap_or(&r.harness)
-            .into(),
+        model_default: r.harness.clone(),
         effort_default: l.effort.clone().unwrap_or_else(|| "none".into()),
         accounts: vec![],
         mcp: r.mcp.clone(),
@@ -3291,13 +3270,10 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
         env: fc.env.keys().cloned().collect(),
         node_modules: fc.clone_node_modules,
         builtin: fc.flow().builtin,
-        review_rounds: l.review_rounds,
-        update_rounds: l.update_rounds,
         stall_minutes: l.stall_minutes,
         ask_minutes: l.ask_default_minutes,
         max_impl: fc.max_impl,
         max_rev: fc.max_rev,
-        line_cap,
         serial: (fc.serial.iter())
             .map(|g| format!("🔒{} {} at a time: {}", g.name, g.max, g.paths.join(", ")))
             .collect(),
@@ -3457,7 +3433,7 @@ fn pipe(fleet: &str, fc: &crate::config::Fleet, st: &States) -> serde_json::Valu
                 format!("{} · {m} · effort {}", r.harness, r.effort.as_deref().unwrap_or("none"))
             });
             let here = count(&|x| stage_at(fc, x).is_some_and(|a| a.0 == s.name));
-            json!({"name": s.name, "kind": s.kind, "role": s.role, "run": run, "next": s.next, "rounds": s.rounds,
+            json!({"name": s.name, "kind": s.kind, "role": s.role, "run": run, "next": s.next,
                 "line": s.line, "here": here, "loop": p.loop_of(&s.name)})
         })
         .collect();

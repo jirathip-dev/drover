@@ -119,7 +119,7 @@ export type LaneNow = { title: string, w?: string | null, n?: string | null, t?:
 export type ShedRow = { host: string, error?: string | null, name?: string | null, runtime?: string | null, labels?: { [key in string]: string } | null, state?: string | null, last?: string | null, age?: string | null, };
 
 /**
- * API v1's `chat`, the [chat] tab: a card per repo (`all` first) with its threads, then every thread's view (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
+ * API v1's `chat`, the [chat] tab: a card per repo (`all` first) with its open threads' rows (`?archived=1`: the archived ones too), and `?thread=<t>`'s view alone (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
  */
 export type ChatTab = { now: number, rw: boolean, error?: string | null, repos: Array<ChatRepo>, threads: Array<ThreadView>, };
 
@@ -439,7 +439,7 @@ export type Backlog = { issues: { [key in string]: BacklogIssue }, ago: string, 
 /**
  * A fleet's [config] sheet: the config file (`path`, `file`), GENERAL, the Pipeline group's data (`pipe`), LIMITS, ROLES (with `rw`, pickers from `models`, `harnesses` and their efforts), the Conductor, ALERTS.
  */
-export type ConfigSheet = { path: string, file: string, repo: string, local: string, integration: string, effort?: string | null, color_set: boolean, env: Array<string>, node_modules: boolean, builtin: boolean, review_rounds: number, update_rounds: number, stall_minutes: number, ask_minutes: number, max_impl?: number | null, max_rev?: number | null, line_cap?: number | null, serial: Array<string>, deny: Array<string>, required: Array<string>, merge_label?: string | null, notify: Array<string>, global: Array<string>, pipe: JsonValue, models: Array<string>, harnesses: Array<Harness>, roles: Array<RoleRow>, conductor?: Conductor | null, };
+export type ConfigSheet = { path: string, file: string, repo: string, local: string, integration: string, effort?: string | null, color_set: boolean, env: Array<string>, node_modules: boolean, builtin: boolean, stall_minutes: number, ask_minutes: number, max_impl?: number | null, max_rev?: number | null, serial: Array<string>, deny: Array<string>, required: Array<string>, merge_label?: string | null, notify: Array<string>, global: Array<string>, pipe: JsonValue, models: Array<string>, harnesses: Array<Harness>, roles: Array<RoleRow>, conductor?: Conductor | null, };
 
 export type Harness = { name: string, efforts: Array<string>, };
 
@@ -549,6 +549,50 @@ guarded: boolean, why: string, };
 export type AttachEnv = { DROVER_LANE: string, DROVER_THREAD: string, DROVER_PORT: string, };
 
 /**
+ * `POST /api/v1/thread/<id>/said`: one owner line of an attached chat, copied for `answer --typed`.
+ */
+export type Said = { 
+/**
+ * The client's item id: posting it twice logs it once.
+ */
+id: string, ts: number, 
+/**
+ * `owner`; the agent's own lines stay in the client.
+ */
+from: string, text: string, };
+
+/**
+ * `GET /api/v1/manifest`: what a client needs to attach a plugin, with no path of its own.
+ */
+export type Manifest = { name: string, version: string, 
+/**
+ * The base URL the client calls; every path below is relative to it.
+ */
+api: string, 
+/**
+ * The places: header strips, the cards place, the menu row, each with its screen path.
+ */
+screens: Array<Place>, 
+/**
+ * Every action name `POST /action` takes, and which of them are destructive.
+ */
+actions: Array<string>, destructive: Array<string>, 
+/**
+ * Where a client reads profiles, and attaches, follows and writes a chat.
+ */
+threads: Threads, };
+
+/**
+ * One place a client draws: `type` header-strip, chat-cards or menu-row.
+ */
+export type Place = { type: string, id?: string | null, persona?: string | null, label?: string | null, subtitle?: string | null, screen?: string | null, };
+
+/**
+ * The manifest's chat paths; `<id>` stands for a thread id.
+ */
+export type Threads = { profiles: string, started: string, attach: string, detach: string, rows: string, stream: string, thread: string, said: string, };
+
+/**
  * `GET /api/v1/config`: fleet.toml as cooee's config screens read it.
  */
 export type ConfigView = { 
@@ -603,17 +647,9 @@ export type IssueState = { fleet: string, issue: number, state: string, lane?: s
  */
 effort?: string | null, rounds: number, 
 /**
- * Extra rounds the owner allowed (`round-extended`); the latest grants the round after any stage's.
- */
-extra: number, granted: number, 
-/**
  * Passed `--update` rounds, apart from `rounds`; `updating` while one is open (state `fix(n)+uk`).
  */
-updates: number, updating: boolean, 
-/**
- * Update rounds the owner allowed past `update_rounds` (`round-extended` on an `UPDATE_LIMIT` card).
- */
-update_extra: number, last_ts: number, last_event: string, 
+updates: number, updating: boolean, last_ts: number, last_event: string, 
 /**
  * Latest agent per role (impl, rev).
  */
@@ -650,9 +686,9 @@ lane: string,
 who: string, what: string, since: number, next_cmd?: string | null, };
 
 /**
- * What the last look at a host saw (`<state dir>/hosts.json`): detected tags and `$HOME` (probed hourly), reachability, load/cpu, free memory and disk in GB.
+ * What the last look at a host saw (`<state dir>/hosts.json`): detected tags and `$HOME` (probed hourly), reachability, CPU idle %, free memory and disk in GB.
  */
-export type HostSeen = { tags: Array<string>, home: string, probed: number, seen: number, up: boolean, load?: number | null, mem?: number | null, disk?: number | null, 
+export type HostSeen = { tags: Array<string>, home: string, probed: number, seen: number, up: boolean, idle?: number | null, mem?: number | null, disk?: number | null, 
 /**
  * A remote host's failed checks from `health` (`✗` keeps lanes off it, `!` warns), with the probe.
  */
@@ -666,14 +702,6 @@ pressure?: number | null, swap?: number | null, top: Array<string>,
  */
 mem_total?: number | null, disk_total?: number | null, 
 /**
- * When it last had a live agent (a cloud host's idle stop).
- */
-busy: number, 
-/**
- * A cloud host's gh token, as its card says it.
- */
-github: string, 
-/**
  * Its set workspace roots.
  */
 roots: Array<HostRoot>, };
@@ -686,7 +714,7 @@ export type HostRoot = { path: string, state: string, free_gb?: number | null, }
 /**
  * One row a minute per host in `<state dir>/host-history.jsonl`, written by the fast step; 24 h kept.
  */
-export type HostRow = { ts: number, host: string, load_cpu?: number | null, pressure?: number | null, swap_out?: number | null, mem_free_gb?: number | null, disk_free_gb?: number | null, lanes: number, 
+export type HostRow = { ts: number, host: string, cpu_idle?: number | null, pressure?: number | null, swap_out?: number | null, mem_free_gb?: number | null, disk_free_gb?: number | null, lanes: number, 
 /**
  * MB per `host::groups` group, only while `/live?tab=host` was seen in the last 2 min (else no `ps` walk).
  */

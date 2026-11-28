@@ -1,3 +1,5 @@
+#[path = "drive/ci_flaky.rs"]
+mod ci_flaky;
 mod common;
 #[path = "drive/done_lanes.rs"]
 mod done_lanes;
@@ -7,6 +9,8 @@ mod no_baseline;
 mod remote_unlisted;
 #[path = "drive/rev_unlisted.rs"]
 mod rev_unlisted;
+#[path = "drive/stale_view.rs"]
+mod stale_view;
 #[path = "drive/undriven.rs"]
 mod undriven;
 #[path = "drive/update_limit.rs"]
@@ -155,7 +159,7 @@ fn start_spawns_the_next_queued_issue() {
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["start"], "{out}");
     assert!(out.starts_with("sendmeter #12 start: "), "{out}");
-    assert_ne!(started("sendmeter-impl-12"), [] as [std::string::String; 0]);
+    assert_ne!(started("sendmeter-impl-12"), <[std::string::String; 0]>::default());
     assert_eq!(state(&c), "impl");
     let wt = c.worktrees.join("sendmeter/issue-12");
     idle(&c, &fake(&[("sendmeter-impl-12", "working", &wt.to_string_lossy())]));
@@ -168,7 +172,11 @@ fn review_spawns_rev_at_the_pushed_head() {
     let head = sha("abc");
     done_at(&c, 11, &head);
     let r = fake(&[("sendmeter-impl-12", "idle", &wt.to_string_lossy())])
-        .once("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", 1, "")
+        .once(
+            "git -C /tmp/does-not-matter/sendmeter rev-parse --verify --quiet rev-12-r1",
+            1,
+            "",
+        )
         .reply("gh pr view issue-12", &pr(&head, "pending"))
         .reply(&format!("git -C {} log", wt.display()), &format!("{head} 20"))
         .reply("git -C", "");
@@ -180,7 +188,7 @@ fn review_spawns_rev_at_the_pushed_head() {
         rev.display()
     );
     assert!(r.called(&add), "{:?}", r.calls.borrow());
-    assert_ne!(started("sendmeter-rev-12-r1"), [] as [std::string::String; 0]);
+    assert_ne!(started("sendmeter-rev-12-r1"), <[std::string::String; 0]>::default());
     assert_eq!(state(&c), "review(1)");
     let r = fake(&[
         ("sendmeter-impl-12", "idle", &wt.to_string_lossy()),
@@ -348,23 +356,23 @@ fn a_fail_starts_a_fix_round_with_the_findings_verbatim() {
 }
 
 #[test]
-fn the_third_fail_stops_at_needs_human_with_the_findings() {
+fn the_same_blocker_in_a_third_fail_stops_at_a_stuck_card_with_the_findings() {
     let c = setup("drive-limit");
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     ev(
         &c,
         11,
         "verdict",
-        json!({"verdict": "FAIL", "sha": sha("1"), "body": "FAIL"}),
+        json!({"verdict": "FAIL", "sha": sha("1"), "stage": "rev", "body": STILL}),
     );
     ev(
         &c,
         12,
         "verdict",
-        json!({"verdict": "FAIL", "sha": sha("2"), "body": "FAIL"}),
+        json!({"verdict": "FAIL", "sha": sha("2"), "stage": "rev", "body": STILL}),
     );
     let rev = lane(&c, 20, "rev", "sendmeter-rev-12-r3", "rev-12-r3");
-    std::fs::write(rev.join("verdict.md"), "FAIL\nsrc/y.rs:9 still wrong\n").unwrap();
+    std::fs::write(rev.join("verdict.md"), STILL).unwrap();
     let head = sha("3");
     let r = fake(NONE)
         .reply("gh pr view issue-12", &pr(&head, "green"))
@@ -379,51 +387,13 @@ fn the_third_fail_stops_at_needs_human_with_the_findings() {
     assert_eq!(state(&c), "needs-human");
     let all = read(&c.state).unwrap();
     let nh = all.iter().find(|e| e.kind == "needs-human").unwrap();
-    assert!(nh.str("findings").unwrap().contains("src/y.rs:9 still wrong"));
+    assert!(nh.str("findings").unwrap().contains("src/y.rs:9: still wrong"));
     idle(&c, &r);
-    assert!(started("").is_empty(), "no fix lane after the limit");
+    assert_eq!(nh.str("code"), Some("STUCK"));
+    assert!(started("").is_empty(), "no fix lane once stuck");
 }
 
-#[test]
-fn red_ci_after_pass_is_a_fail_with_the_log_tail() {
-    let c = setup("drive-red");
-    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
-    let head = sha("abc");
-    ev(
-        &c,
-        30,
-        "verdict",
-        json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
-    );
-    let r = fake(NONE)
-        .reply("gh pr view issue-12", &pr(&head, "red"))
-        .reply(
-            "gh run view 777 -R jirathip-dev/sendmeter --log-failed",
-            "test x ... FAILED\nGH_TOKEN=ghp_abcdef123456\nerror: 1 test failed\n",
-        )
-        .reply(
-            "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
-            &format!("{head}\n"),
-        )
-        .reply("git -C", "");
-    let (out, steps) = drive(&c, &r);
-    assert_eq!(steps, ["ci-red", "fix"], "{out}");
-    let all = read(&c.state).unwrap();
-    let v = all.iter().rev().find(|e| e.kind == "verdict").unwrap();
-    assert_eq!(v.str("verdict"), Some("FAIL"));
-    assert!(
-        v.str("body").unwrap().contains("error: 1 test failed"),
-        "{:?}",
-        v.str("body")
-    );
-    assert!(
-        !v.str("body").unwrap().contains("ghp_abcdef"),
-        "the log tail is masked: {:?}",
-        v.str("body")
-    );
-    let st = &fold(&all)[&("sendmeter".to_string(), 12)];
-    assert_eq!((st.state.as_str(), st.rounds), ("fix(1)", 1), "same head: no new round");
-}
+const STILL: &str = "FAIL\n- blocking [ac] src/y.rs:9: still wrong\n  Proof: spec\n  > AC 1\n  src/y.rs:9\n";
 
 #[test]
 fn clean_reclaims_merged_lanes() {
@@ -434,11 +404,14 @@ fn clean_reclaims_merged_lanes() {
         .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
         .reply("git -C", "");
     let (out, steps) = drive(&c, &r);
-    assert_eq!(steps, ["clean"], "{out}");
+    assert!(steps.is_empty(), "a drive pass cleans nothing (#1805): {out}");
     let rm = format!(
         "git -C /tmp/does-not-matter/sendmeter worktree remove --force {}",
         wt.display()
     );
+    assert!(!r.called(&rm), "{:?}", r.calls.borrow());
+    let (code, out) = run(&c, &r, &["housekeep", "--only", "clean"]);
+    assert_eq!(code, 0, "{out}");
     assert!(r.called(&rm), "{:?}", r.calls.borrow());
     std::fs::remove_dir_all(&wt).unwrap();
     idle(&c, &r);
@@ -463,11 +436,16 @@ fn idle_lane(name: &str, merged: bool, status: &str) -> (drover::Ctx, PathBuf, i
     (c, wt, r)
 }
 
-struct Stamped(Fake, std::sync::Mutex<Vec<(String, usize)>>);
+struct Stamped(
+    Fake,
+    std::sync::Mutex<Vec<(String, usize)>>,
+    std::sync::Arc<std::sync::Mutex<common::fake_shed::State>>,
+);
 impl drover::runner::Runner for Stamped {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         let line = format!("{prog} {}", args.join(" "));
-        self.1.lock().unwrap().push((line, sh().methods().len()));
+        let seen = self.2.lock().unwrap().seen.len();
+        self.1.lock().unwrap().push((line, seen));
         self.0.run(prog, args)
     }
     fn sleep(&self, secs: u64) {
@@ -492,15 +470,15 @@ fn at(c: &drover::Ctx, s: u64) -> drover::Ctx {
 fn a_merged_issues_idle_lane_pane_closes_after_the_limit_with_its_work_on_wip() {
     let (c, wt, r) = idle_lane("drive-merged-idle", true, "idle");
     let r0 = r(0);
-    let (code, out) = run(&c, &r0, &["drive"]);
+    let (code, out) = run(&c, &r0, &["housekeep", "--only", "clean"]);
     assert_eq!(code, 0, "{out}");
     assert!(
         sh().all("kill").is_empty(),
         "idle under idle_merged_minutes (15): {out}"
     );
     assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "lane-closed"));
-    let r1 = Stamped(r(900), std::sync::Mutex::default());
-    let (code, out) = run(&at(&c, 900), &r1, &["drive"]);
+    let r1 = Stamped(r(900), std::sync::Mutex::default(), sh().state.clone());
+    let (code, out) = run(&at(&c, 900), &r1, &["housekeep", "--only", "clean"]);
     assert_eq!(code, 0, "{out}");
     let w = wt.display();
     let push = format!("git -C {w} push origin HEAD:refs/heads/wip/sendmeter-impl-12-20261107-120000-");
@@ -527,7 +505,7 @@ fn a_working_lane_of_a_merged_issue_is_never_closed() {
     let (c, _, r) = idle_lane("drive-merged-working", true, "working");
     for s in [0, 900, 3600] {
         let r = r(s);
-        let (code, out) = run(&at(&c, s), &r, &["drive"]);
+        let (code, out) = run(&at(&c, s), &r, &["housekeep", "--only", "clean"]);
         assert_eq!(code, 0, "{out}");
         assert!(
             sh().all("kill").is_empty() && !r.called("git -C /tmp/does-not-matter/sendmeter worktree remove"),
@@ -542,7 +520,7 @@ fn an_open_issues_idle_lane_is_kept() {
     let (c, _, r) = idle_lane("drive-open-idle", false, "idle");
     for s in [0, 900, 1500] {
         let r = r(s);
-        let (code, out) = run(&at(&c, s), &r, &["drive"]);
+        let (code, out) = run(&at(&c, s), &r, &["housekeep", "--only", "clean"]);
         assert_eq!(code, 0, "{out}");
         assert!(!sh().called("kill", "sendmeter-impl-12"), "{:?}", r.calls.borrow());
     }
@@ -565,7 +543,7 @@ fn a_secret_in_a_merged_lanes_wip_keeps_its_pane_reported_once_and_clean_dry_run
             )
             .reply("git -C", "")
     };
-    run(&c, &r(), &["drive"]);
+    run(&c, &r(), &["housekeep", "--only", "clean"]);
     let (code, dry) = run(&at(&c, 900), &r(), &["clean", "sendmeter"]);
     assert_eq!(code, 0, "{dry}");
     assert!(
@@ -574,7 +552,7 @@ fn a_secret_in_a_merged_lanes_wip_keeps_its_pane_reported_once_and_clean_dry_run
     );
     for s in [900, 1200] {
         let r = r();
-        let (code, out) = run(&at(&c, s), &r, &["drive"]);
+        let (code, out) = run(&at(&c, s), &r, &["housekeep", "--only", "clean"]);
         assert_eq!(code, 0, "{out}");
         assert!(
             sh().all("kill").is_empty() && !r.called(&format!("git -C {w} push")),
@@ -628,7 +606,9 @@ fn a_pr_merged_outside_drover_is_logged_merged_and_its_lanes_cleaned() {
     assert_eq!(m.str("merged_at"), Some("2026-11-03T06:37:00Z"));
     assert_eq!(state(&c), "merged");
     assert!(!r.called("gh pr merge") && !r.called("gh issue comment") && !r.called("gh issue close"));
-    assert_eq!(steps, ["clean"], "{out}");
+    assert!(steps.is_empty(), "{out}");
+    let (code, out) = run(&c, &r, &["housekeep", "--only", "clean"]);
+    assert_eq!(code, 0, "{out}");
     let rm = format!(
         "git -C /tmp/does-not-matter/sendmeter worktree remove --force {}",
         wt.display()
@@ -764,7 +744,11 @@ fn a_dead_pids_lock_is_taken_over_at_once_and_a_live_ones_respected() {
     lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
     std::fs::remove_file(&sh().sock).unwrap();
     let bad = Fake::default().once("kill -0 4242", 1, "");
-    assert!(run(&c, &bad, &["drive"]).0 != 0);
+    assert_eq!(
+        run(&c, &bad, &["drive"]).0,
+        0,
+        "a main host with no word skips, never fails"
+    );
     gone();
 }
 
@@ -797,13 +781,13 @@ fn drive_now_on_the_board_is_paired_only_and_toasts_its_line() {
     assert!(post("127.0.0.1:7777", "").starts_with("HTTP/1.1 401"));
     let cookie = pair(&s, &c, "", c.now);
     assert!(post("evil.example", &cookie).starts_with("HTTP/1.1 403"));
-    assert_eq!(started(""), [] as [std::string::String; 0]);
+    assert_eq!(started(""), <[std::string::String; 0]>::default());
     let res = post("127.0.0.1:7777", &cookie);
     assert!(
         res.starts_with("HTTP/1.1 303") && res.contains("sendmeter%3A%20started%20%2312"),
         "{res}"
     );
-    assert_ne!(started("sendmeter-impl-12"), [] as [std::string::String; 0]);
+    assert_ne!(started("sendmeter-impl-12"), <[std::string::String; 0]>::default());
     let drive = get(&s)["fleets"][0]["drive"].clone();
     let line = drive["line"].as_str().unwrap_or_default();
     assert_eq!(
@@ -928,18 +912,18 @@ fn stale_pr(head: &str, mergeable: &str, status: &str) -> String {
 }
 
 #[test]
-fn a_conflicting_pr_after_pass_gets_update_rounds_then_needs_human() {
+fn a_conflicting_pr_after_pass_gets_update_rounds_then_a_stuck_card() {
     let c = setup("drive-conflict");
     let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     for (i, (v, p)) in [("FAIL", "a1"), ("FAIL", "b2")].into_iter().enumerate() {
         ev(
             &c,
-            11 + i as u64,
+            11 + u64::try_from(i).unwrap(),
             "verdict",
             json!({"verdict": v, "sha": sha(p), "body": v}),
         );
     }
-    for (k, p) in [(1, "c3"), (2, "d4"), (3, "e5"), (4, "f6")] {
+    for (k, p) in [(1, "c3"), (2, "d4"), (3, "e5")] {
         ev(
             &c,
             20 + k,
@@ -964,7 +948,7 @@ fn a_conflicting_pr_after_pass_gets_update_rounds_then_needs_human() {
         );
         let (out, steps) = drive(&c, &r);
         assert_eq!(steps, ["conflict"], "{out}");
-        if k < 4 {
+        if k < 3 {
             assert_eq!(state(&c), format!("fix(3)+u{k}"));
             let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
             assert!(brief.contains("Merge `origin/staging` into this branch"), "{brief}");
@@ -972,9 +956,15 @@ fn a_conflicting_pr_after_pass_gets_update_rounds_then_needs_human() {
             lane(&c, 30 + k, "rev", "sendmeter-rev-12", "issue-12-rev");
             assert_eq!(state(&c), format!("review(3)+u{k}"));
         } else {
-            assert!(out.contains("REFUSED UPDATE_LIMIT"), "{out}");
+            assert!(
+                out.contains("REFUSED STUCK: PR still conflicts after 2 update rounds in a row"),
+                "{out}"
+            );
             assert_eq!(state(&c), "needs-human");
-            assert_eq!(started("").len(), runs, "no fourth update lane");
+            let all = read(&c.state).unwrap();
+            let card = all.iter().rfind(|e| e.kind == "needs-human").unwrap();
+            assert_eq!((card.str("code"), card.val("update")), (Some("STUCK"), &json!(true)));
+            assert_eq!(started("").len(), runs, "no third update lane");
             idle(&c, &r);
         }
     }
@@ -1128,7 +1118,7 @@ fn a_serial_busy_item_is_skipped_and_keeps_its_place() {
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["start", "start", "start"], "{out}");
     assert!(out.contains("sendmeter #1 start: REFUSED SERIAL_BUSY"), "{out}");
-    assert_eq!(started("sendmeter-impl-1"), [] as [std::string::String; 0]);
+    assert_eq!(started("sendmeter-impl-1"), <[std::string::String; 0]>::default());
     assert_eq!((state_of(&c, 2), state_of(&c, 3)), ("impl".into(), "impl".into()));
     assert_eq!(
         run(&c, &Fake::default(), &["next", "sendmeter"]),
@@ -1325,13 +1315,11 @@ fn labelled_pr(head: &str, labels: &[&str]) -> String {
 }
 
 #[test]
-fn a_pass_at_the_head_gets_the_merge_label_once_and_a_moved_head_loses_it() {
+fn a_pass_at_the_head_gets_the_default_merge_label_once_and_a_moved_head_loses_it() {
     let dir = tmpdir("drive-label");
-    let cfg = CONFIG.replace(
-        "integration = \"staging\"",
-        "integration = \"staging\"\nmerge_label = \"merge-ready\"",
-    );
-    let c = ctx(&dir, &cfg);
+    let c = ctx(&dir, &CONFIG.replace("merge_label = \"off\"\n", ""));
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    assert_eq!(cfg.fleet["sendmeter"].merge_label.as_deref(), Some("merge-ready"));
     lane(&c, 10, "impl", "sendmeter-impl-12", "gone-12");
     std::fs::remove_dir_all(c.worktrees.join("sendmeter/gone-12")).unwrap();
     let (head, moved) = (sha("abc"), sha("def"));
@@ -1382,7 +1370,7 @@ fn a_pass_at_the_head_gets_the_merge_label_once_and_a_moved_head_loses_it() {
 }
 
 #[test]
-fn no_merge_label_parses_to_none_and_a_pass_adds_no_label() {
+fn merge_label_off_parses_to_none_and_a_pass_adds_no_label() {
     let c = ctx(&tmpdir("drive-no-label"), CONFIG);
     let cfg = drover::config::Config::load(&c.config).unwrap();
     assert_eq!(cfg.fleet["sendmeter"].merge_label, None);
@@ -1420,10 +1408,7 @@ fn no_merge_label_parses_to_none_and_a_pass_adds_no_label() {
 fn status_says_a_ready_pr_lacks_the_merge_label() {
     let c = ctx(
         &tmpdir("drive-label-status"),
-        &CONFIG.replace(
-            "integration = \"staging\"",
-            "integration = \"staging\"\nmerge_label = \"merge-ready\"",
-        ),
+        &CONFIG.replace("merge_label = \"off\"", "merge_label = \"merge-ready\""),
     );
     lane(&c, 10, "impl", "sendmeter-impl-12", "gone-12");
     std::fs::remove_dir_all(c.worktrees.join("sendmeter/gone-12")).unwrap();
@@ -1624,8 +1609,18 @@ fn a_pass_recorded_with_green_ci_merges_in_the_same_pass() {
         .reply("gh issue", "")
         .reply("runners forget", "");
     let (out, steps) = drive(&c, &r);
-    assert_eq!(steps, ["verdict", "merge", "clean"], "{out}");
-    assert!(out.contains(&format!("removed {} ", rev.display())), "{out}");
+    assert_eq!(
+        steps,
+        ["verdict", "merge"],
+        "the merge's own clean leaves the pass nothing: {out}"
+    );
+    let rev = rev.to_string_lossy();
+    let cleaned = read(&c.state)
+        .unwrap()
+        .iter()
+        .filter(|e| e.kind == "clean" && e.str("worktree") == Some(&rev))
+        .count();
+    assert_eq!(cleaned, 1, "removed once, never walked again");
     assert!(r.called(&format!(
         "gh pr merge 100 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {head}"
     )));
@@ -1808,11 +1803,7 @@ fn auto_update_runs_in_a_pass_with_no_merge() {
 #[test]
 fn auto_update_rechecks_premerge_before_its_push() {
     for fails in [false, true] {
-        let c = setup(if fails {
-            "drive-update-premerge-red"
-        } else {
-            "drive-update-premerge"
-        });
+        let c = setup(["drive-update-premerge", "drive-update-premerge-red"][usize::from(fails)]);
         let cfg = CONFIG.replace(
             "integration = \"staging\"",
             "integration = \"staging\"\npremerge = [\"make lint\"]",
@@ -1828,7 +1819,10 @@ fn auto_update_rechecks_premerge_before_its_push() {
             json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
         );
         let wt = c.state.with_file_name("update-sendmeter");
-        let check = format!("sh -c cd \"$0\" && make lint {}", wt.display());
+        let check = format!(
+            "sh -c renice -n 19 -p $$ >/dev/null 2>&1; cd \"$0\" && make lint {}",
+            wt.display()
+        );
         let push = format!("git -C {} push -q origin HEAD:issue-12", wt.display());
         let r = fake(NONE)
             .once(&check, i32::from(fails), "lint: error: unused import\n")
@@ -1952,7 +1946,7 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
             json!({"verdict": "FAIL", "sha": sha(p), "body": "FAIL"}),
         );
     }
-    ev(&c, 14, "needs-human", json!({"code": "ROUND_LIMIT"}));
+    ev(&c, 14, "needs-human", json!({"code": "STUCK"}));
     let base = || {
         fake(NONE)
             .reply("gh pr view issue-12", &pr(&sha("3"), "green"))
@@ -1985,7 +1979,7 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
 fn an_extend_no_spawn_is_never_a_due_fix_over_a_live_lane() {
     let c = setup("drive-extend-no-spawn");
     let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
-    ev(&c, 14, "needs-human", json!({"code": "UPDATE_LIMIT"}));
+    ev(&c, 14, "needs-human", json!({"code": "STUCK"}));
     let live = [("sendmeter-impl-12", "idle", wt.to_string_lossy())];
     let r = fake(&live)
         .reply("gh pr view issue-12", &pr(&sha("3"), "green"))
@@ -2090,8 +2084,8 @@ fn an_unchanged_head_with_red_ci_stays_and_the_stall_says_what_is_missing() {
 #[test]
 fn a_no_change_round_is_reviewed_while_a_check_that_waits_for_the_label_is_absent() {
     let cfg = CONFIG.replace(
-        "integration = \"staging\"",
-        "integration = \"staging\"\nmerge_label = \"merge-ready\"\nrequired_checks = [\"quality\"]",
+        "merge_label = \"off\"",
+        "merge_label = \"merge-ready\"\nrequired_checks = [\"quality\"]",
     );
     let body = "FAIL (form-only)\n1. blocking [form]: the PR body lacks For humans";
     let (c, r, head) = no_change_in(&cfg, "drive-noop-label", "rev", body, "pending");
@@ -2255,10 +2249,10 @@ fn a_held_lane_whose_pane_is_gone_is_respawned_when_its_blocker_merges() {
 fn busy(mut f: Fake) -> Fake {
     let o = drover::runner::Out {
         code: 0,
-        stdout: "{ 50.00 40.00 30.00 }\n".into(),
+        stdout: iostat(5),
         stderr: String::new(),
     };
-    f.replies.insert(0, ("sysctl -n vm.loadavg".into(), o));
+    f.replies.insert(0, ("iostat".into(), o));
     f
 }
 
@@ -2403,8 +2397,8 @@ fn a_spawn_whose_prompt_never_landed_is_retried_by_the_next_pass() {
     assert!(done.iter().all(|e| e.str("reason") != Some("done")), "{done:?}");
 }
 
-const PROOFLESS: &str = "FAIL\n\n- blocking [code] src/x.rs:9: off by one\n";
-const PROVEN: &str = "FAIL\n\n- blocking [code] src/x.rs:9: off by one\n  Proof: spec\n  > AC 1: totals add up\n";
+const PROOFLESS: &str = "FAIL\n\n- blocking [ac] src/x.rs:9: off by one\n";
+const PROVEN: &str = "FAIL\n\n- blocking [ac] src/x.rs:9: off by one\n  Proof: spec\n  > AC 1: totals add up\n";
 
 fn proofless(name: &str, body: &str, live: bool) -> (drover::Ctx, PathBuf, Fake) {
     let c = setup(name);
@@ -2560,6 +2554,7 @@ fn a_no_repro_verdict_refiled_and_refused_again_is_one_owner_card() {
 
 fn lesson(name: &str, live: bool) -> (drover::Ctx, Fake) {
     let c = setup(name);
+    ev(&c, 9, "job-filed", json!({"job": "lesson", "role": "lesson"}));
     let wt = lane(&c, 10, "lesson", "sendmeter-lesson-12", "issue-12");
     let list = [("sendmeter-lesson-12", "idle", wt.to_string_lossy().to_string())];
     let r = fake(if live { &list[..] } else { &[] })
@@ -2579,11 +2574,11 @@ fn a_lesson_lane_ending_without_a_push_is_prompted_once_then_closed_never_lane_e
     };
     let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
     assert!(
-        out.contains("#12 drive: lesson lane ended without a push: prompting it once"),
+        out.contains("#12 drive: job lane ended without a push: prompting it once"),
         "{out}"
     );
     let (out, _) = drive(&c, &r);
-    assert!(out.contains("sendmeter #12 lesson lane prompted: sent"), "{out}");
+    assert!(out.contains("sendmeter #12 job lane prompted: sent"), "{out}");
     let prompt = || {
         let line = "no repeated class? end with `drover done --no-change \"no repeated class\" sendmeter 12`";
         typed("sendmeter-lesson-12", line)
@@ -2653,7 +2648,7 @@ fn a_done_reviewer_in_the_way_is_superseded_and_the_review_spawns() {
     let sup = all.iter().find(|e| e.kind == "supersede").expect(&out);
     assert_eq!(sup.str("agent"), Some("sendmeter-rev-12-r1"));
     assert!(sh().called("kill", "sendmeter-rev-12-r1"), "{:?}", r.calls.borrow());
-    assert_ne!(started("sendmeter-rev-12-r1"), [] as [std::string::String; 0]);
+    assert_ne!(started("sendmeter-rev-12-r1"), <[std::string::String; 0]>::default());
     assert_eq!(state(&c), "review(1)");
 }
 
@@ -2664,7 +2659,7 @@ fn a_working_reviewer_in_the_way_still_waits() {
     assert_eq!(steps, ["review"], "{out}");
     assert!(out.contains("REFUSED LANE_LIVE: live agent(s)"), "{out}");
     assert!(!read(&c.state).unwrap().iter().any(|e| e.kind == "supersede"));
-    assert_eq!(started(""), [] as [std::string::String; 0]);
+    assert_eq!(started(""), <[std::string::String; 0]>::default());
     assert_eq!(state(&c), "impl");
 }
 
@@ -2793,7 +2788,7 @@ fn an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it() {
     let (code, out) = run(&c, &Fake::default(), &["queue", "sendmeter", "ls"]);
     assert!(code == 0 && out.contains("parked: host mini is down"), "{out}");
     let r = fake(NONE).reply("git -C", "");
-    assert_eq!(drive(&c, &r).1, [] as [std::string::String; 0]);
+    assert_eq!(drive(&c, &r).1, <[std::string::String; 0]>::default());
     assert!(started("").is_empty(), "a parked issue is skipped");
 
     let s = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
@@ -2827,7 +2822,7 @@ fn an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it() {
     assert_eq!(kinds, [("parked", Some("owner")), ("unparked", Some("owner"))]);
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["start"], "{out}");
-    assert_ne!(started("sendmeter-impl-12"), [] as [std::string::String; 0]);
+    assert_ne!(started("sendmeter-impl-12"), <[std::string::String; 0]>::default());
 }
 
 #[test]

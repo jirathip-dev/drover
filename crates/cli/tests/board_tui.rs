@@ -51,7 +51,7 @@ fn recorded(name: &str) -> (drover::Ctx, OnShed) {
         T - 1_900,
         Some(5),
         "needs-human",
-        json!({"code": "ROUND_LIMIT", "reason": "review rounds ran out (4/3)"}),
+        json!({"code": "STUCK", "reason": "review rounds ran out (4/3)"}),
     );
     let ask = json!({"id": "q7", "question": "Move the branch out?", "options": ["move", "refuse"], "recommend": 1, "kind": "routine"});
     ev(T - 300, None, "needs-decision", ask);
@@ -251,9 +251,7 @@ fn every_screen_the_phone_reaches_draws_every_title_value_badge_and_label_at_40_
         );
     }
     assert!(
-        !paths
-            .iter()
-            .any(|p| p.contains("herd") || p.contains("/screens/scene") || p.contains("proxy-token")),
+        !paths.iter().any(|p| p.contains("herd") || p.contains("/screens/scene")),
         "{paths:?}"
     );
     assert_eq!(door.screen(T, "/screens/scene"), None);

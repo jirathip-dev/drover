@@ -330,7 +330,7 @@ fn need_input_without_an_ask_says_so() {
     let (w, st) = texts(&c, &r);
     assert!(w.contains("reported need-input (which port) with no open ask"), "{w}");
     assert!(st.contains("reported need-input (which port)"), "{st}");
-    let (code, out) = run(&c, &r, &["ask", "sendmeter", "12", "which port?"]);
+    let (code, out) = run(&c, &r, &["ask", "sendmeter", "12", "which port for prod?"]);
     assert_eq!(code, 0, "{out}");
     let (w, _) = texts(&c, &r);
     assert!(w.contains("waiting on your answer"), "{w}");
@@ -368,7 +368,7 @@ fn need_input_without_an_ask_is_nudged_once_then_a_parkable_owner_card() {
 #[test]
 fn need_input_with_an_open_ask_waits_on_the_owner_unchanged() {
     let (c, r, sh) = lane("turn-input-asked", true, None);
-    let (code, out) = run(&c, &r, &["ask", "sendmeter", "12", "which port?"]);
+    let (code, out) = run(&c, &r, &["ask", "sendmeter", "12", "which port for prod?"]);
     assert_eq!(code, 0, "{out}");
     turn(&c, &r, &["need-input", "--why", "which port"]);
     drive(&c, &r);
@@ -602,4 +602,53 @@ fn a_failed_git_read_in_the_pr_body_walk_is_could_not_check() {
         .insert(0, (format!("git -C {} log -1 --format=%s", wt.display()), subject));
     unchecked(&c, &r, "rev-parse");
     assert!(kinds(&c, "done-refused").is_empty());
+}
+
+#[test]
+fn a_red_pr_body_leg_is_rerun_once_after_pr_body_passes_at_its_head() {
+    let head = sha("abc");
+    let leg = |conclusion: &str, body: &str| {
+        let check = json!({"__typename": "CheckRun", "name": "evidence", "status": "COMPLETED",
+            "conclusion": conclusion, "completedAt": "1970-01-12T13:40:00Z",
+            "detailsUrl": "https://github.com/jirathip-dev/sendmeter/actions/runs/555/job/5"});
+        json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
+            "statusCheckRollup": [check], "body": body})
+        .to_string()
+    };
+    let good = format!("## For humans\n\nx\n\n## Evidence (head {head})");
+    let (c, r, _sh) = lane_at("turn-body-leg", true, Some(&leg("FAILURE", &good)), Some(&sha("def")));
+    let r = r
+        .once("gh pr view issue-12", 0, &leg("FAILURE", "## For humans\n\nx"))
+        .reply("gh run rerun", "");
+    let (code, out) = run(&c, &r, &["turn", "done"]);
+    assert!(code == 3 && out.contains("REFUSED PR_BODY"), "{out}");
+    assert!(!r.called("gh run rerun"), "no re-run while PR_BODY refuses");
+    turn(&at(&c, 10), &r, &["done"]);
+    assert_eq!(r.count("gh run rerun 555 --failed -R jirathip-dev/sendmeter"), 1);
+    let rerun = kinds(&c, "ci-rerun");
+    assert_eq!((rerun.len(), rerun[0].val("checks")), (1, &json!(["evidence"])));
+    turn(&at(&c, 20), &r, &["done"]);
+    assert_eq!(r.count("gh run rerun"), 1, "once a head");
+}
+
+#[test]
+fn ci_flaky_retries_0_never_reruns_a_red_pr_body_leg() {
+    let head = sha("abc");
+    let check = json!({"__typename": "CheckRun", "name": "evidence", "status": "COMPLETED",
+        "conclusion": "FAILURE", "completedAt": "1970-01-12T13:40:00Z",
+        "detailsUrl": "https://github.com/jirathip-dev/sendmeter/actions/runs/555/job/5"});
+    let body = format!("## For humans\n\nx\n\n## Evidence (head {head})");
+    let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
+        "statusCheckRollup": [check], "body": body})
+    .to_string();
+    let (c, r, _sh) = lane_at("turn-body-leg-off", true, Some(&pr), Some(&sha("def")));
+    let off = CONFIG.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\nci_flaky_retries = 0",
+    );
+    std::fs::write(&c.config, off).unwrap();
+    let r = r.reply("gh run rerun", "");
+    turn(&at(&c, 10), &r, &["done"]);
+    assert!(!r.called("gh run rerun"), "ci_flaky_retries = 0 never re-runs");
+    assert!(kinds(&c, "ci-rerun").is_empty());
 }

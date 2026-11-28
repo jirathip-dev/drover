@@ -1,13 +1,5 @@
 /// Every `[limits]` key and what it sets, in docs/config/limits.md's order; `drover config show` prints them.
 pub const LIMIT_DOCS: &[(&str, &str)] = &[
-    (
-        "review_rounds",
-        "review rounds before an issue goes needs-human (ROUND_LIMIT)",
-    ),
-    (
-        "update_rounds",
-        "PASSed update rounds before `spawn --update` refuses UPDATE_LIMIT",
-    ),
     ("stall_minutes", "a working lane with no event this long is stalled"),
     (
         "silent_minutes",
@@ -21,14 +13,21 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "ci_stuck_minutes",
         "a ready PR's check still pending this long after its run completed is re-run once, then alerts `ci-stuck`",
     ),
-    ("load_per_cpu", "spawn refuses HOST_BUSY over this load per CPU"),
+    (
+        "ci_flaky_retries",
+        "re-runs of a failed check's jobs a head gets before its red counts, `ci-rerun` why failed (0 = off; a fleet may set its own)",
+    ),
+    (
+        "min_cpu_idle",
+        "spawn refuses HOST_BUSY under this percent of the CPUs idle over a 1 s sample; `[hosts.<n>]` may set its own",
+    ),
     (
         "overload_minutes",
-        "load per CPU over `load_per_cpu` this long alerts `host-overloaded` once, with the 5 busiest processes",
+        "CPU idle under `min_cpu_idle` this long alerts `host-overloaded` once, with the 5 busiest processes",
     ),
     (
         "swapout_rate",
-        "pages swapped out per 2 s sample that count as swapping",
+        "pages swapped out per 2 s sample that count as swapping; `[hosts.<n>]` may set its own",
     ),
     ("min_free_gb", "spawn refuses DISK_LOW under this many GB free on `/`"),
     (
@@ -49,12 +48,12 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "min_free_mem_gb",
-        "spawn refuses MEM_LOW under this many GB of free + inactive memory",
+        "spawn refuses MEM_LOW under this many GB of free + inactive memory; `[hosts.<n>]` may set its own",
     ),
     ("effort", "default reasoning effort for roles that set none"),
     (
         "ask_default_minutes",
-        "a routine ask unanswered this long takes its recommended option",
+        "a routine ask filed before #1813 unanswered this long takes its recommended option",
     ),
     (
         "ask_expire_hours",
@@ -82,15 +81,11 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "fast_secs",
         "the fast job (`drive`) starts every fleet's pass every this many seconds",
     ),
-    ("slow_secs", "the slow tick runs every this many seconds"),
+    ("slow_secs", "the slow tick and the housekeeping job run every this many seconds; each housekeeping chore's budget"),
     ("form_categories", "the finding tags a `FAIL (form-only)` may carry"),
     (
         "form_rounds",
         "form-only FAILs per issue that don't count as a review round",
-    ),
-    (
-        "overflow_after_minutes",
-        "every local host refused this long lets placement start a stopped cloud host",
     ),
     (
         "import_max_age_hours",
@@ -105,6 +100,14 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "concurrent detached spawn kicks on the main host (0: in the pass)",
     ),
     (
+        "max_in_flight_total",
+        "PRs in flight across every fleet before a first start is refused `IN_FLIGHT_CAP` (0: off)",
+    ),
+    (
+        "fleet_priority",
+        "fleets in the order a freed `max_in_flight_total` slot goes to, oldest queue entry first; unlisted fleets after",
+    ),
+    (
         "start_max",
         "lanes starting at once on a remote host that sets no `start_max`",
     ),
@@ -115,10 +118,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "spawn_pending_max_secs",
         "a spawn marker older than this is stale",
-    ),
-    (
-        "admit_wait_secs",
-        "a spawn's admission waits this long for another admission on its host before `SPAWN_PENDING`",
     ),
     (
         "acp_start_minutes",
@@ -162,6 +161,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "a fleet's pass ends itself here, `pass-slow` naming its step; a lock held past 2 × it logs `pass-stuck` and is taken over",
     ),
     (
+        "fetch_fresh_secs",
+        "a fleet clone's fetch of refspecs fetched this recently, their refs there, is skipped; a fetch waiting on the clone's lock gets the one before it",
+    ),
+    (
         "ssh_connect_secs",
         "every host ssh's `-oConnectTimeout`; the whole `ssh <host> true` probe's retry and `hosts refresh`'s probe",
     ),
@@ -194,10 +197,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "the pause between a new database's WAL switch retries",
     ),
     (
-        "cloud_idle_stop_minutes",
-        "a cloud host's `idle_stop_minutes` when it sets none",
-    ),
-    (
         "notify_secs",
         "a notifier command or web push send is killed after this long",
     ),
@@ -209,10 +208,13 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "shed_read_millis",
         "how long drive's intake waits for shed's state changes",
     ),
-    ("proxy_connect_secs", "the token proxy's liveness connect timeout"),
     (
-        "proxy_retry_secs",
-        "a proxy lane's sign-out holds its host only if no call gets through the token proxy this long after it",
+        "acp_judge_secs",
+        "shed's judge denies a judged lane's tool call when `drover hook --acp` takes longer",
+    ),
+    (
+        "acp_probe_seconds",
+        "an agent's test run under shed's judge (before its first judged lane) gives up after this long",
     ),
     (
         "service_call_secs",
@@ -220,11 +222,11 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "disk_probe_secs",
-        "a folder listing slower than this on a host under `load_per_cpu` marks its disk as not answering",
+        "a folder listing slower than this on a host over `min_cpu_idle` marks its disk as not answering",
     ),
     (
         "disk_hung_secs",
-        "over `load_per_cpu` a call waits this long for a slow folder listing, then the disk is not answering",
+        "under `min_cpu_idle` a call waits this long for a slow folder listing, then the disk is not answering",
     ),
     (
         "disk_sick_secs",
@@ -262,10 +264,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "orchestrator_change_minutes",
         "an orchestrator's answer may not change one this long after it",
-    ),
-    (
-        "token_refresh_minutes",
-        "`check` pushes a fresh runner registration token to every VM this often",
     ),
     (
         "ask_waiting_minutes",

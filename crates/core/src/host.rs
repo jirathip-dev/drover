@@ -185,7 +185,8 @@ pub struct Host {
     pub swap_count: Option<f64>,
     /// The median of the last `WINDOW` swap-out samples (`window`); the gate reads this, not one spike.
     pub swap_median: Option<f64>,
-    pub load_per_cpu: Option<f64>,
+    /// Percent of the CPUs idle over a 1 s `iostat` (`vmstat` on Linux), drover's own processes counted idle.
+    pub cpu_idle: Option<f64>,
     /// `vm_stat` free + inactive pages, in GB.
     pub free_mem_gb: Option<f64>,
     /// The memory size in GB.
@@ -256,7 +257,7 @@ pub fn lane_cpu(r: &dyn Runner, dirs: &BTreeMap<PathBuf, String>) -> Vec<(String
     out
 }
 
-fn own_load(ps: &str) -> (f64, Vec<String>) {
+fn own_cpus(ps: &str) -> (f64, Vec<String>) {
     let procs = procs(ps);
     let ours: Vec<u64> = (procs.iter().filter(|p| ["drover", "herdsman"].contains(&p.3.as_str())))
         .map(|p| p.0)
@@ -291,11 +292,11 @@ fn mem_gb(s: &str) -> Option<f64> {
 const PROBES: [&[&str]; 10] = [
     &["sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
     &["vm_stat"],
-    &["sysctl", "-n", "vm.loadavg"],
+    &["iostat", "-n", "0", "-c", "2", "-w", "1"],
     &["sysctl", "-n", "hw.ncpu"],
     &["ps", "-Ao", "pid=,ppid=,pcpu=,comm="],
     &["sysctl", "-n", "hw.memsize"],
-    &["cat", "/proc/loadavg"],
+    &["vmstat", "1", "2"],
     &["nproc"],
     &["grep", "MemAvailable", "/proc/meminfo"],
     &["grep", "MemTotal", "/proc/meminfo"],
@@ -311,10 +312,16 @@ fn level(s: &str) -> Option<String> {
     .map(String::from)
 }
 
-/// This host's own `Sample` for its frame, with no process started: `load` per CPU and its memory pressure.
+fn idle_column(s: &str) -> Option<f64> {
+    let head = s.lines().rfind(|l| l.split_whitespace().any(|w| w == "id"))?;
+    let i = head.split_whitespace().position(|w| w == "id")?;
+    s.lines().last()?.split_whitespace().nth(i)?.parse().ok()
+}
+
+/// This host's own `Sample` for its frame, with no process started: its CPU idle and its memory pressure.
 pub fn own() -> Option<crate::link::frame::Sample> {
     Some(crate::link::frame::Sample {
-        load_per_cpu: load()?.1,
+        cpu_idle: Some(idle()?),
         pressure: drover_sys::pressure_level().and_then(|l| level(&l.to_string())),
         at: crate::clock::now(),
     })
@@ -337,19 +344,19 @@ pub fn sample(r: &dyn Runner) -> Host {
         .collect();
     let mut outs = (ran.into_iter()).map(|(o, code)| o.filter(|_| code == Some(0)));
     let mut next = || outs.next().flatten();
-    let (pressure, vm, load, ncpu, ps, size) = (next(), next(), next(), next(), next(), next());
+    let (pressure, vm, iostat, ncpu, ps, size) = (next(), next(), next(), next(), next(), next());
     let pressure = pressure.as_deref().and_then(level);
     let vm = vm.unwrap_or_default();
     let mut linux = || next().filter(|_| vm.is_empty()).unwrap_or_default();
-    let (cat, nproc, avail, total) = (linux(), linux(), linux(), linux());
+    let (vmstat, nproc, avail, total) = (linux(), linux(), linux(), linux());
     let word = |s: &str, n: usize| s.split_whitespace().nth(n)?.parse::<f64>().ok();
-    let load = load.and_then(|s| s.split_whitespace().find_map(|w| w.parse::<f64>().ok()));
-    let load = load.or_else(|| word(&cat, 0));
+    let idle = iostat.as_deref().and_then(idle_column).or_else(|| idle_column(&vmstat));
     let ncpu = ncpu
         .and_then(|s| s.trim().parse::<f64>().ok())
         .or_else(|| word(&nproc, 0));
-    let (own, top) = own_load(&ps.unwrap_or_default());
-    let load_per_cpu = load.zip(ncpu.filter(|n| *n > 0.0)).map(|(l, n)| (l - own).max(0.0) / n);
+    let (own, top) = own_cpus(&ps.unwrap_or_default());
+    let own = ncpu.filter(|n| *n > 0.0).map_or(0.0, |n| own * 100.0 / n);
+    let cpu_idle = idle.map(|i| (i + own).min(100.0));
     let size = size
         .and_then(|s| s.trim().parse::<f64>().ok())
         .map(|b| b / 1_073_741_824.0);
@@ -357,7 +364,7 @@ pub fn sample(r: &dyn Runner) -> Host {
     Host {
         pressure,
         swap_count: field(&vm, "Swapouts:"),
-        load_per_cpu,
+        cpu_idle,
         free_mem_gb: mem_gb(&vm).or_else(|| Some(word(&avail, 1)? / 1_048_576.0)),
         mem_total_gb: size,
         top,
@@ -397,15 +404,25 @@ pub fn window(state: &Path, h: &mut Host) {
     h.swap_median = m.get(m.len() / 2).copied();
 }
 
-/// This host's load now, with no process started: the one-minute average, and that per CPU.
-pub fn load() -> Option<(f64, f64)> {
-    let cpus = u32::try_from(std::thread::available_parallelism().ok()?.get()).ok()?;
-    drover_sys::loadavg().map(|l| (l, l / f64::from(cpus)))
+static TICKS: std::sync::Mutex<Option<((u64, u64), f64)>> = std::sync::Mutex::new(None);
+
+/// This host's CPU idle percent with no process started: over the ticks since the last call (since boot on the first).
+pub fn idle() -> Option<f64> {
+    let (i, t) = drover_sys::cpu_ticks()?;
+    let mut last = TICKS.lock().ok()?;
+    let ((i0, t0), was) = last.unwrap_or(((0, 0), 100.0));
+    if t.saturating_sub(t0) < 100 {
+        return Some(was);
+    }
+    let per_mille = i.saturating_sub(i0) * 1000 / (t - t0);
+    let now = f64::from(u32::try_from(per_mille).unwrap_or(1000)) / 10.0;
+    *last = Some(((i, t), now));
+    Some(now)
 }
 
-/// This host is over `load_per_cpu` now.
+/// This host is under `min_cpu_idle` now.
 pub fn loaded() -> bool {
-    load().is_some_and(|l| l.1 > crate::config::limits().load_per_cpu)
+    idle().is_some_and(|i| i < crate::config::limits().min_cpu_idle)
 }
 
 /// Why a host with `disk` GB free on `/` takes no new lane: under `min_free_gb`.
@@ -442,11 +459,11 @@ pub fn admit(h: &Host, l: &Limits) -> Result<(), String> {
     if let Some(s) = median {
         why.push(format!("swap-out median {s} pages/2s > {}", l.swapout_rate));
     }
-    if let Some(x) = h.load_per_cpu.filter(|x| *x > l.load_per_cpu) {
+    if let Some(x) = h.cpu_idle.filter(|x| *x < l.min_cpu_idle) {
         let top = (!h.top.is_empty()).then(|| format!(" (top: {})", h.top.join(", ")));
         why.push(format!(
-            "load/cpu {x:.2} > {}{}",
-            l.load_per_cpu,
+            "cpu idle {x:.0}% < {}%{}",
+            l.min_cpu_idle,
             top.unwrap_or_default()
         ));
     }

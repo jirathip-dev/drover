@@ -12,13 +12,13 @@ it through orchestrator threads, in cooee or on the phone page. Setup and detail
 drover is the autonomous agent workflow plus its `/api/v1`: queue, spawn, hook, drive, check, flow, gate, land,
 events, asks, cards, config propose, the design, architect and judge lanes, host-load admission, the generic
 `[[notify]]` command hook and the screens JSON. It owns policy and each lane's env, its cache env included. Its own
-threads and thread blocks (desk thread, `[chat]`, `[move]`) stay. Two binaries sit outside core and the line cap:
+threads and thread blocks (desk thread, `[chat]`, `[move]`) stay. Two binaries sit outside core:
 drover-serve (the page relay, webpush, paired devices) and drover-tui (a terminal client of `/api/v1`).
 
 ## Non-goals
 
 - **shed** owns the runtime: terminals, ACP sessions, the link to machines it can reach (ssh, exec, files), their
-  processes, CPU and memory, accounts and credentials, secrets, the token proxy, usage, self-update and provider
+  processes, CPU and memory, accounts and credentials, secrets, usage, self-update and provider
   facts as catalog records. drover uses shed-client; it has no ssh plumbing, protocol client or provider facts of
   its own.
 - **shed-cloud** owns what a machine has on it (toolchains, sccache, disk) and pool VM lifecycle: drover runs no
@@ -38,8 +38,7 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
   timer install` runs it every few minutes (#135, #213).
 - Merge needs a PASS verdict and green CI at the PR's exact head sha, at most 3 review rounds, never main (`crates/core/src/gate.rs`).
 - The lane hook blocks merges, comments and protected pushes; reviewers are read-only (`hooks/`, #848).
-- Serial path groups (#306), the queue-wide line cap `drover cap` (#671), its history `drover cap log` (#1096), and
-  arch-check from `.drover/arch.toml` (#758, #772).
+- Serial path groups (#306) and arch-check from `.drover/arch.toml` (#758, #772).
 - `--repro`, `--perf` and `--refactor` playbooks (#758); impl lanes end each turn with `drover turn` (#591).
 - `drover turn done` is a hard gate: no review until the PR body names the pushed head and format and arch-check
   pass (#1362); `drover why` shows a line's commit, issue and the issue's asks and answers (#691).
@@ -99,7 +98,9 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 - Design reviews and one more round from the owner's typed words (#828); a typed `#N approve` approves (#1080).
 - SLO promises a known hold supersedes are void, not missed (#1093); one log read per pass (#832).
 - Banned APIs (unwrap, panics, indexing, `as` casts) fail CI (#809).
-- `drover compact`: a one-time fresh start of the history, with an owner card and undo (#1121).
+- Compact: a one-time fresh start of the history, with an owner card and undo (#1121), now the standalone
+  `compact` binary; `drover compact <fleet> <act>` runs it on the fleet
+  and logs its records (#1574).
 
 ## Next
 
@@ -117,7 +118,6 @@ The open queue, by area.
   sleep ([#951](https://github.com/jirathip-dev/herdsman/issues/951)).
 - A stalled lane restarts, a long load wait moves host ([#1216](https://github.com/jirathip-dev/herdsman/issues/1216)); remote scratch is swept ([#1215](https://github.com/jirathip-dev/herdsman/issues/1215)).
 - Proxy lanes' sign-out advice ([#1212](https://github.com/jirathip-dev/herdsman/issues/1212)); a `Repro: verify` PASS on a fleet with no verify role ([#1224](https://github.com/jirathip-dev/herdsman/issues/1224)).
-- `drover compact` as a kept feature ([#1202](https://github.com/jirathip-dev/herdsman/issues/1202)).
 
 **Hosts**
 - Remote drover from a prebuilt Linux binary ([#1165](https://github.com/jirathip-dev/herdsman/issues/1165)).

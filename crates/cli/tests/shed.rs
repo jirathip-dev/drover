@@ -1,6 +1,8 @@
 mod acp_listing;
 mod common;
+mod judged;
 mod lane_states;
+mod shed_accounts;
 use acp_listing::acp_fake;
 use common::*;
 use drover::events::Event;
@@ -10,6 +12,7 @@ use drover::shed::proto::Response;
 use drover::shed::{self, Wire};
 use drover::term;
 use serde_json::{json, Value};
+use shed_accounts::acct;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::PathBuf;
@@ -60,7 +63,7 @@ fn every_adapter_call_is_a_shed_request() {
     assert_eq!(b.methods().iter().rev().take(2).collect::<Vec<_>>(), ["rm", "kill"]);
     assert_eq!(
         drover::session::live_on(&r).unwrap(),
-        [] as [drover::session::Session; 0]
+        <[drover::session::Session; 0]>::default()
     );
     term::close(&c, &r, lane).unwrap();
     let o = term::exec(&r, &term::read_argv(lane)).unwrap();
@@ -289,7 +292,7 @@ fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_firs
     let start = calls.iter().find(|c| c.starts_with("shed run")).unwrap();
     let head = format!(
         "shed run --acp claude-acp --policy allow --name sendmeter-impl-12 --cwd {0} --mcp {0}/.mcp.lane.json \
-         --meta {1} --label fleet=sendmeter --label issue=12 --label role=impl --label harness=claude --label source=drover --label group=sendmeter \
+         --meta {1} --account auto --label fleet=sendmeter --label issue=12 --label role=impl --label harness=claude --label source=drover --label group=sendmeter \
          --label item=#12 --label round=0 --label url=https://github.com/jirathip-dev/sendmeter/issues/12 \
          --label drover.fleet=sendmeter --label drover.issue=12 --label drover.role=impl --label drover.round=0 -- sh -c ",
         wt.display(), *META
@@ -416,6 +419,7 @@ fn doctor_prints_an_account_row_per_acp_agent_and_crosses_a_shed_under_protocol_
     let b = FakeShed::new();
     let c = acp_ctx("acp-accounts", &acp_config(&b.sock, "claude"));
     let f = acp_fake(&["echo", "claude-agent-acp"]);
+    b.lock().accounts = vec![];
     let (_, out) = run(&c, &f, &["doctor"]);
     assert!(
         out.contains("✗ account claude: no signed-in named account → shed account add claude <name>"),
@@ -435,9 +439,12 @@ fn doctor_prints_an_account_row_per_acp_agent_and_crosses_a_shed_under_protocol_
     b.lock().hello.as_mut().unwrap().protocol = 4;
     let (code, out) = run(&c, &f, &["doctor"]);
     assert_eq!(code, 1, "{out}");
-    assert!(out.contains("✗ account — shed serve is "), "{out}");
+    assert!(out.contains("✗ account — SHED_VERSION: shed serve is "), "{out}");
     assert!(
-        out.contains(&format!("protocol 4, accounts need protocol 5 → {}", shed::UPDATE)),
+        out.contains(&format!(
+            "protocol 4, drover needs shed protocol 5 or newer → {}",
+            shed::UPDATE
+        )),
         "{out}"
     );
 }
@@ -558,7 +565,7 @@ fn an_unguardable_acp_lane_refuses_to_start() {
 }
 
 #[test]
-fn an_acp_lane_with_no_account_starts_guarded_on_the_hosts_own_login() {
+fn an_acp_lane_with_no_account_starts_guarded_on_auto_and_keeps_sheds_token() {
     let b = FakeShed::new();
     let c = acp_ctx("acp-noacct", &acp_config(&b.sock, "claude"));
     let f = acp_fake(&["echo", "claude-agent-acp"]);
@@ -578,9 +585,10 @@ fn an_acp_lane_with_no_account_starts_guarded_on_the_hosts_own_login() {
         !start.contains("CLAUDE_CONFIG_DIR=") && !start.contains("HERDSMAN_ACCOUNT="),
         "no account env: {start}"
     );
+    assert!(start.contains(" --account auto "), "{start}");
     assert!(
-        start.contains("unset CLAUDE_CODE_OAUTH_TOKEN"),
-        "an inherited token never signs it in: {start}"
+        !start.contains("unset CLAUDE_CODE_OAUTH_TOKEN"),
+        "shed scrubs an inherited token and injects the account's: {start}"
     );
 }
 
@@ -659,7 +667,7 @@ fn an_acp_lanes_state_follows_its_turn_events() {
     let sh = cfg.shed_for("sendmeter").unwrap();
     assert_eq!((sh.acp.as_deref(), sh.policy.as_str()), (Some("claude-acp"), "allow"));
     assert_eq!(
-        drover::session::stamp::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap(),
+        drover::session::stamp::intake(&c, &cfg, &drover::runner::Real, &cfg.shed().unwrap().wire).unwrap(),
         4
     );
     let states: Vec<_> = drover::events::read(&c.state)
@@ -758,7 +766,10 @@ fn drive_logs_sheds_state_changes_since_its_last_pass() {
     let c = ctx(&d, &shed_config(&b, ""));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    assert_eq!(drover::session::stamp::intake(&c, &cfg, &b.shed().wire).unwrap(), 2);
+    assert_eq!(
+        drover::session::stamp::intake(&c, &cfg, &drover::runner::Real, &b.shed().wire).unwrap(),
+        2
+    );
     assert_eq!(b.last("events"), json!({"labels": {}, "since": 0}));
     let logged: Vec<_> = drover::events::read(&c.state)
         .unwrap()
@@ -781,14 +792,14 @@ fn drive_logs_sheds_state_changes_since_its_last_pass() {
         std::fs::read_to_string(c.state.with_file_name("shed.seq")).unwrap(),
         "7"
     );
-    drover::session::stamp::intake(&c, &cfg, &b.shed().wire).unwrap();
+    drover::session::stamp::intake(&c, &cfg, &drover::runner::Real, &b.shed().wire).unwrap();
     assert_eq!(
         b.last("events")["since"],
         7,
         "the next pass asks only for what it has not seen"
     );
     let none = Wire::Socket(d.join("none.sock"));
-    assert!(drover::session::stamp::intake(&c, &cfg, &none).is_err());
+    assert!(drover::session::stamp::intake(&c, &cfg, &drover::runner::Real, &none).is_err());
 }
 
 #[test]
@@ -801,7 +812,6 @@ fn no_runtime_is_no_shed_and_herdr_fails_to_load() {
     for herdr in [
         format!("{CONFIG}\n[runtime]\nkind = \"herdr\"\n"),
         format!("{CONFIG}\n[fleet.sendmeter.runtime]\nkind = \"herdr\"\n"),
-        format!("{CONFIG}\n[hosts.air]\nmachine = \"air\"\nruntime = \"herdr\"\n"),
     ] {
         let e = format!("{:#}", drover::config::Config::parse(&herdr).unwrap_err());
         assert!(e.contains(drover::config::RETIRED_RUNTIME), "{e}");
@@ -843,13 +853,16 @@ fn drive_reads_berths_seq_file_once_when_sheds_is_missing() {
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     std::fs::write(c.state.with_file_name("berth.seq"), "8").unwrap();
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    assert_eq!(drover::session::stamp::intake(&c, &cfg, &b.shed().wire).unwrap(), 1);
+    assert_eq!(
+        drover::session::stamp::intake(&c, &cfg, &drover::runner::Real, &b.shed().wire).unwrap(),
+        1
+    );
     assert_eq!(b.last("events")["since"], 8);
     assert_eq!(
         std::fs::read_to_string(c.state.with_file_name("shed.seq")).unwrap(),
         "9"
     );
-    drover::session::stamp::intake(&c, &cfg, &b.shed().wire).unwrap();
+    drover::session::stamp::intake(&c, &cfg, &drover::runner::Real, &b.shed().wire).unwrap();
     assert_eq!(b.last("events")["since"], 9, "shed's file wins once it exists");
 }
 
@@ -1021,10 +1034,11 @@ fn exits(b: &FakeShed, kinds: &[Value]) {
     b.lock().terms.get_mut("sendmeter-impl-12").unwrap()["state"] = json!("exited");
     let mut st = b.lock();
     let ev = &mut st.events;
-    let start = ev.len() as u64 * 10;
+    let start = u64::try_from(ev.len()).unwrap() * 10;
     let all = [&[json!({"event": "turn", "prompt": "# Brief"})][..], kinds].concat();
     for (i, k) in all.iter().enumerate() {
-        let mut e = json!({"seq": start + i as u64 + 1, "name": "sendmeter-impl-12", "labels": lane_labels()});
+        let mut e =
+            json!({"seq": start + u64::try_from(i).unwrap() + 1, "name": "sendmeter-impl-12", "labels": lane_labels()});
         e.as_object_mut().unwrap().extend(k.as_object().unwrap().clone());
         ev.push(e);
     }
@@ -1043,7 +1057,7 @@ fn logged(c: &drover::Ctx, kind: &str) -> Vec<Event> {
 }
 
 #[test]
-fn an_acp_lane_that_exits_on_a_usage_limit_is_pushed_holds_the_host_and_resumes_once_it_is_on() {
+fn an_acp_lane_that_exits_on_a_usage_limit_is_pushed_held_by_its_account_and_resumes_once_it_is_ready() {
     let (c, b, f, wt, origin) = acp_lane("acp-resume");
     for m in ["test", "fix"] {
         git(&wt, &["commit", "-q", "--allow-empty", "-m", m]);
@@ -1058,6 +1072,7 @@ fn an_acp_lane_that_exits_on_a_usage_limit_is_pushed_holds_the_host_and_resumes_
             json!({"event": "exited", "code": 0}),
         ],
     );
+    b.lock().accounts = vec![acct("work", "limited")];
     let cli = Push(b.cli(&f), wt.clone());
     let (code, out) = run(&later(&c, 300), &cli, &["drive"]);
     assert_eq!(code, 0, "{out}");
@@ -1069,14 +1084,13 @@ fn an_acp_lane_that_exits_on_a_usage_limit_is_pushed_holds_the_host_and_resumes_
         "the staged change is kept"
     );
     assert_eq!(logged(&c, "spawn").len(), 1, "held, never rested: {out}");
-    let hit = logged(&c, "usage-limit");
-    assert_eq!(hit.len(), 1, "{out}");
-    assert!(hit[0].str("reason").unwrap().contains("claude /login"), "{hit:?}");
     let (code, out) = run(&later(&c, 360), &cli, &["drive"]);
     assert_eq!((code, logged(&c, "spawn").len()), (0, 1), "still held: {out}");
-    assert_eq!(logged(&c, "usage-limit").len(), 1, "one alert");
-    let (code, out) = run(&later(&c, 400), &cli, &["hosts", "on", "main"]);
-    assert_eq!(code, 0, "{out}");
+    assert!(
+        logged(&c, "usage-limit").is_empty(),
+        "account.ls holds it, never the lane's banner"
+    );
+    b.lock().accounts = vec![acct("work", "ready")];
     let (code, out) = run(&later(&c, 2400), &cli, &["drive"]);
     assert_eq!(code, 0, "{out}");
     let sp = logged(&c, "spawn");
@@ -1101,7 +1115,7 @@ fn lane_dead_and_waiting_carry_an_acp_lanes_exit_cause() {
     exits(&b, &[json!({"event": "exited", "code": 139})]);
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let c = later(&c, 300);
-    drover::session::stamp::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap();
+    drover::session::stamp::intake(&c, &cfg, &drover::runner::Real, &cfg.shed().unwrap().wire).unwrap();
     let cli = Push(b.cli(&f), wt.clone());
     let (code, out) = run(&c, &cli, &["check"]);
     assert_eq!(code, 0, "{out}");
@@ -1144,7 +1158,7 @@ fn a_shed_acp_fleets_thread_runs_its_orchestrator_as_an_acp_session_that_sleeps_
     let start = calls.iter().find(|c| c.starts_with("shed run")).unwrap();
     let head = format!(
         "shed run --acp claude-acp --policy allow --name orchestrator-t1 --cwd {0} --mcp {0}/.mcp.lane.json \
-         --meta {1} --label fleet=sendmeter --label issue=- \
+         --meta {1} --account auto --label fleet=sendmeter --label issue=- \
          --label role=orchestrator --label harness=claude --label source=drover --label group=sendmeter --label thread=t1 \
          -- sh -c ",
         dir.display(), *META
@@ -1164,8 +1178,9 @@ fn a_shed_acp_fleets_thread_runs_its_orchestrator_as_an_acp_session_that_sleeps_
     assert!(brief.contains("Thread: t1, Grill #12"));
     let st = &thread_events(&c, "orchestrator-start")[0];
     assert_eq!(
-        (st.str("runtime"), st.str("pane")),
-        (Some("shed-acp"), Some("orchestrator-t1"))
+        (st.str("runtime"), st.str("pane"), st.str("account")),
+        (Some("shed-acp"), Some("orchestrator-t1"), Some("auto")),
+        "no account key: auto"
     );
     assert_eq!(*st.val("confirmed"), json!(true));
 
@@ -1499,7 +1514,13 @@ fn herdr_era_lane(
     .enumerate()
     .filter(|_| fix)
     {
-        let e = Event::new(c.now - 900 + i as u64 * 60, "sendmeter", Some(12), kind, data);
+        let e = Event::new(
+            c.now - 900 + u64::try_from(i).unwrap() * 60,
+            "sendmeter",
+            Some(12),
+            kind,
+            data,
+        );
         drover::events::append(&c.state, &e).unwrap();
     }
     for n in live {
@@ -1659,152 +1680,6 @@ fn a_hook_naming_another_binary_refuses_acp_unguarded() {
     let cli = b.cli(&f);
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl", "--dry-run"]);
     assert!(code == 3 && out.contains("REFUSED ACP_UNGUARDED"), "{out}");
-}
-
-#[test]
-fn a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login() {
-    let b = FakeShed::new();
-    let cfg = acp_config(&b.sock, "claude").replace(
-        "[fleet.sendmeter.role.rev]\nharness = \"claude\"",
-        "[fleet.sendmeter.role.rev]\nagent = \"codex-acp\"\nmodel = \"gpt-5.5\"\neffort = \"high\"",
-    );
-    let c = acp_ctx("acp-codex", &cfg);
-    let agents = json!([{"id": "claude-acp", "cmd": ["env"]}, {"id": "codex-acp", "cmd": ["env"]}]);
-    let head = "a".repeat(40);
-    let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
-        "mergeable": "MERGEABLE", "statusCheckRollup": []});
-    let f = spawn_fake()
-        .reply("shed help run", "--meta <JSON>")
-        .reply("shed agents --json", &agents.to_string())
-        .reply("shed run", "")
-        .reply("shed send", "")
-        .reply("gh pr view", &pr.to_string());
-    let cli = b.cli(&f);
-    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
-    assert_eq!(code, 0, "{out}");
-    let ev = |kind: &str, d: Value| {
-        drover::events::append(&c.state, &Event::new(c.now, "sendmeter", Some(12), kind, d)).unwrap();
-    };
-    ev("pushed", json!({"sha": head}));
-    ev("turn-end", json!({"state": "done", "agent": "sendmeter-impl-12"}));
-    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "rev"]);
-    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
-    let calls = f.calls.borrow();
-    let runs: Vec<_> = calls.iter().filter(|c| c.starts_with("shed run")).collect();
-    assert!(
-        runs[0].contains("--acp claude-acp ") && runs[0].contains("--label role=impl "),
-        "{runs:?}"
-    );
-    assert!(
-        runs[1].contains("--acp codex-acp ") && runs[1].contains("--label role=rev "),
-        "{runs:?}"
-    );
-    assert!(runs[1].contains("--label harness=codex "), "{runs:?}");
-    assert!(runs[0].contains(&format!(" --meta {} ", *META)), "{runs:?}");
-    assert!(
-        !runs[1].contains(" --mcp ") && !runs[1].contains(" --meta "),
-        "{runs:?}"
-    );
-    let dumps = cli.out.borrow();
-    let env = |i: usize| -> BTreeMap<String, String> {
-        let kv = dumps[i].lines().filter_map(|l| l.split_once('='));
-        kv.map(|(k, v)| (k.to_string(), v.to_string())).collect()
-    };
-    let (imp, rev) = (env(0), env(1));
-    for e in [&imp, &rev] {
-        assert!(
-            !e.contains_key("CLAUDE_CONFIG_DIR") && !e.contains_key("CODEX_HOME"),
-            "the host's own logins: {e:?}"
-        );
-    }
-    assert_eq!(rev.get("DROVER_LANE").map(String::as_str), Some("sendmeter:12:rev"));
-    let codex: Value = serde_json::from_str(&rev["CODEX_CONFIG"]).unwrap();
-    assert_eq!(
-        (&codex["model"], &codex["model_reasoning_effort"]),
-        (&json!("gpt-5.5"), &json!("high"))
-    );
-    let wt = PathBuf::from(&rev["PWD"]);
-    assert!(std::fs::read_to_string(wt.join("AGENTS.override.md"))
-        .unwrap()
-        .contains("drover"));
-    let hook = codex["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
-    assert!(hook.ends_with("hook --role rev"), "{hook}");
-    let tool = |call: Value| {
-        let mut ch = std::process::Command::new("sh")
-            .args(["-c", hook])
-            .env_clear()
-            .envs(rev.iter())
-            .env("FLEET_CONFIG", &c.config)
-            .env("FLEET_STATE", &c.state)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .spawn()
-            .unwrap();
-        ch.stdin.take().unwrap().write_all(call.to_string().as_bytes()).unwrap();
-        String::from_utf8(ch.wait_with_output().unwrap().stdout).unwrap()
-    };
-    let call = |tool: &str, cmd: &str| {
-        json!({"hook_event_name": "PreToolUse", "turn_id": "t1", "model": "gpt-5.5", "cwd": wt,
-            "tool_name": tool, "tool_input": {"command": cmd}})
-    };
-    let patch = "*** Begin Patch\n*** Update File: src/main.rs\n@@\n-a\n+b\n*** End Patch";
-    for (t, cmd, why) in [
-        ("Bash", "gh pr merge 3", "merge"),
-        ("Bash", "git push origin staging", "staging"),
-        ("apply_patch", patch, "reviewers are read-only"),
-    ] {
-        let o = tool(call(t, cmd));
-        let v: Value = serde_json::from_str(&o).unwrap_or_else(|_| panic!("{cmd}: {o}"));
-        let d = &v["hookSpecificOutput"];
-        assert_eq!(d["permissionDecision"], "deny", "{cmd}: {o}");
-        assert!(
-            d["permissionDecisionReason"].as_str().unwrap().contains(why),
-            "{cmd}: {o}"
-        );
-    }
-    assert_eq!(tool(call("Bash", "cargo test")), "", "an ordinary command runs");
-}
-
-#[test]
-fn a_rev_on_the_impls_provider_refuses_to_load() {
-    let sock = std::path::Path::new("/nonexistent/shed.sock");
-    let base = acp_config(sock, "claude");
-    let rev = |agent: &str| {
-        base.replace(
-            "[fleet.sendmeter.role.rev]\nharness = \"claude\"",
-            &format!("[fleet.sendmeter.role.rev]\nagent = \"{agent}\""),
-        )
-    };
-    let load = |t: &str| drover::config::Config::parse(t).map_err(|e| format!("{e:#}"));
-    let err = load(&rev("claude-acp")).unwrap_err();
-    assert!(
-        err.contains("REVIEW_SAME_PROVIDER") && err.contains("anthropic"),
-        "{err}"
-    );
-    let imp = base.replace(
-        "harness = \"claude\"\nprofile = \"fleet-impl\"",
-        "agent = \"claude-acp\"\nprofile = \"fleet-impl\"",
-    );
-    assert!(load(&imp).unwrap_err().contains("REVIEW_SAME_PROVIDER"));
-    let opt = |line: &str| {
-        rev("claude-acp").replace(
-            "integration = \"staging\"   # never main",
-            &format!("integration = \"staging\"\n{line}"),
-        )
-    };
-    assert!(
-        load(&opt("rev_same_provider = true"))
-            .unwrap_err()
-            .contains("REVIEW_SAME_PROVIDER"),
-        "no reason given"
-    );
-    assert!(load(&opt("rev_same_provider = true # one provider for now (q911)")).is_ok());
-    let ok = load(&rev("codex-acp")).unwrap();
-    assert_eq!(ok.fleet["sendmeter"].role["rev"].harness, "codex");
-    assert!(load(&rev("gemini-acp"))
-        .unwrap_err()
-        .contains("no harness adapter guards it"));
-    assert!(load(&base).is_ok());
 }
 
 fn lane_json(b: &FakeShed, agent: &str, query: &str) -> Value {
@@ -2041,18 +1916,19 @@ fn a_pending_tool_call_whose_process_died_is_silent() {
 #[test]
 fn a_silent_lanes_respawn_waits_under_host_busy_and_mem_low() {
     for (name, prog, sample, spawns) in [
-        ("acp-busy", "sysctl -n vm.loadavg", "{ 90.00 80.00 70.00 }\n", 1),
+        ("acp-busy", "iostat", iostat(5), 1),
         (
             "acp-memlow",
             "vm_stat",
-            "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 100.\nPages inactive: 100.\n",
+            "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 100.\nPages inactive: 100.\n"
+                .to_string(),
             1,
         ),
     ] {
         let (c, b, mut f, wt, _) = acp_lane(name);
         mid_turn(&b);
         session(&b, &[turn()]);
-        host(&mut f, prog, sample);
+        host(&mut f, prog, &sample);
         let cli = Push(b.cli(&f), wt.clone());
         drive_at(&c, &cli, 60);
         drive_at(&c, &cli, 60 + SILENT);
@@ -2071,27 +1947,25 @@ fn a_silent_lanes_respawn_waits_under_host_busy_and_mem_low() {
 }
 
 #[test]
-fn an_auth_failure_alerts_signed_out_once_and_holds_the_host() {
+fn an_account_lanes_auth_failure_is_held_by_account_ls_not_its_banner() {
     let (c, b, f, wt, _) = acp_lane("acp-auth");
     mid_turn(&b);
     let err = "auth: API Error: 401 authentication_error";
     b.lock().terms.get_mut("sendmeter-impl-12").unwrap()["reported"] = json!({"state": "error", "note": err});
     let cli = Push(b.cli(&f), wt.clone());
-    for s in [60, 120] {
+    look(&later(&c, 60), &b.on(&cli));
+    let (code, out) = run(&later(&c, 60), &cli, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(logged(&c, "signed-out").is_empty(), "the banner holds nothing");
+    b.lock().accounts = vec![acct("work", "signed-out")];
+    for s in [120, 180] {
         look(&later(&c, s), &b.on(&cli));
         let (code, out) = run(&later(&c, s), &cli, &["check"]);
         assert_eq!(code, 0, "{out}");
     }
     let out = logged(&c, "signed-out");
     assert_eq!(out.len(), 1, "alerted once: {out:?}");
-    let why = out[0].str("reason").unwrap();
-    assert!(
-        why.contains("claude /login") && why.contains("is signed out on main"),
-        "{why}"
-    );
-    let (code, out) = run(&later(&c, 180), &cli, &["spawn", "sendmeter", "13", "impl"]);
-    assert_eq!(code, 3, "{out}");
-    assert!(out.contains("LOGIN_NEEDED"), "{out}");
+    assert_eq!(out[0].str("signin"), Some("claude/work"), "{out:?}");
 }
 
 #[test]
@@ -2113,24 +1987,24 @@ fn a_skipped_fix_round_spawn_shows_its_refusal_in_waiting() {
     let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
         "mergeable": "MERGEABLE", "statusCheckRollup": []});
     f = f.reply("gh pr view issue-12", &pr.to_string());
-    host(&mut f, "sysctl -n vm.loadavg", "{ 90.00 80.00 70.00 }\n");
+    host(&mut f, "iostat", &iostat(5));
     let cli = Push(b.cli(&f), wt.clone());
     drive_at(&c, &cli, 60);
     assert_eq!(logged(&c, "spawn").len(), 2, "the fix round (a new lane) waits");
     let (_, w) = run(&later(&c, 3 * 3600), &cli, &["waiting", "sendmeter"]);
-    assert!(w.contains("held: HOST_BUSY load/cpu 9.00 > "), "{w}");
+    assert!(w.contains("held: HOST_BUSY cpu idle 5% < "), "{w}");
     assert!(!w.contains("nothing drives this"), "{w}");
 }
 
 #[test]
 fn an_acp_lane_silent_after_its_first_turn_is_a_failed_start() {
     let (c, b, f, wt, _) = acp_lane("acp-silent");
-    let seq = b.lock().events.len() as u64 * 10 + 1;
+    let seq = u64::try_from(b.lock().events.len()).unwrap() * 10 + 1;
     let turn =
         json!({"seq": seq, "name": "sendmeter-impl-12", "labels": lane_labels(), "event": "turn", "prompt": "# Brief"});
     b.lock().events.push(turn);
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    drover::session::stamp::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap();
+    drover::session::stamp::intake(&c, &cfg, &drover::runner::Real, &cfg.shed().unwrap().wire).unwrap();
     let cli = Push(b.cli(&f), wt.clone());
     let check = |secs| {
         let (code, out) = run(&later(&c, secs), &cli, &["check"]);
@@ -2346,7 +2220,13 @@ fn thread_say_restarts_a_hung_acp_orchestrator_and_delivers_to_the_fresh_one() {
     let text = json!({"seq": 1, "name": "orchestrator-t1", "labels": labels, "event": "text", "text": "thinking"});
     b.lock().events.push(text);
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    drover::session::stamp::intake(&at(&c, c.now + 20 * 60), &cfg, &cfg.shed().unwrap().wire).unwrap();
+    drover::session::stamp::intake(
+        &at(&c, c.now + 20 * 60),
+        &cfg,
+        &drover::runner::Real,
+        &cfg.shed().unwrap().wire,
+    )
+    .unwrap();
     let f = hang_fake();
     assert_eq!(
         run(
@@ -2366,8 +2246,8 @@ fn thread_say_restarts_a_hung_acp_orchestrator_and_delivers_to_the_fresh_one() {
         [
             "shed cancel",
             "shed kill",
-            "shed help",
             "shed agents",
+            "shed help",
             "shed run",
             "shed send"
         ]

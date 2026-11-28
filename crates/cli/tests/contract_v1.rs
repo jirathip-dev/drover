@@ -227,3 +227,62 @@ fn the_stream_resumes_after_last_event_id() {
     let row: Value = serde_json::from_str(data).unwrap();
     assert_eq!((row["seq"].clone(), row["kind"].clone()), (json!(16), json!("alert")));
 }
+
+#[test]
+fn attach_and_said_keep_contract_v1() {
+    let c = board("contract-said");
+    let r = Fake::default().reply("gh", "");
+    let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let post = |path: &str, auth: &str, body: Value| {
+        let body = body.to_string();
+        let r = format!(
+            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n{auth}Content-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let res = String::from_utf8_lossy(&s.respond(&r, T)).into_owned();
+        serde_json::from_str::<Value>(res.split_once("\r\n\r\n").unwrap().1).unwrap()
+    };
+    let attach = post(
+        "/api/v1/orchestrator-attach",
+        &ck,
+        json!({"fleet": "sendmeter", "thread": "chat-1"}),
+    );
+    assert_eq!(attach["ok"], true, "{attach}");
+    let said = json!({"id": "m1", "ts": T, "from": "owner", "text": "go"});
+    let said = post("/api/v1/thread/chat-1/said", &bearer(), said);
+    assert_eq!(said["ok"], true, "{said}");
+    let mut fails = vec![];
+    check("orchestrator-attach", &attach, &mut fails);
+    check("said", &said, &mut fails);
+    assert!(fails.is_empty(), "{}", fails.join("\n"));
+}
+
+#[test]
+fn the_manifest_keeps_contract_v1_and_names_every_chat_path() {
+    let c = board("contract-manifest");
+    let r = Fake::default();
+    let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    assert_eq!(get(&s, "/api/v1/manifest", "").0, "401");
+    let (code, m) = get(&s, "/api/v1/manifest", &bearer());
+    assert_eq!(code, "200", "{m}");
+    assert_eq!(m["api"], "http://127.0.0.1:4810");
+    assert_eq!(m["threads"]["profiles"], "/cooee/profiles");
+    assert_eq!(m["threads"]["started"], "/cooee/thread-started");
+    assert_eq!(m["threads"]["said"], "/api/v1/thread/<id>/said");
+    let screens: Vec<&str> = m["screens"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|p| p["screen"].as_str())
+        .collect();
+    assert_eq!(
+        screens,
+        ["/screens/queue", "/screens/events", "/screens/lanes", "/screens/fleets"]
+    );
+    let actions = m["actions"].as_array().unwrap();
+    assert!(m["destructive"].as_array().unwrap().iter().all(|d| actions.contains(d)));
+    let mut fails = vec![];
+    check("manifest", &m, &mut fails);
+    assert!(fails.is_empty(), "{}", fails.join("\n"));
+}

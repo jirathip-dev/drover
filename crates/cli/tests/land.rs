@@ -14,12 +14,14 @@ fn setup(name: &str, land: bool, verdict: &str) -> (std::path::PathBuf, drover::
     let d = tmpdir(name);
     let text = if land {
         let extra = format!(
-            "merge_label = \"merge-ready\"\n\n[fleet.sendmeter.land]\nmode = \"fast-first\"\nfast = [\"unit\"]\n\
+            "\n[fleet.sendmeter.land]\nmode = \"fast-first\"\nfast = [\"unit\"]\n\
              full_first_paths = [\"db/**\"]\n\n[[fleet.sendmeter.notify]]\ncmd = \"cat >> '{}'\"\non = [\"merged\"]\n\n\
              [fleet.sendmeter.role.impl]",
             d.join("alerts.txt").display()
         );
-        CONFIG.replacen("[fleet.sendmeter.role.impl]", &extra, 1)
+        CONFIG
+            .replacen("merge_label = \"off\"\n", "", 1)
+            .replacen("[fleet.sendmeter.role.impl]", &extra, 1)
     } else {
         CONFIG.to_string()
     };
@@ -169,7 +171,7 @@ fn integration_moved_catches_up_and_lands_on_the_fast_checks_again() {
 
 fn landed(c: &drover::Ctx, rows: &[(u64, &str, &str)]) {
     for (i, (n, mode, sha)) in rows.iter().enumerate() {
-        let ts = 100 + i as u64;
+        let ts = 100 + u64::try_from(i).unwrap();
         let d = json!({"pr": format!("{}", 30 + n), "merge_sha": sha});
         append(&c.state, &Event::new(ts, "sendmeter", Some(*n), "merged", d)).unwrap();
         let d = json!({"mode": mode, "sha": sha, "pr": format!("{}", 30 + n)});

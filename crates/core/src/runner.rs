@@ -247,7 +247,7 @@ impl Real {
                 ..Out::default()
             });
         }
-        let mut pipes = None;
+        let (mut pipes, mut pid) = (None, None);
         let end = crate::clock::instant() + limit;
         let start = || {
             use std::os::unix::process::CommandExt;
@@ -259,11 +259,17 @@ impl Real {
                 .stderr(Stdio::piped())
                 .spawn()
                 .with_context(|| format!("cannot run {prog}"))?;
+            pid = Some(c.id());
+            running().insert(c.id());
             let _ = c.stdin.take().map(|mut s| s.write_all(input));
             pipes = Some((drain(c.stdout.take()), drain(c.stderr.take())));
             Ok(c)
         };
-        let ended = settle(dir.map(String::as_str), limit, start)?;
+        let ended = settle(dir.map(String::as_str), limit, start);
+        if let Some(p) = pid {
+            running().remove(&p);
+        }
+        let ended = ended?;
         let text = |b: std::sync::mpsc::Receiver<Vec<u8>>| {
             let left = end.saturating_duration_since(crate::clock::instant());
             let v = b.recv_timeout(left).ok()?;
@@ -290,6 +296,19 @@ impl Real {
     }
 }
 
+fn running() -> std::sync::MutexGuard<'static, std::collections::BTreeSet<u32>> {
+    static RUNNING: std::sync::Mutex<std::collections::BTreeSet<u32>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    RUNNING.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// SIGKILL to the process group of every call still running here, as a pass ending on its deadline leaves none behind.
+pub fn kill_running() {
+    for p in running().iter() {
+        drover_sys::kill_group(*p);
+    }
+}
+
 /// The argv a `git` really gets (graft-blind: drover never sees a lane's baseline view); every other program's is unchanged.
 pub fn plain(prog: &str, args: &[String]) -> Vec<String> {
     let git = std::path::Path::new(prog).file_name().is_some_and(|n| n == "git");
@@ -297,7 +316,7 @@ pub fn plain(prog: &str, args: &[String]) -> Vec<String> {
     flag.into_iter().chain(args.iter().cloned()).collect()
 }
 
-/// Every call's time limit by the program's file name, unless `run_for` gives one: a call that hits it is killed and exits 124. - `security`, `codesign`: 10 s; they wait on the login Keychain, which can stop answering (11-08). - `git clone|fetch|pull|push`: 10 min; a large repo over the network. - `cp`, `rm`: 10 min; copying (spawn's build cache) or deleting a worktree's build folder of many GB. - `cargo`: 30 min; self-update's release build. - `ssh` through `hosts::On`: the limit of the command it carries; `hosts bootstrap`'s installs 30 min by `run_for`. - arch-check's `generate`: `gate_check_minutes` by `run_for`. - anything else: 60 s.
+/// Every call's time limit by the program's file name, unless `run_for` gives one: a call that hits it is killed and exits 124. - `security`, `codesign`: 10 s; they wait on the login Keychain, which can stop answering (11-08). - `git clone|fetch|pull|push`: 10 min; a large repo over the network. - `cp`, `rm`: 10 min; copying (spawn's build cache) or deleting a worktree's build folder of many GB. - `compact`: 10 min; its dry run mirrors the repo. - `cargo`: 30 min; self-update's release build. - `ssh` through `hosts::On`: the limit of the command it carries. - arch-check's `generate`: `gate_check_minutes` by `run_for`. - anything else: 60 s.
 pub fn limit(prog: &str, args: &[String]) -> Duration {
     let net = |w: &String| ["clone", "fetch", "pull", "push"].contains(&w.as_str());
     let name = std::path::Path::new(prog)
@@ -314,7 +333,7 @@ pub fn limit(prog: &str, args: &[String]) -> Duration {
     let secs = match &*name {
         "security" | "codesign" => 10,
         "git" if args.iter().any(net) => 600,
-        "cp" | "rm" => 600,
+        "cp" | "rm" | "compact" => 600,
         "cargo" => 1800,
         _ => 60,
     };
@@ -332,15 +351,15 @@ pub fn answers(dir: &std::path::Path) -> bool {
 }
 
 fn listed(dir: &str) -> String {
-    let load = crate::host::load().map_or("?".into(), |l| format!("{:.1}", l.0));
+    let idle = crate::host::idle().map_or("?".into(), |i| format!("{i:.0}%"));
     match probes().get(dir) {
         Some(p) if !p.done.load(std::sync::atomic::Ordering::Relaxed) => {
             format!(
-                "folder listing still running after {:.1} s at load {load}",
+                "folder listing still running after {:.1} s at cpu idle {idle}",
                 p.at.elapsed().as_secs_f64()
             )
         }
-        _ => format!("a call on its disk ran out of time; load {load}"),
+        _ => format!("a call on its disk ran out of time; cpu idle {idle}"),
     }
 }
 

@@ -6,13 +6,25 @@ use serde_json::{json, Value};
 use shed_proto::{KeysParams, Method, ReadParams, RunParams, SendParams, Target, WaitParams};
 use std::path::PathBuf;
 
-/// An ACP lane's start: its adapter command, the role's MCP servers file (`--mcp`), the provider's session options (`--meta`) and whether shed may never hibernate it (`--no-hibernate`).
+/// An ACP lane's start: its adapter command, the role's MCP servers file (`--mcp`), the provider's session options (`--meta`), whether shed may never hibernate it (`--no-hibernate`) and its shed account (`--account`; none on another host).
 #[derive(Clone, Debug, Default)]
 pub struct Acp {
     pub cmd: Vec<String>,
     pub mcp: Option<PathBuf>,
     pub meta: Option<Value>,
     pub awake: bool,
+    pub account: Option<crate::config::Account>,
+    pub judge: Option<Judged>,
+}
+
+/// A judged lane's start: shed's `judge` policy runs `cmd` per permission request within `secs`; `env` is what the judge and the agent share.
+#[derive(Clone, Debug, Default)]
+pub struct Judged {
+    pub cmd: String,
+    pub secs: u64,
+    pub env: Vec<(String, String)>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
 }
 
 /// Shed's lanes: terminals named as their agents, labelled `fleet`, `issue`, `role` and `harness`.
@@ -94,17 +106,15 @@ impl Shed {
     /// The `shed run --acp` words that start ACP lane `name`.
     pub fn acp_argv(&self, name: &str, labels: &[(&str, String)], cwd: &str, acp: &Acp) -> Vec<String> {
         let id = self.0.acp.as_deref().unwrap_or_default();
-        let mut a = argv(&[
-            "run",
-            "--acp",
-            id,
-            "--policy",
-            &self.0.policy,
-            "--name",
-            name,
-            "--cwd",
-            cwd,
-        ]);
+        let policy = if acp.judge.is_some() { "judge" } else { &self.0.policy };
+        let mut a = argv(&["run", "--acp", id, "--policy", policy]);
+        if let Some(j) = &acp.judge {
+            a.extend(argv(&["--judge", &j.cmd, "--judge-secs", &j.secs.to_string()]));
+            a.extend(j.env.iter().flat_map(|(k, v)| ["--env".into(), format!("{k}={v}")]));
+            a.extend(j.model.iter().flat_map(|m| ["--model".into(), m.clone()]));
+            a.extend(j.effort.iter().flat_map(|e| ["--effort".into(), e.clone()]));
+        }
+        a.extend(argv(&["--name", name, "--cwd", cwd]));
         a.extend(
             acp.mcp
                 .iter()
@@ -112,6 +122,11 @@ impl Shed {
         );
         a.extend(acp.meta.iter().flat_map(|m| ["--meta".into(), m.to_string()]));
         a.extend(acp.awake.then(|| "--no-hibernate".to_string()));
+        a.extend(
+            acp.account
+                .iter()
+                .flat_map(|x| ["--account".into(), x.word().to_string()]),
+        );
         a.extend(labels.iter().flat_map(|(k, v)| ["--label".into(), format!("{k}={v}")]));
         a.extend(
             (!acp.cmd.is_empty())

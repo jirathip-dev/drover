@@ -1,6 +1,6 @@
 use crate::access::{civil_month_day, civil_year};
 use crate::config::Config;
-use crate::events::{emit, plain, Event, Json};
+use crate::events::{plain, Event};
 use crate::runner::{ok, Runner};
 use crate::Ctx;
 use anyhow::{Context, Result};
@@ -8,17 +8,17 @@ use serde_json::json;
 use std::io::Write;
 
 /// `drover lesson digest`: the last `days` of rev FAIL findings, the owner's lines in the fleet's conductor threads, `by: owner` events and reverts on integration, secret-looking values redacted.
-pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -> Result<String> {
+pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -> Result<(String, usize)> {
     let f = cfg.fleet(fleet)?;
     let since = ctx.now.saturating_sub(days * 86400);
     let events = crate::events::history(&ctx.state)?;
     let recent: Vec<&Event> = events.iter().filter(|e| e.fleet == fleet && e.ts >= since).collect();
     let mut s =
         format!("# Lessons digest: {fleet}, last {days} days\n\n## Review FAIL findings (blocking, with proof)\n");
-    for e in recent
-        .iter()
+    let fails: Vec<&&Event> = (recent.iter())
         .filter(|e| e.kind == "verdict" && e.str("verdict") == Some("FAIL"))
-    {
+        .collect();
+    for e in &fails {
         let n = e.issue.unwrap_or_default();
         let round = events
             .iter()
@@ -59,6 +59,18 @@ pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -
     for e in recent.iter().filter(owner) {
         s += &format!("- {}: {}\n", e.kind, plain(e));
     }
+    s += "\n## Flaky checks (green after a re-run)\n\n";
+    for e in recent.iter().filter(|e| e.kind == "ci-flaky?") {
+        let n = e.issue.map_or(String::new(), |n| format!("#{n} "));
+        let checks = e
+            .val("checks")
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c.as_str());
+        let checks: Vec<&str> = checks.collect();
+        s += &format!("- {n}{} at {:.7}\n", checks.join(", "), e.str("sha").unwrap_or("?"));
+    }
     s += "\n## Reverts on integration\n\n";
     let local = f.local_path().to_string_lossy().into_owned();
     let integration = format!("origin/{}", f.integration);
@@ -83,159 +95,8 @@ pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -
     for (c, stats, decision) in checks {
         s += &format!("- {}: {stats} → {decision}\n", c.name);
     }
-    Ok(s.lines().map(crate::lanes::redact).collect::<Vec<_>>().join("\n") + "\n")
-}
-
-/// `drover lesson`: file this week's lessons issue, queue it on top and spawn its `lesson` lane; false when the lane's prompt was not confirmed (exit 4, as `spawn`). the board's run logs the paired device it came from (`by`).
-pub fn run(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
-    fleet: &str,
-    by: Option<&str>,
-) -> Result<bool> {
-    let title = format!("lessons: {fleet} week of {}", ymd(ctx.now / 86400));
-    let body = include_str!("../roles/lesson-issue.md").replace("{fleet}", fleet);
-    file(ctx, cfg, r, out, (fleet, "lesson", by), (&title, &body))
-}
-
-/// Run `drover lesson <fleet>`: exit 4 when the lane's prompt was not confirmed.
-pub fn cli(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: Option<String>) -> Result<i32> {
-    let fleet = fleet.context("usage: drover lesson <FLEET> | drover lesson digest <FLEET>")?;
-    Ok(if run(ctx, cfg, r, out, &fleet, None)? { 0 } else { 4 })
-}
-
-pub(crate) fn file(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
-    (fleet, role, by): (&str, &str, Option<&str>),
-    (title, body): (&str, &str),
-) -> Result<bool> {
-    let f = cfg.fleet(fleet)?;
-    let url = crate::hygiene::gh(
-        ctx,
-        r,
-        cfg,
-        fleet,
-        &["issue", "create", "-R", &f.repo, "--title", title, "--body", body],
-    )?;
-    let n: u64 = url
-        .trim()
-        .rsplit('/')
-        .next()
-        .and_then(|n| n.parse().ok())
-        .context("gh issue create: no number")?;
-    writeln!(out, "filed {fleet}#{n}: {title}")?;
-    let mut op = crate::queue::op("add", &[n], true, None, None, None);
-    if let Some(by) = by {
-        op.put("by", json!(by));
-    }
-    writeln!(out, "{}", crate::queue_change(ctx, cfg, fleet, op, by.map(|_| "web"))?)?;
-    crate::spawn::spawn(ctx, cfg, r, out, (fleet, n, role), &crate::spawn::Opts::default())
-}
-
-fn at(ctx: &Ctx, fleet: &str) -> std::path::PathBuf {
-    ctx.state.with_file_name(format!("lesson-{fleet}.at"))
-}
-
-/// When `tick` last ran (or skipped) `fleet`'s lessons; the next is due a week later.
-pub fn last(ctx: &Ctx, fleet: &str) -> Option<u64> {
-    std::fs::read_to_string(at(ctx, fleet)).ok()?.trim().parse().ok()
-}
-
-/// `tick`'s lesson run, at most once per 7 days per fleet (`lessons = "off"` opts out; a paused fleet waits).
-pub fn weekly(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    for name in cfg
-        .fleet
-        .iter()
-        .filter(|(_, f)| f.lessons.as_deref() != Some("off") && !f.paused)
-        .map(|x| x.0)
-    {
-        if last(ctx, name).is_some_and(|t| ctx.now < t + 7 * 86400) {
-            continue;
-        }
-        std::fs::write(at(ctx, name), ctx.now.to_string())?;
-        let week = ctx.now.saturating_sub(7 * 86400);
-        let first = crate::db::events(
-            &ctx.state,
-            "seq = (SELECT MIN(seq) FROM events WHERE archived = 0 AND fleet = ?1)",
-            name,
-        )?;
-        let young = first.first().is_none_or(|e| e.ts > week);
-        let fails = (crate::events::since(&ctx.state, &["verdict"], week)?.iter())
-            .filter(|e| e.fleet == *name && e.str("verdict") == Some("FAIL"))
-            .count();
-        if young || fails < 2 {
-            let why = if young {
-                "fleet under a week old"
-            } else {
-                "under 2 FAIL verdicts this week"
-            };
-            writeln!(out, "{name} lesson skipped: {why}")?;
-            let e = Event::new(
-                ctx.now,
-                name,
-                None,
-                "lesson-skipped",
-                json!({"why": why, "fails": fails}),
-            );
-            crate::events::append(&ctx.state, &e)?;
-            continue;
-        }
-        if let Err(e) = run(ctx, cfg, r, out, name, None) {
-            writeln!(out, "{name} lesson: {e:#}")?;
-        }
-    }
-    Ok(())
-}
-
-/// A lesson lane's `done --no-change` before any review: no class repeated, so drover closes its issue with that line.
-pub fn done(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
-    (fleet, n): (&str, u64),
-    why: &str,
-) -> Result<()> {
-    let st = crate::gate::issue_state(ctx, fleet, n)?;
-    if st
-        .as_ref()
-        .is_some_and(|s| s.build.as_deref() == Some("triage") && s.rounds == 0)
-    {
-        return crate::triage::done(ctx, cfg, r, out, (fleet, n), why);
-    }
-    let filed = || crate::gh::cached_title(ctx, fleet, n).is_some_and(|t| t.starts_with("lessons: "));
-    let no_pr = || crate::gh::cached_pr(ctx, fleet, n).at("number").is_null();
-    if st.is_none_or(|s| s.build.as_deref() != Some("lesson") && !(filed() && no_pr()) || s.rounds > 0) {
-        return Ok(());
-    }
-    close(ctx, cfg, r, out, (fleet, n), why)
-}
-
-pub(crate) fn close(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
-    (fleet, n): (&str, u64),
-    why: &str,
-) -> Result<()> {
-    let repo = &cfg.fleet(fleet)?.repo;
-    ok(
-        r,
-        "gh",
-        &["issue", "close", &n.to_string(), "-R", repo, "--comment", why],
-    )?;
-    emit(
-        &ctx.state,
-        cfg,
-        Event::new(ctx.now, fleet, Some(n), "closed", json!({"why": why})),
-    )?;
-    Ok(writeln!(out, "closed {fleet}#{n}: {why}")?)
+    let text = s.lines().map(crate::lanes::redact).collect::<Vec<_>>().join("\n") + "\n";
+    Ok((text, fails.len()))
 }
 
 const RULES: [&str; 2] = [".drover/rules.md", ".herdsman/rules.md"];
@@ -243,10 +104,10 @@ pub const PROSE_ONLY: &str = "- blocking [lesson] .drover/rules.md:1: this lesso
 (a CI step, a test, a type, a lint rule, a lesson check) and retires no rules line\n  Proof: spec\n  > A PR that only \
 edits prose is a FAIL in rev, unless it retires lines.\n  roles/lesson.md:3 says each class is fixed by a check";
 
-/// Whether issue `n` is a lessons issue: its lane's build, else its title (drive may start it as `impl`).
+/// Whether issue `n` is a lessons issue: its lane's build, else the job that filed it.
 pub fn is_lesson(ctx: &Ctx, st: Option<&crate::events::IssueState>, (fleet, n): (&str, u64)) -> bool {
     st.is_some_and(|s| s.build.as_deref() == Some("lesson"))
-        || crate::gh::cached_title(ctx, fleet, n).is_some_and(|t| t.starts_with("lessons: "))
+        || crate::events::working(&ctx.state).is_ok_and(|e| crate::jobs::of(&e, fleet, n) == Some("lesson"))
 }
 
 /// Whether a PR's unified `diff` only edits prose: every file Markdown, no `.drover/rules.md` line removed or changed (a retirement or promotion), no lesson check added.
@@ -271,37 +132,6 @@ pub fn prose_only(diff: &str) -> bool {
         }
     }
     checks(&added).is_empty()
-}
-
-/// The one prompt a lesson lane gets when its turn ends with no push and no `done`.
-pub fn prompt(fleet: &str, n: u64, build: Option<&str>) -> String {
-    let why = idle_note(build);
-    format!("{why}? end with `drover done --no-change \"{why}\" {fleet} {n}`")
-}
-
-/// Close a lesson or triage lane's issue that ended without its own `done`.
-pub fn idle_done(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
-    at: (&str, u64),
-    build: Option<&str>,
-) -> Result<()> {
-    done(ctx, cfg, r, out, at, idle_note(build))
-}
-
-fn idle_note(build: Option<&str>) -> &'static str {
-    if build == Some("triage") {
-        "nothing to triage"
-    } else {
-        "no repeated class"
-    }
-}
-
-/// A lane that opens no PR and closes its own issue (lesson, triage).
-pub fn no_pr(build: Option<&str>) -> bool {
-    matches!(build, Some("lesson" | "triage"))
 }
 
 /// A check a lesson PR added: a `.drover/rules.md` line `- don't X (enforced by: <name> `<cmd>`, shadow since <date>)` (or `active since`). A line without that mark is hand-written: the lesson role never runs or changes it.

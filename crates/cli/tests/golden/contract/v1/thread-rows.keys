@@ -24,6 +24,9 @@ rows[].kind = "system"
 rows[].open: boolean
 rows[].prompt: null
 rows[].prompt: string
+rows[].push.body: string
+rows[].push.tag: string
+rows[].push.title: string
 rows[].push: null
 rows[].seq: number
 rows[].text: string

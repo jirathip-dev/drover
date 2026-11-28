@@ -165,7 +165,7 @@ fn post(s: &Server, path: &str, body: &str, cookie: &str, now: u64) -> String {
 
 fn needs_and_ask(s: &Server, cookie: &str, now: u64) -> (Value, Value) {
     let needs: Value = serde_json::from_str(&api(s, ADDR, cookie, now, "needs")).unwrap();
-    let chat: Value = serde_json::from_str(&api(s, ADDR, cookie, now, "chat")).unwrap();
+    let chat: Value = chat_all(s, ADDR, cookie, now);
     let msgs: Vec<Value> = chat["threads"]
         .as_array()
         .unwrap()
@@ -574,7 +574,11 @@ fn a_superseded_design_lane_over_a_pushed_design_hands_it_off_once() {
     assert_eq!(state(&c, 12), "design");
     c.now += 1000;
     let r = fake(&c, HEAD);
-    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "design", "--supersede"]);
+    let (code, out) = run(
+        &c,
+        &r,
+        &["spawn", "sendmeter", "12", "design", "--supersede", "--why", "redo"],
+    );
     assert_eq!(code, 0, "{out}");
     assert_eq!(spawned(&c, "design"), 2);
     let out = drive(&c, &r);

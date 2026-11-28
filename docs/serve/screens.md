@@ -42,9 +42,8 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
 - #1091: `GET /screens/hosts`, the page's Hosts sheet (a [⚙] row, not cooee's): one row per host, main first, then
   A→Z, with its kind, on/off and live lane count; a remote host's [Off]/[On] runs `host` (`host-off`/`host-on`) and
   the main host's [Reap N], shown while leftovers exist, runs `reap`, each confirmed; #1378: a fleet disk section shows
-  the worktree total (drive's last walk) against `worktree_budget_gb` and the orphan folders, [Remove N] running `orphans`. No gauges or charts (Beacon's). #1131: with a `shed-acp` host, a Token
-  proxy section under it holds doctor's proxy facts and [How to set], `GET /screens/proxy-token`, the token's steps.
-  #1313: the leftover count and the proxy facts are read off the request (the host sampler, `refresh`; never by a host action);
+  the worktree total (drive's last walk) against `worktree_budget_gb` and the orphan folders, [Remove N] running `orphans`. No gauges or charts (Beacon's).
+  #1313: the leftover count is read off the request (the host sampler, `refresh`; never by a host action);
 - #1305: `GET /screens/scene` (and its `/stream`), the page's Scene (page-only; the header's `[scene]` swaps the whole
   page between the screens and Scene, kept per phone; cooee draws its own scene): one `scene` block with `weather`
   (`sky` clear, windy, fog or storm from host load, memory pressure and the spawn gate; `wind`, `fog` 0–2, `storm`,
@@ -64,6 +63,9 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   one publisher thread rebuilds the screens open streams hold (each second, at once after a write but at most once a second a screen, asleep while none
   is held) and hands each stream the diff; no server-wide stream cap, 16 a device;
 - `POST /action` `{screen, block, action, values}`: an action not in the manifest's `[permissions]` actions is 403;
-  each other runs the board's own op (a refusal is 409 with its line).
+  each other runs the board's own op (a refusal is 409 with its line);
+- `GET /api/v1/manifest` (#1774): the plugin's name, version, `api` URL, `actions` and `destructive`, the `[threads]`
+  paths, and its `screens`, one place each: `type` (header-strip, chat-cards or menu-row, `kind` in Rust), `id`,
+  `persona`, `label`, `subtitle` and `screen`; `cooee-plugin.toml` is `just gen`'s rendering of it.
 
 Tests: `crates/cli/tests/cooee_screens.rs` against cooee's fixtures in `crates/cli/tests/golden/cooee/`.

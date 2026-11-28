@@ -277,11 +277,11 @@ fn a_sometimes_state_never_reached_fails_the_run() {
     assert!(outs[0].failure.is_none(), "{}", outs[0].report());
     assert_eq!(
         gates::unreached(&outs, &["merge-after-retried-verdict"]),
-        [] as [String; 0]
+        <[String; 0]>::default()
     );
     assert_eq!(
-        gates::unreached(&outs, &["round-limit"]),
-        ["sometimes round-limit: never reached in seeds [9591]"]
+        gates::unreached(&outs, &["stuck"]),
+        ["sometimes stuck: never reached in seeds [9591]"]
     );
 }
 
@@ -335,7 +335,7 @@ fn random_seeds() {
 fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
     let s = Some(Sabotage::Planted);
     let tripped = |f: &str| f.starts_with("I1 ") && f.contains(" rev has ");
-    let h = hunt::hunt(&[2, 9, 4, 5], 2, s, |r, f| {
+    let h = hunt::hunt(&[2, 9, 4, 5], 3, s, |r, f| {
         r < 40 && !f.iter().any(|x| tripped(&x.failure))
     });
     let f = h
@@ -343,7 +343,7 @@ fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
         .iter()
         .find(|x| tripped(&x.failure))
         .expect("the hunt finds it within 40 rounds");
-    let random: Vec<u64> = (2015..2015 + f.round as u64).collect();
+    let random: Vec<u64> = (2015..2015 + u64::try_from(f.round).unwrap()).collect();
     let hs: Vec<_> = random.iter().map(|&n| std::thread::spawn(move || run(n, s))).collect();
     for o in hs.into_iter().map(|h| h.join().expect("a run")) {
         let why = o.failure.unwrap_or_default();
@@ -411,14 +411,14 @@ fn the_known_fleet_gives_exact_metrics() {
     let o = run_world(seeds::KNOWN, seeds::known(), STEPS + 1000, None);
     assert!(o.failure.is_none(), "{}", o.report());
     let want = metrics::Metrics {
-        to_merge: vec![965, 1286],
+        to_merge: vec![962, 1252],
         spawns: 5,
         wasted: 1,
         supersedes: 1,
         lanes: 4,
-        idle: 233,
+        idle: 279,
         ci_wait: 600,
-        lock_wait: 3,
+        lock_wait: 0,
         serial: 0,
         host_busy: 0,
         caps: 0,
@@ -434,10 +434,10 @@ fn the_known_fleet_gives_exact_metrics() {
             ("caps", 0.0),
             ("ci_wait_min", 10.0),
             ("host_busy", 0.0),
-            ("idle_lane_min", 3.88),
-            ("lock_wait_min", 0.05),
-            ("queue_to_merge_p50_min", 16.08),
-            ("queue_to_merge_p90_min", 21.43),
+            ("idle_lane_min", 4.65),
+            ("lock_wait_min", 0.0),
+            ("queue_to_merge_p50_min", 16.03),
+            ("queue_to_merge_p90_min", 20.87),
             ("review_rounds_per_merge", 1.0),
             ("serial_busy", 0.0),
             ("supersedes_per_lane", 0.25),
@@ -467,7 +467,7 @@ fn a_metric_over_20_percent_worse_is_a_warning() {
         "{t}"
     );
     let back: serde_json::Value = serde_json::from_str(&metrics::to_json(1, &s).to_string()).unwrap();
-    assert_eq!(metrics::regressions(&s, &back), [] as [std::string::String; 0]);
+    assert_eq!(metrics::regressions(&s, &back), <[std::string::String; 0]>::default());
 }
 
 #[test]
@@ -668,7 +668,7 @@ fn what_if() {
 
 fn fleet_toml(serial_max: u64) -> String {
     format!(
-        "[fleet.fx]\nrepo = \"o/fx\"\nlocal = \"/x\"\nintegration = \"staging\"\nflow = \"legacy\"\nserial_paths = [\"db/**\"]\nserial_max = {serial_max}\n"
+        "[fleet.fx]\nrepo = \"o/fx\"\nlocal = \"/x\"\nintegration = \"staging\"\nmerge_label = \"off\"\nflow = \"legacy\"\nserial_paths = [\"db/**\"]\nserial_max = {serial_max}\n"
     )
 }
 
@@ -728,5 +728,5 @@ fn a_busy_window_blocks_spawns_only_while_it_takes_every_host() {
     assert_eq!(loads(&ws, 1).0, [(100, 40), (300, 1)]);
     assert_eq!(loads(&ws, 2).0, [(100, 40), (200, 1)]);
     assert_eq!(loads(&ws, 3), (vec![(150, 40), (200, 1)], vec![(150, 200, 1)]));
-    assert_eq!(loads(&[(100, 200, 1)], 2).0, [] as [(u64, u64); 0]);
+    assert_eq!(loads(&[(100, 200, 1)], 2).0, <[(u64, u64); 0]>::default());
 }

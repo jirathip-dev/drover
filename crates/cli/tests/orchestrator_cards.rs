@@ -20,7 +20,7 @@ fn body(res: &str) -> &str {
 }
 
 fn chat(s: &Server, cookie: &str, now: u64) -> Value {
-    serde_json::from_str(&api(s, ADDR, cookie, now, "chat")).unwrap()
+    chat_all(s, ADDR, cookie, now)
 }
 
 fn thread(page: &Value) -> &Value {
@@ -198,7 +198,7 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
     );
     assert!(body(&req(&s, "/thread", "op=config&id=c1&act=discard", &cookie, T + 30)).contains("ALREADY_SETTLED"));
 
-    std::fs::write(&file, new.replace("review_rounds = 3", "review_rounds = 4")).unwrap();
+    std::fs::write(&file, new.replace("stall_minutes = 30", "stall_minutes = 31")).unwrap();
     assert_eq!(
         run(
             &c,
@@ -218,8 +218,7 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
 }
 
 #[test]
-fn a_signed_out_orchestrator_with_no_account_gets_a_sign_in_card_for_the_harness_login() {
-    let signed_out = json!({"state": "error", "note": "auth: Invalid API key · Please run /login"});
+fn a_signed_out_orchestrator_account_gets_one_sign_in_card_for_account_login() {
     let page = |c: &drover::Ctx| {
         let r = Fake::default();
         let s = Server::new(c, &r, Some(ADDR.into()));
@@ -231,35 +230,26 @@ fn a_signed_out_orchestrator_with_no_account_gets_a_sign_in_card_for_the_harness
         now: T + 60,
         ..c.clone()
     };
-    b.set("orchestrator-t1", |t| t["reported"] = signed_out.clone());
+    b.lock().accounts = vec![json!({"provider": "claude", "name": "work", "state": "signed-out"})];
     assert_eq!(run(&later, &Fake::default(), &["check"]).0, 0);
     assert!(b.called("kill", "orchestrator-t1"), "{:?}", b.methods());
     assert_eq!(kinds(&c, "orchestrator-start").len(), 1, "nothing to resume on");
-    assert!(kinds(&c, "agent-unavailable").is_empty(), "the harness is not rested");
-    let lines: Vec<_> = kinds(&c, "thread-msg")
-        .into_iter()
-        .filter(|e| e.str("signin").is_some())
-        .collect();
+    let signin = |c: &drover::Ctx| {
+        let all = kinds(c, "thread-msg").into_iter();
+        all.filter(|e| e.str("signin").is_some()).collect::<Vec<_>>()
+    };
+    let lines = signin(&c);
     assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0].str("signin"), Some("claude"));
+    assert_eq!(lines[0].str("signin"), Some("claude/work"));
     let signed = page(&c);
     assert!(
         shown(&signed)
             .iter()
-            .any(|m| m["kind"] == "note" && m["signin"] == "claude"),
+            .any(|m| m["kind"] == "note" && m["signin"] == "claude/work"),
         "{signed}"
     );
-    b.add("orchestrator-t1", json!({"fleet": "sendmeter", "harness": "claude"}));
-    b.set("orchestrator-t1", |t| t["reported"] = signed_out.clone());
     run(&later, &Fake::default(), &["check"]);
-    assert_eq!(
-        kinds(&c, "thread-msg")
-            .iter()
-            .filter(|e| e.str("signin").is_some())
-            .count(),
-        1,
-        "once"
-    );
+    assert_eq!(signin(&c).len(), 1, "once");
 }
 
 #[test]
@@ -475,7 +465,7 @@ fn a_run_card_between_two_replies_renders_in_order_in_the_chat_tab() {
     let cli = sh.cli(&r);
     let on = sh.on(&cli);
     let s = Server::new(&c, &on, Some(ADDR.into()));
-    let j: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, T + 60, "chat")).unwrap();
+    let j: serde_json::Value = chat_all(&s, ADDR, &cookie, T + 60);
     let t = j["threads"]
         .as_array()
         .unwrap()

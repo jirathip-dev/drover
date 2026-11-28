@@ -60,12 +60,28 @@ struct Part {
 }
 
 impl Part {
-    fn plain(&self) -> String {
-        let w: Vec<&String> = self.plain.iter().filter(|w| !w.is_empty()).collect();
+    fn args(&self) -> Vec<&str> {
+        let mut w: Vec<&str> = (self.plain.iter())
+            .map(String::as_str)
+            .filter(|w| !w.is_empty())
+            .collect();
         let at = w.iter().position(|w| !w.contains('=') || w.starts_with('-'));
-        at.and_then(|i| w.get(i..)).map_or(String::new(), |t| {
-            t.iter().map(|w| w.as_str()).collect::<Vec<_>>().join(" ")
-        })
+        w.split_off(at.unwrap_or(w.len()))
+    }
+
+    fn plain(&self) -> String {
+        self.args().join(" ")
+    }
+
+    fn dirs(&self) -> Vec<&str> {
+        let a = self.args();
+        let cd = matches!(a.first(), Some(&("cd" | "pushd"))).then(|| a.get(1).copied().unwrap_or("~"));
+        let pairs = a.iter().zip(a.iter().skip(1));
+        let flags = pairs
+            .filter(|(f, _)| matches!(**f, "-C" | "--manifest-path"))
+            .map(|(_, v)| *v);
+        let joined = a.iter().filter_map(|w| w.strip_prefix("--manifest-path="));
+        cd.into_iter().chain(flags).chain(joined).collect()
     }
 
     fn text(&self) -> String {
@@ -254,6 +270,22 @@ impl Line {
     }
 }
 
+fn inside(dir: &str, to: &str) -> bool {
+    use std::path::Component;
+    if to == "-" || to.contains(['$', '~', '`']) {
+        return false;
+    }
+    let mut n = std::path::PathBuf::new();
+    for c in Path::new(dir).join(to).components() {
+        match c {
+            Component::ParentDir if !n.pop() => return false,
+            Component::ParentDir | Component::CurDir => {}
+            c => n.push(c),
+        }
+    }
+    n.starts_with(dir)
+}
+
 /// Whether shell pattern `p` (`*` any text) matches `s`.
 pub fn hits(p: &str, s: &str) -> bool {
     crate::config::glob(p.replace('*', "**").as_bytes(), s.as_bytes())
@@ -268,15 +300,10 @@ fn matches(ps: &[String], p: &Part) -> bool {
 pub const GATE_KIND: &str = "cargo";
 
 impl Heavy {
-    /// Fleet `f`'s kinds, routes and never-routed list under host `h`'s slot limits; with a `cargo` route its gate checks join that kind.
+    /// Fleet `f`'s kinds, routes and never-routed list under host `h`'s slot limits.
     pub fn of(f: &crate::config::Fleet, h: Option<&crate::config::HostCfg>) -> Heavy {
-        let mut kinds = f.heavy_kinds();
-        if f.remote.contains_key(GATE_KIND) {
-            let gates = kinds.entry(GATE_KIND.into()).or_default();
-            gates.extend([format!("{}*", crate::gatekeeper::CHECK), "just check*".into()]);
-        }
         Heavy {
-            kinds,
+            kinds: f.heavy_kinds(),
             max: h.and_then(|h| h.heavy_max).unwrap_or(3),
             kind_max: h.map(|h| h.heavy_kind_max.clone()).unwrap_or_default(),
             wait_minutes: h.and_then(|h| h.heavy_wait_minutes).unwrap_or(30),
@@ -303,6 +330,23 @@ impl Heavy {
         } else {
             cmd.into()
         }
+    }
+
+    /// Fleet `f`'s heavy kinds under host `host`'s slot limits (None or unknown: the main host's).
+    pub fn at(cfg: &crate::config::Config, f: &crate::config::Fleet, host: Option<&str>) -> Heavy {
+        let main = || cfg.hosts.values().find(|h| h.machine.is_none());
+        Self::of(f, host.and_then(|n| cfg.hosts.get(n)).or_else(main))
+    }
+
+    /// `run` as a check's `sh -c` argv in `wt` at background priority: on the `cargo` route when `gated`, else in a slot of the kind it matches.
+    pub fn check(&self, exe: &str, run: &str, wt: &str) -> Vec<String> {
+        let line = match self.kind(run) {
+            _ if self.gated(run) => self.wrap(exe, GATE_KIND, run, Some(wt)),
+            Some(kind) => self.wrap(exe, kind, run, None),
+            None => run.to_string(),
+        };
+        let sh = format!("renice -n 19 -p $$ >/dev/null 2>&1; cd \"$0\" && {line}");
+        crate::runner::argv(&["-c", &sh, wt])
     }
 
     /// The first kind with a pattern matching one of `cmd`'s commands (leading `VAR=value` words, quoted text, comments and here-doc bodies skipped).
@@ -348,18 +392,21 @@ impl Heavy {
         let ps = self.kinds.get(kind).map_or(&[][..], Vec::as_slice);
         let never = |p: &Part| (self.never.iter()).any(|n| hits(n, &p.plain()) || hits(n, &p.text()));
         let routed: Vec<bool> = line.parts.iter().map(|p| matches(ps, p) && !never(p)).collect();
-        let (mut prev, mut piped) = ("", false);
+        let (mut prev, mut piped, mut split) = ("", false, false);
         for (p, r) in line.parts.iter().zip(&routed) {
-            piped |= *r && (p.op == "|" || prev == "|");
+            piped |= *r && prev == "|";
+            split |= *r && (p.op == "|" || !p.redirs.is_empty());
             prev = &p.op;
         }
         if !routed.contains(&true) {
             return here;
         }
-        if let Some(why) = line.unsplit.or(piped.then_some("a pipe")) {
+        let away = line.parts.iter().flat_map(Part::dirs).any(|to| !inside(dir, to));
+        let why = line.unsplit.or(piped.then_some("a pipe"));
+        if let Some(why) = why.or(away.then_some("another checkout")) {
             return format!("echo 'heavy: {why} in the line, running here' >&2; {here}");
         }
-        if !line.parts.iter().any(never) {
+        if !split && !line.parts.iter().any(never) {
             return self.slot(exe, kind, Some((r, dir)), cmd);
         }
         let part = |(p, on): (&Part, &bool)| {
@@ -386,21 +433,21 @@ impl Heavy {
     }
 }
 
-/// `runners run` for `cmd` in worktree `dir` on route `r`: `Some(code)` once it ran there (the command's own code), else `None` with the reason printed: run it here.
-pub fn remote(run: &dyn Runner, r: &Route, dir: &str, cmd: &str) -> Option<i32> {
+/// `runners run` for `cmd` in worktree `dir` on route `r`: `Ok(code)` once it ran there (the command's own code), else the reason, printed: run it here.
+pub fn remote(run: &dyn Runner, r: &Route, dir: &str, cmd: &str) -> Result<i32, String> {
     let mut a: Vec<String> = ["run", "--tag", &r.tag, "--dir", dir].map(String::from).to_vec();
     a.extend(r.flags("--wait"));
     a.extend(["--", "bash", "-c", cmd].map(String::from));
     let why = match run.attached("runners", &a) {
         Ok(c @ (75 | 76 | 64 | 78)) => format!("exit {c}"),
-        Ok(c) => return Some(c),
+        Ok(c) => return Ok(c),
         Err(e) => match e.downcast_ref::<std::io::Error>().map(std::io::Error::kind) {
             Some(std::io::ErrorKind::NotFound) => "not found".into(),
             _ => format!("{e:#}"),
         },
     };
     crate::stderr!("runners: {why}, running here");
-    None
+    Err(why)
 }
 
 /// `drover heavy`: a lane's heavy command, its host slot limits and its route's build machines.
@@ -422,20 +469,23 @@ pub struct Args {
 }
 
 impl Args {
-    /// Run it on its route's build machines, else as `who` in slot folder `dir`'s line.
+    /// Run it on its route's build machines, else as `who` in slot folder `dir`'s line; `fell` gets a routed run that falls back here.
     pub fn run(
         self,
         r: &dyn Runner,
         dir: &Path,
         who: String,
+        fell: impl FnOnce(&Ticket),
         late: impl FnOnce(&Ticket, &str) -> Option<i32>,
     ) -> Result<i32> {
+        let mut me = Ticket::new(who, self.kind, self.cmd, self.kind_max);
         if let (Some(route), Some(wt)) = (&self.route, &self.dir) {
-            if let Some(code) = remote(r, route, wt, &self.cmd) {
-                return Ok(code);
+            match remote(r, route, wt, &me.cmd) {
+                Ok(code) => return Ok(code),
+                Err(why) => me.here = Some(why),
             }
+            fell(&me);
         }
-        let me = Ticket::new(who, self.kind, self.cmd, self.kind_max);
         run(r, dir, me, self.max, self.wait, &|| None, late)
     }
 }
@@ -461,6 +511,9 @@ pub struct Ticket {
     pub since: u64,
     pub running: bool,
     pub kind_max: Option<usize>,
+    /// Why a routed command runs here instead of on its build machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub here: Option<String>,
 }
 
 impl Ticket {
@@ -474,6 +527,7 @@ impl Ticket {
             since,
             running: false,
             kind_max,
+            here: None,
         }
     }
 }
@@ -605,7 +659,7 @@ pub fn hold(ctx: &crate::Ctx, r: &dyn crate::runner::Runner, wait: u64, cmd: &[S
     let heavy = fleet.map(|f| Heavy::of(f, host)).filter(|h| h.gated(&cmd.join(" ")));
     let route = heavy.as_ref().and_then(|h| h.routes.get(GATE_KIND));
     let here = std::env::current_dir()?;
-    if let Some(code) = route.and_then(|rt| remote(r, rt, &here.to_string_lossy(), &line)) {
+    if let Some(Ok(code)) = route.map(|rt| remote(r, rt, &here.to_string_lossy(), &line)) {
         return Ok(code);
     }
     let kind_max = host.and_then(|h| h.heavy_kind_max.get("ci").copied());

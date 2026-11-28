@@ -5,7 +5,7 @@ use crate::runner::Runner;
 use serde_json::{json, Value};
 use std::sync::Mutex;
 
-const OFF: [&str; 3] = ["/screens/scene", "/screens/threads", "/screens/proxy-token"];
+const OFF: [&str; 2] = ["/screens/scene", "/screens/threads"];
 const CARDS: &str = "/screens/cards";
 
 pub(in super::super) enum Who<'a> {
@@ -23,7 +23,7 @@ impl Server<'_> {
             return crate::gate::refused("NOT_PERMITTED", "a secret is entered on a paired device only");
         }
         if !permitted(name) && (!owner || !THREAD_ACTIONS.contains(&name) && !HOST_ACTIONS.contains(&name)) {
-            let why = format!("`{name}` is not in cooee-plugin.toml's [permissions] actions");
+            let why = format!("`{name}` is not in the manifest's actions");
             return crate::gate::refused("NOT_PERMITTED", why);
         }
         let by = match who {

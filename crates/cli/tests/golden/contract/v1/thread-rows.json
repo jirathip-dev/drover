@@ -33,7 +33,11 @@
       "kind": "ask",
       "open": false,
       "prompt": null,
-      "push": null,
+      "push": {
+        "body": "q1 · retry the flaky gate?",
+        "tag": "ask-sendmeter-q1",
+        "title": "sendmeter #12"
+      },
       "seq": 4,
       "text": "q1 · retry the flaky gate?",
       "to": {
@@ -63,7 +67,11 @@
       "kind": "system",
       "open": false,
       "prompt": "lane ask q1 on #12",
-      "push": null,
+      "push": {
+        "body": "lane ask q1 on #12",
+        "tag": "system-5",
+        "title": "sendmeter"
+      },
       "seq": 5,
       "text": "lane ask q1 on #12",
       "to": {
@@ -146,7 +154,11 @@
       "kind": "run-card",
       "open": true,
       "prompt": null,
-      "push": null,
+      "push": {
+        "body": "sendmeter run-card",
+        "tag": "run-r1",
+        "title": "sendmeter"
+      },
       "seq": 9,
       "text": "sendmeter run-card",
       "to": {
@@ -239,7 +251,11 @@
       "kind": "config-card",
       "open": true,
       "prompt": null,
-      "push": null,
+      "push": {
+        "body": "sendmeter config-propose",
+        "tag": "config-c1",
+        "title": "sendmeter"
+      },
       "seq": 11,
       "text": "sendmeter config-propose",
       "to": {
@@ -311,7 +327,11 @@
       "kind": "secret-card",
       "open": true,
       "prompt": null,
-      "push": null,
+      "push": {
+        "body": "sendmeter secret-request",
+        "tag": "secret-t1-API_KEY",
+        "title": "sendmeter"
+      },
       "seq": 12,
       "text": "sendmeter secret-request",
       "to": {
@@ -346,7 +366,11 @@
       "kind": "said",
       "open": false,
       "prompt": "go ahead",
-      "push": null,
+      "push": {
+        "body": "go ahead",
+        "tag": "said-13",
+        "title": "sendmeter"
+      },
       "seq": 13,
       "text": "go ahead",
       "to": {
@@ -376,7 +400,11 @@
       "kind": "merged",
       "open": false,
       "prompt": null,
-      "push": null,
+      "push": {
+        "body": "sendmeter #12 merged → ? ? (PR #?)",
+        "tag": "merged-14",
+        "title": "sendmeter #12"
+      },
       "seq": 14,
       "text": "sendmeter #12 merged → ? ? (PR #?)",
       "to": {

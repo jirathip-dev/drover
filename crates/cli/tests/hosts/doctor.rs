@@ -4,7 +4,7 @@ use super::*;
 fn doctor_flags_a_stale_remote_fleet_toml_and_leaves_it() {
     let c = setup("hosts-stale-conf", "", true, 0);
     let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
-    let r = healthy(fake(0.1, 0.1)).reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n");
+    let r = healthy(fake(97, 97)).reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n");
     let (_, out) = run(&c, &two(&r, &bazzite), &["doctor"]);
     assert!(
         !out.contains("stale fleet.toml") && out.contains("\n! host bazzite sshd — "),
@@ -21,13 +21,13 @@ fn doctor_flags_a_stale_remote_fleet_toml_and_leaves_it() {
 fn doctor_flags_each_host_without_just_on_the_done_checks_path() {
     let c = setup("hosts-just", "", true, 0);
     let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
-    let base = || healthy(fake(0.1, 0.1)).reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n");
+    let base = || healthy(fake(97, 97)).reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n");
     let cfg = Config::load(&c.config).unwrap();
     let main = format!(
         "sh -c export PATH='{}'; command -v just",
         drover::timer::job_path(&c, &cfg, &base())
     );
-    let remote = format!("{SSH}'sh' '-c' '{}command -v just'", drover::cloud::SH);
+    let remote = format!("{SSH}'sh' '-c' 'command -v just'");
     let r = base().reply(&main, "/usr/bin/just\n").reply(&remote, "/usr/bin/just\n");
     let (_, out) = run(&c, &two(&r, &bazzite), &["doctor"]);
     assert!(!out.contains("just —"), "{out}");
@@ -35,7 +35,7 @@ fn doctor_flags_each_host_without_just_on_the_done_checks_path() {
     let r = base().reply(&main, "/usr/bin/just\n");
     let (_, out) = run(&c, &two(&r, &bazzite), &["doctor"]);
     assert!(
-        out.contains("\n! just — missing on bazzite → drover hosts bootstrap bazzite\n"),
+        out.contains("\n! just — missing on bazzite → install just on bazzite\n"),
         "{out}"
     );
     assert!(!out.contains("missing on mini"), "{out}");

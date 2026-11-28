@@ -62,7 +62,7 @@ fn the_needs_and_chat_views_are_linear_in_the_log_and_one_event_updates_the_inde
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let before = VISITS.load(Relaxed);
     let open = needs(&s);
-    let chat: Value = serde_json::from_str(&api(&s, ADDR, "", NOW + 500, "chat")).unwrap();
+    let chat: Value = chat_all(&s, ADDR, "", NOW + 500);
     let visits = VISITS.load(Relaxed) - before;
     let want: Vec<String> = (ASKS - AGENTS..ASKS)
         .filter(|j| j % 2 == 1)

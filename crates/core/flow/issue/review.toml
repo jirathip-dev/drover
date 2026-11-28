@@ -29,7 +29,7 @@ when = { lane = "*", host = "*", pr = ["none", "open", "pending", "red", "green"
 do = "record"
 owner = "drive"
 timeout = "act_minutes"
-to = ["ready", "fix"]
+to = ["ready", "fix", "needs-human"]
 say = "record the written verdict"
 
 [[row]]

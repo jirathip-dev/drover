@@ -129,35 +129,62 @@ fn disk_low_under_min_free_gb() {
 }
 
 #[test]
-fn host_busy_on_load_per_cpu() {
-    let d = tmpdir("host-load");
-    let c = ctx(&d, CONFIG);
+fn cpu_idle_gates_admission_not_the_load_average() {
+    let c = ctx(&tmpdir("host-idle-ok"), CONFIG);
     let (sh, r) = shed_happy(&c);
-    let r = r.once("sysctl -n vm.loadavg", 0, "{ 26.00 3.00 2.00 }\n");
+    let r = r
+        .once("sysctl -n vm.loadavg", 0, "{ 52.00 50.00 48.00 }\n")
+        .once("iostat", 0, &iostat(43));
+    let (exit, out) = spawn(&c, &r, &[]);
+    assert_eq!(exit, 0, "load 52 on 10 CPUs with 43% idle admits: {out}");
+    assert!(sh.has("sendmeter-impl-12"), "the lane started");
+    let c = ctx(&tmpdir("host-idle-low"), CONFIG);
+    let (sh, r) = shed_happy(&c);
+    let ps = "  103     1 900.0 /usr/bin/rustc\n  104     1 120.0 /usr/libexec/fseventsd\n";
+    let r = r
+        .once("sysctl -n vm.loadavg", 0, "{ 3.00 3.00 3.00 }\n")
+        .once("iostat", 0, &iostat(5))
+        .reply("ps -Ao", ps);
     let out = assert_refused(&c, &sh, &r, &[], "HOST_BUSY");
-    assert!(out.contains("load/cpu 2.60"), "{out}");
+    assert!(
+        out.contains("cpu idle 5% < 15% (top: rustc 900%, fseventsd 120%)"),
+        "{out}"
+    );
 }
 
 #[test]
-fn load_from_drovers_own_processes_admits_and_an_outside_one_is_named() {
+fn a_hosts_own_cpu_and_memory_floor_wins_over_limits() {
+    let own = "\n[hosts.mini]\ntags = []\nmin_cpu_idle = 3.0\nmin_free_mem_gb = 0.5\n";
+    let c = ctx(&tmpdir("host-own-floor"), &format!("{CONFIG}{own}"));
+    let vm = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 32768.\nPages inactive: 32768.\nSwapouts: 100.\n";
+    let (sh, r) = shed_happy(&c);
+    let r = r.once("iostat", 0, &iostat(5)).reply("vm_stat", vm);
+    let (exit, out) = spawn(&c, &r, &[]);
+    assert_eq!(exit, 0, "5% idle and 1 GB free pass the host's own floors: {out}");
+    assert!(sh.has("sendmeter-impl-12"), "the lane started");
+    let c = ctx(&tmpdir("host-limits-floor"), CONFIG);
+    let (sh, r) = shed_happy(&c);
+    let r = r.once("iostat", 0, &iostat(5));
+    let out = assert_refused(&c, &sh, &r, &[], "HOST_BUSY");
+    assert!(out.contains("cpu idle 5% < 15%"), "{out}");
+}
+
+#[test]
+fn cpu_from_drovers_own_processes_admits_and_an_outside_one_is_named() {
     let c = ctx(&tmpdir("host-own-load"), CONFIG);
-    let ps = "  101     1 600.0 /opt/drover/bin/drover\n  102   101 350.0 /bin/cp\n  103     1   5.0 /usr/sbin/mds\n";
+    let ps = "  101     1  50.0 /opt/drover/bin/drover\n  102   101  30.0 /bin/cp\n  103     1   5.0 /usr/sbin/mds\n";
     let (sh, own) = shed_happy(&c);
-    let own = own
-        .once("sysctl -n vm.loadavg", 0, "{ 26.00 3.00 2.00 }\n")
-        .reply("ps -Ao", ps);
+    let own = own.once("iostat", 0, &iostat(10)).reply("ps -Ao", ps);
     let (exit, out) = spawn(&c, &own, &[]);
     assert_eq!(exit, 0, "drover's own drive and clone: {out}");
     assert!(sh.has("sendmeter-impl-12"), "the lane started");
     let busy = format!("{ps}  104     1 900.0 /usr/bin/rustc\n  105     1 120.0 /usr/libexec/fseventsd\n");
     let c = ctx(&tmpdir("host-other-load"), CONFIG);
     let (sh, other) = shed_happy(&c);
-    let other = other
-        .once("sysctl -n vm.loadavg", 0, "{ 36.00 3.00 2.00 }\n")
-        .reply("ps -Ao", &busy);
+    let other = other.once("iostat", 0, &iostat(0)).reply("ps -Ao", &busy);
     let out = assert_refused(&c, &sh, &other, &[], "HOST_BUSY");
     assert!(
-        out.contains("load/cpu 2.65 > 2.5 (top: rustc 900%, fseventsd 120%, mds 5%)"),
+        out.contains("cpu idle 8% < 15% (top: rustc 900%, fseventsd 120%, mds 5%)"),
         "{out}"
     );
 }
@@ -391,7 +418,7 @@ fn host_busy_creates_no_worktree_dir() {
     let d = tmpdir("host-busy-nothing");
     let c = ctx(&d, CONFIG);
     let (sh, r) = shed_happy(&c);
-    let r = r.once("sysctl -n vm.loadavg", 0, "{ 26.90 3.00 2.00 }\n");
+    let r = r.once("iostat", 0, &iostat(2));
     std::fs::remove_dir_all(wt(&c)).unwrap();
     assert_refused(&c, &sh, &r, &[], "HOST_BUSY");
     assert!(!wt(&c).exists(), "no worktree dir");
@@ -551,4 +578,76 @@ fn a_rejected_wip_push_leaves_the_worktree_as_it_was() {
     assert_eq!(sh_git(&["-C", &w, "diff", "--cached", "--name-only"]), "");
     assert!(!sh_git(&["-C", &w, "log", "--format=%s"]).contains("wip:"));
     assert!(out.contains("nothing committed, nothing pushed, pane kept"), "{out}");
+}
+
+fn progressing(name: &str, status: &str, at: u64) -> (drover::Ctx, FakeShed, Fake) {
+    let c = ctx(&tmpdir(name), CONFIG);
+    let w = wt(&c).to_string_lossy().into_owned();
+    let d0 = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12", "worktree": w, "pane": "sendmeter-impl-12"});
+    append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", d0)).unwrap();
+    append(
+        &c.state,
+        &Event::new(at, "sendmeter", Some(12), "pushed", json!({"sha": "abc"})),
+    )
+    .unwrap();
+    let (sh, r) = shed_happy(&c);
+    sh.lane("sendmeter-impl-12", status, &w);
+    (c, sh, r)
+}
+
+#[test]
+fn a_supersede_of_a_progressing_lane_is_refused_unless_it_says_why() {
+    for (status, at, age) in [("idle", 1_000_000 - 120, "2m"), ("working", 10, "0s")] {
+        let (c, sh, r) = progressing("supersede-progressing", status, at);
+        let out = assert_refused(&c, &sh, &r, &["--supersede"], "LANE_PROGRESSING");
+        assert!(
+            out.contains("sendmeter-impl-12") && out.contains(&format!("{age} ago")),
+            "{out}"
+        );
+        let (exit, out) = spawn(&c, &r, &["--supersede", "--why", "wrong brief"]);
+        assert_eq!(exit, 0, "{out}");
+        let ev = read(&c.state).unwrap();
+        let s = ev.iter().find(|e| e.kind == "supersede").expect("supersede logged");
+        assert_eq!(s.str("why"), Some("wrong brief"));
+        assert!(s.str("by").is_some_and(|b| !b.is_empty()), "{s:?}");
+        assert!(sh.has("sendmeter-impl-12"), "the new lane started");
+    }
+}
+
+#[test]
+fn a_dead_or_quiet_lane_supersedes_with_no_why() {
+    let (c, sh, r) = progressing("supersede-quiet", "idle", 1_000_000 - 31 * 60);
+    let (exit, out) = spawn(&c, &r, &["--supersede"]);
+    assert_eq!(exit, 0, "quiet past stall_minutes: {out}");
+    assert!(read(&c.state).unwrap().iter().any(|e| e.kind == "supersede"));
+    assert!(sh.has("sendmeter-impl-12"), "the new lane started");
+    let c = ctx(&tmpdir("supersede-dead"), CONFIG);
+    let w = wt(&c).to_string_lossy().into_owned();
+    let d0 = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12", "worktree": w});
+    append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", d0)).unwrap();
+    append(
+        &c.state,
+        &Event::new(999_990, "sendmeter", Some(12), "pushed", json!({"sha": "abc"})),
+    )
+    .unwrap();
+    let (sh, r) = shed_happy(&c);
+    let (exit, out) = spawn(&c, &r, &["--supersede"]);
+    assert_eq!(exit, 0, "a dead lane: {out}");
+    assert!(sh.has("sendmeter-impl-12"), "{sh:?}", sh = sh.methods());
+}
+
+#[test]
+fn drives_own_respawn_of_a_progressing_lane_is_not_refused() {
+    let (c, sh, r) = progressing("supersede-internal", "working", 10);
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let o = drover::spawn::Opts {
+        supersede: true,
+        ..Default::default()
+    };
+    let r = drover::shed::With(&r, cfg.shed().unwrap());
+    let mut out = Vec::new();
+    let res = drover::spawn::spawn(&c, &cfg, &r, &mut out, ("sendmeter", 12, "impl"), &o);
+    assert!(res.is_ok(), "{res:?} {}", String::from_utf8_lossy(&out));
+    assert!(read(&c.state).unwrap().iter().any(|e| e.kind == "supersede"));
+    assert!(sh.has("sendmeter-impl-12"));
 }

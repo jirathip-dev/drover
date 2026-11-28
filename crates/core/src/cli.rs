@@ -1,4 +1,4 @@
-use crate::config::{home, Config};
+use crate::config::Config;
 use crate::events::{emit, status_line, working, Event, Json};
 use crate::runner::{self, Runner};
 use crate::{
@@ -24,11 +24,16 @@ pub(crate) struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    #[command(about = "Switch a role's harness/model/profile/effort in fleet.toml; prints old -> new")]
+    #[command(about = "Switch a role's agent/harness/model/profile/effort in fleet.toml; prints old -> new")]
     Set {
         fleet: String,
         #[arg(help = "impl | rev | design")]
         role: String,
+        #[arg(
+            long,
+            help = "#1694: any agent id `shed agents` lists; one drover has no module for runs judged"
+        )]
+        agent: Option<String>,
         #[arg(long, help = providers::lane_names().join(" | "))]
         harness: Option<String>,
         #[arg(long, help = "Model name (ignored where the provider's profile owns the model)")]
@@ -82,15 +87,9 @@ enum Cmd {
     #[command(
         about = "Merge the issue's PR into the integration branch if every gate passes; writes the one closing comment, closes the issue"
     )]
-    Merge {
-        fleet: String,
-        issue: u64,
-        #[arg(help = "Owner only: merge past ROUND_LIMIT (never past PASS, CI or serial); logged `by: owner`")]
-        #[arg(long)]
-        owner_override: bool,
-    },
+    Merge { fleet: String, issue: u64 },
     #[command(
-        about = "Owner only: one more round for a needs-human issue (its card's [one more round]): an update round on an UPDATE_LIMIT card, else a review round; logs `round-extended`"
+        about = "Owner only: one more round for a needs-human issue (its card's [one more round]): an update round on a stuck update's card, else a review round; logs `round-extended`"
     )]
     Extend {
         fleet: String,
@@ -183,9 +182,6 @@ enum Cmd {
         #[arg(help = "The recommended option's number")]
         #[arg(long, value_name = "N")]
         recommend: Option<usize>,
-        #[arg(help = "routine (defaults to --recommend after [limits].ask_default_minutes) | owner (always waits)")]
-        #[arg(long, default_value = "owner", value_parser = ["routine", "owner"])]
-        kind: String,
         #[arg(help = "Ask in this orchestrator thread: its options become choice rows, the answer goes back into it")]
         #[arg(long, value_name = "ID")]
         thread: Option<String>,
@@ -219,7 +215,7 @@ enum Cmd {
         fleet: String,
         issue: u64,
         text: String,
-        #[arg(help = "The ask the owner answered (or a routine ask's default) on this issue that decided it")]
+        #[arg(help = "The ask the owner answered (or an old routine ask's default) on this issue that decided it")]
         #[arg(long, value_name = "ID")]
         basis: String,
     },
@@ -227,6 +223,10 @@ enum Cmd {
     Report { id: Option<String> },
     #[command(about = "Owner only: the orchestrator threads full screen in a terminal; needs no serve")]
     Chat { thread: Option<String> },
+    #[command(
+        about = "Attach a terminal chat to a repo, `all` or `none` (optionally an old chat's id): logs the attach, prints the brief path, the settings path and the env lines"
+    )]
+    Attach { repo: String, thread: Option<String> },
     #[command(
         about = "Orchestrator chat threads per repo (or `all`), each talked through by one orchestrator lane (docs/orchestrator.md)"
     )]
@@ -301,10 +301,6 @@ enum Cmd {
         json: bool,
     },
     #[command(
-        about = "#668: the queue-wide line-cap view: total, cap and headroom at integration, each open PR's `src/ net`, the queued issues with no PR, the projected total and the one raise to ask for; `cap log`: every past cap change from git"
-    )]
-    Cap { fleet: String },
-    #[command(
         about = "#889: files 5+ merged PRs touched in 14 days; opens or updates the week's issue, queued `--architect`"
     )]
     Hotspots { fleet: Option<String> },
@@ -359,21 +355,21 @@ enum Cmd {
         #[arg(last = true, required = true)]
         cmd: Vec<String>,
     },
-    #[command(
-        about = "File this week's lessons issue, queue it on top and spawn its `lesson` lane (orchestrators and the owner only)"
-    )]
-    #[command(args_conflicts_with_subcommands = true)]
-    Lesson {
-        #[command(subcommand)]
-        cmd: Option<LessonCmd>,
-        fleet: Option<String>,
-    },
-    #[command(about = "#1100: file this week's triage issue and spawn its lane, or a triage lane's verb")]
+    #[command(about = "#419: a lesson lane's verbs: the digest and the lesson checks' promotion")]
+    #[command(subcommand)]
+    Lesson(LessonCmd),
+    #[command(about = "#1100: a triage lane's verbs")]
     Triage(crate::triage::Args),
     #[command(about = "#1786: an epic: a parent issue's children, shown `k/n merged`; closed when the last lands")]
     Epic(crate::epic::Args),
-    #[command(about = "#1488: file this month's deps issue, queue it and spawn its lane (orchestrators, owner)")]
-    Deps(crate::deps::Args),
+    #[command(
+        about = "#1756: the fleet's scheduled jobs (every, last, next, open issue); with a name, run it now (orchestrators and the owner)"
+    )]
+    Job(crate::jobs::Args),
+    #[command(
+        about = "#1785: the `integration` job's check, in a checkout of the integration head: the premerge gate once per head; green closes the job's open issue, red exits 1"
+    )]
+    Integration { fleet: String },
     #[command(about = "#1648: the nightly soak on `[fleet.<n>.soak]` hosts; an issue per missed target")]
     Soak(crate::soak::Args),
     #[command(about = "Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)")]
@@ -382,11 +378,6 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<HostsCmd>,
     },
-    #[command(
-        about = "Owner only: the token proxy remote ACP lanes' model calls go through, on `[proxy] port` (#637, docs/hosts.md)"
-    )]
-    #[command(hide = true)]
-    Proxy,
     #[command(
         about = "Phone page (PWA): queue, lanes, host, events; buttons for queue order, pause/resume, role model/effort"
     )]
@@ -429,16 +420,6 @@ enum Cmd {
         #[arg(help = "The triggering event's id: the same id is driven once")]
         #[arg(long)]
         id: Option<String>,
-    },
-    #[command(
-        about = "CI: lines of the `count` globs (less `exclude`) in --config, default src/**/*.rs, against its `line_cap` or a higher one in cap.d/; exit 1 over it"
-    )]
-    #[command(hide = true)]
-    CapCheck {
-        #[arg(long)]
-        config: std::path::PathBuf,
-        #[arg(long)]
-        base: Option<String>,
     },
     #[command(about = "CI (#734): the layers, bans and size limits in --config; exit 1 on a violation")]
     #[command(hide = true)]
@@ -493,22 +474,27 @@ enum Cmd {
         no_load: bool,
     },
     #[command(
-        about = "One timer pass: check, then drive; refusals exit 0, a real error logs `tick-failed` (alerts at most hourly)"
+        about = "One timer pass: start each fleet's drive pass; refusals exit 0, a real error logs `tick-failed` (alerts at most hourly)"
     )]
     Tick,
+    #[command(
+        about = "The housekeeping job (#1805): check, clean, reclaim, trim and the daily chores, each under its own `slow_secs` budget; never inside a drive pass"
+    )]
+    Housekeep {
+        #[arg(help = "Run only this chore")]
+        #[arg(long, value_parser = crate::housekeep::CHORES.map(|c| c.0))]
+        only: Option<String>,
+    },
     #[command(
         about = "One supervised process: the board, kicks driven at once, the GitHub poll, API v1 for remote lanes (docs/service.md)"
     )]
     Service {
         #[arg(help = "API v1 listen address (remote lanes reach it over the tailnet)")]
-        #[arg(long, default_value = "127.0.0.1:7778")]
+        #[arg(long, default_value = crate::timer::API)]
         api: String,
         #[arg(help = "Also serve the board here (the `serve` job's address)")]
         #[arg(long)]
         board: Option<String>,
-        #[arg(help = "Write its launchd/systemd unit and print the commands that load it; loads nothing")]
-        #[arg(long)]
-        install: bool,
     },
     #[command(
         about = "Alert once per state on stall, lane-dead, ready-unmerged, ci-missing, ask-waiting, orphan-lane, outbox-stale; idempotent, safe from cron"
@@ -544,9 +530,9 @@ enum Cmd {
         #[arg(help = "With --yes, remove the orphans too: folders under the worktree root no fleet owns")]
         #[arg(long)]
         orphans: bool,
-        #[arg(help = "The daily job (#557): merged/closed lanes idle 3+ days, at most 10")]
-        #[arg(long, hide = true, conflicts_with_all = ["fleet", "lane", "yes", "orphans"])]
-        scheduled: bool,
+        #[arg(help = "List each lane and wip branch, not one summary line per host")]
+        #[arg(long)]
+        verbose: bool,
     },
     #[command(
         about = "Install the `[self_update] branch` head (default main) once its CI is green: build, sign, doctor-gate, swap, hand serve over (#557, #894)"
@@ -568,14 +554,6 @@ enum Cmd {
     Reclaim {
         #[arg(long, help = "Remove without asking")]
         apply: bool,
-    },
-    #[command(
-        about = "#537: the `[ci_runners]` VMs and their GitHub runners (an orchestrator's `runners` group, its brief names the verbs); each verb logged `runners-*`"
-    )]
-    #[command(hide = true)]
-    Runners {
-        #[command(subcommand)]
-        cmd: RunnersCmd,
     },
     #[command(about = "Send Esc to an agent's pane (it pauses); logs `stop`")]
     Stop { agent: String },
@@ -621,8 +599,10 @@ enum Cmd {
         #[arg(long, help = "Rebuild the issue, lane and ask tables from every event instead")]
         rebuild: bool,
     },
-    #[command(about = "A repo's fresh start: one root before a cut, one commit per landed PR after it; archive, undo")]
-    Compact(crate::compact::Opts),
+    #[command(
+        about = "Moved to the standalone `compact` binary: this runs it on the fleet's repo, clone, lanes and saved ids, and logs its records"
+    )]
+    Compact(crate::reroot::Opts),
     #[command(about = "The event log in its JSONL format (one event a line, with its seq), for external readers")]
     #[command(hide = true)]
     Events {
@@ -646,6 +626,12 @@ enum Cmd {
         #[arg(help = "The lane's role; `rev` is read-only")]
         #[arg(long)]
         role: Option<String>,
+        #[arg(help = "#1694: judge one shed permission request (shed's `judge` policy) on stdin")]
+        #[arg(long)]
+        acp: bool,
+        #[arg(help = "An agent's test run: record each request in this folder and deny it")]
+        #[arg(long, requires = "acp")]
+        probe: Option<PathBuf>,
     },
     #[command(hide = true, about = "A provider's status line: the lane's fleet and issue")]
     Statusline,
@@ -698,7 +684,7 @@ enum ThreadCmd {
         orchestrator: Option<String>,
     },
     #[command(
-        about = "An orchestrator hands off to thread <to> at once, or to a repo (or `all`): the owner taps one of its threads or a new one; linked both ways, <text> wakes its orchestrator as from <from>"
+        about = "An orchestrator hands off to thread <to>, or to a repo's (or `all`'s) desk thread, at once with no tap; linked both ways, <text> wakes its orchestrator as from <from>"
     )]
     Handoff {
         from: String,
@@ -984,67 +970,6 @@ enum HostsCmd {
         about = "Empty a root (default the host's first): new lanes skip it, its lanes are saved and restarted on the next root"
     )]
     Eject { name: String, root: Option<String> },
-    #[command(
-        about = "Owner only: a cloud host's lanes' work to `wip/` first, then its recipe's `destroy`; logs `cloud-stop`"
-    )]
-    #[command(hide = true)]
-    Destroy { name: String },
-    #[command(
-        hide = true,
-        about = "Owner only: install shed, drover, git, gh, the lane providers there over SSH, open its logins, clone its fleets"
-    )]
-    Bootstrap { name: String },
-    #[command(about = "Owner only: a healthy cloud host saved as its recipe's snapshot; logs `cloud-snapshot`")]
-    #[command(hide = true)]
-    Snapshot { name: String },
-    #[command(
-        about = "The token proxy's per-lane keys (#637): id, state, lane, host; `revoke <id>` (owner only) ends one at once"
-    )]
-    Keys {
-        #[command(subcommand)]
-        cmd: Option<KeysCmd>,
-    },
-}
-
-#[derive(Subcommand)]
-enum KeysCmd {
-    #[command(about = "Owner only: this key stops signing at once; logs `proxy-key-revoked`")]
-    Revoke { id: String },
-}
-
-#[derive(Subcommand)]
-enum RunnersCmd {
-    #[command(about = "The GitHub runners, each VM's state and a health line (`9/9 online`)")]
-    Status,
-    #[command(about = "A fresh registration token and a runner-service restart on that VM")]
-    Revive { vm: String },
-    #[command(
-        about = "Create N VMs to the spec, within `max_vms` and the $/day cap (past it: RUNNERS_CAP, an owner ask)"
-    )]
-    Add {
-        #[arg(default_value_t = 1)]
-        n: u64,
-        #[arg(help = "The owner ask that approved going past the cap")]
-        #[arg(long, value_name = "ID")]
-        approved: Option<String>,
-    },
-    #[command(about = "Drain (no job running), deregister, then delete a VM; or deregister one idle runner by name")]
-    Remove {
-        target: String,
-        #[arg(help = "The owner ask that approved removing the last online VM (RUNNERS_LAST)")]
-        #[arg(long, value_name = "ID")]
-        approved: Option<String>,
-    },
-    #[command(
-        about = "Push a fresh registration token to every VM now (`check` repeats it every 30 min) and report the refresher"
-    )]
-    Tokens,
-    #[command(about = "Stop and deregister this host's self-hosted runners (`local_label`, `local_stop`)")]
-    RetireLocal {
-        #[arg(help = "The owner ask that approved it while VM runners are below expected (RUNNERS_LOW)")]
-        #[arg(long, value_name = "ID")]
-        approved: Option<String>,
-    },
 }
 
 #[derive(Subcommand)]
@@ -1057,6 +982,11 @@ enum LessonCmd {
         #[arg(help = "The window in days")]
         #[arg(long, default_value_t = 7)]
         days: u64,
+        #[arg(
+            long,
+            help = "Exit 1 when the window holds this many review FAILs or more (the lesson job's check)"
+        )]
+        min_fails: Option<usize>,
     },
     #[command(
         about = "Promote or retire the lesson checks in a rules file by their history (the lesson lane, in its worktree)"
@@ -1109,6 +1039,7 @@ pub fn usage_doc() -> String {
         "setup",
         "stats",
         "tick",
+        "housekeep",
         "timer",
         "self-update",
     ];
@@ -1162,7 +1093,7 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             | Cmd::Help { .. }
     ) || matches!(
         cli.cmd,
-        Cmd::CapCheck { .. } | Cmd::ArchCheck { .. } | Cmd::LessonCheck { .. } | Cmd::PrBody { .. }
+        Cmd::ArchCheck { .. } | Cmd::LessonCheck { .. } | Cmd::PrBody { .. }
     );
     if !quiet && args.first().is_some_and(|a| a.ends_with("herdsman")) {
         crate::stderr!("herdsman is now drover: the old name works for one more release");
@@ -1281,8 +1212,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         } => crate::config::show_md(out)?,
         Cmd::Diagram { live, fleet } => crate::diagram::run(ctx, live, fleet.as_deref(), out)?,
         Cmd::Flow(a) => crate::flow::shadow::cli(ctx, a, out)?,
-        Cmd::CapCheck { config, base } => return crate::overlap::cap_check(r, &config, base.as_deref(), out),
-        Cmd::Cap { fleet } if fleet == "log" => return crate::overlap::cap_log(r, std::path::Path::new("."), out),
         Cmd::ArchCheck {
             config,
             write_baseline,
@@ -1306,18 +1235,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Hosts {
             cmd: Some(c @ (HostsCmd::Report | HostsCmd::Watch)),
         } => crate::link::watch::answer(r, matches!(c, HostsCmd::Watch), stdin, out)?,
-        Cmd::Hook { role } => run_hook(ctx, r, out, stdin, role.as_deref() == Some("rev"))?,
+        Cmd::Hook { acp: true, probe, .. } => run_acp(ctx, r, out, stdin, probe.as_deref())?,
+        Cmd::Hook { role, .. } => run_hook(ctx, r, out, stdin, role.as_deref() == Some("rev"))?,
         Cmd::Statusline => crate::usage::statusline(&crate::config::env("DROVER_LANE").unwrap_or_default(), out),
         Cmd::LaneEvent { kind, data } => lane_event(ctx, &kind, serde_json::from_str(&data)?),
-        Cmd::Heavy(a) => {
-            let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
-            let timeout = |t: &crate::heavy::Ticket, _: &str| {
-                let d = json!({"kind": t.kind, "cmd": t.cmd, "since": t.since});
-                lane_event(ctx, "heavy-timeout", d);
-                None
-            };
-            return a.run(r, &ctx.state.with_file_name("heavy"), lane, timeout);
-        }
+        Cmd::Heavy(a) => return heavy(ctx, r, a),
         Cmd::Hold { wait, cmd } => return crate::heavy::hold(ctx, r, wait, &cmd),
         Cmd::Status(Scope { fleet, json }) => {
             let fleet = fleet.map(|f| crate::rename::current(&ctx.state, &f));
@@ -1346,8 +1268,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 let look = crate::snapshot::Snap::read(ctx, &spared);
                 let (at, slots) = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
                 let skip = |s: &crate::events::IssueState| {
-                    let f = cfg.as_ref().and_then(|c| c.fleet.get(&s.fleet));
-                    let skip = queue::skipped(&events, &all, f, &s.fleet, (s.issue, ctx), &slots);
+                    let skip = queue::skipped(&events, &all, cfg.as_ref(), &s.fleet, (s.issue, ctx), &slots);
                     skip.map(|s| format!("skipped this pass: {}", s.1))
                 };
                 let skips: Vec<_> = rows.iter().map(|s| skip(s)).collect();
@@ -1420,12 +1341,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Set {
             fleet,
             role,
+            agent,
             harness,
             model,
             profile,
             effort,
         } => {
             let wanted = [
+                ("agent", agent),
                 ("harness", harness),
                 ("model", model),
                 ("profile", profile),
@@ -1481,7 +1404,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             write!(out, "{}", boards.join("\n"))?;
         }
         Cmd::ArchiveEvents { rebuild } => crate::db::archive_events(&ctx.state, ctx.now, rebuild, out)?,
-        Cmd::Compact(o) => crate::compact::cli(ctx, r, out, o)?,
+        Cmd::Compact(o) => crate::reroot::cli(ctx, r, out, o)?,
         Cmd::Report { id } => crate::report::show(ctx, out, id.as_deref())?,
         Cmd::Asks {
             scope: Scope { fleet, json },
@@ -1600,6 +1523,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             )?;
         }
         Cmd::Tick => return crate::timer::tick(ctx, r, out),
+        Cmd::Housekeep { only } => return crate::housekeep::run(ctx, r, out, only.as_deref()),
         Cmd::Profiles {
             cmd:
                 ProfilesCmd::Sync {
@@ -1608,16 +1532,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     ..
                 },
         } => {
-            for h in crate::providers::known() {
-                crate::providers::get(h).sync(ctx, &role, &role, &p, &usage_doc(), out)?;
+            for h in crate::providers::lanes() {
+                h.sync(ctx, &role, &role, &p, &usage_doc(), out)?;
             }
         }
-        Cmd::Service {
-            api,
-            board,
-            install: true,
-        } => crate::timer::service_unit(ctx, r, out, &api, board.as_deref())?,
-        Cmd::Service { api, board, .. } => (crate::SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
+        Cmd::Service { api, board } => (crate::SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
         Cmd::Chat { thread } => anyhow::ensure!(crate::app(ctx, r, &crate::Open::Threads(thread))?, "needs a terminal"),
         cmd => {
             let cfg = match cmd {
@@ -1691,12 +1610,18 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     question: Some(question),
                     options,
                     recommend: n,
-                    kind,
                     thread,
                     ..
                 } => {
-                    let (at, how) = (lane(&issue)?, (n, kind.as_str(), thread.as_deref()));
-                    crate::ask(ctx, &cfg, r, out, (&fleet, at), (&question, &options), how)?;
+                    let at = lane(&issue)?;
+                    crate::ask(
+                        ctx,
+                        &cfg,
+                        out,
+                        (&fleet, at),
+                        (&question, &options),
+                        (n, thread.as_deref()),
+                    )?;
                     at.inspect(|n| kick(&fleet, *n, "ask"));
                 }
                 Cmd::Answer {
@@ -1740,6 +1665,29 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     basis,
                 } => crate::amend::amend(ctx, &cfg, r, out, (&fleet, issue), &basis, &text)?,
                 Cmd::Check => check::check(ctx, &cfg, r, out)?,
+                Cmd::Attach { repo, thread } => {
+                    let id = thread.unwrap_or_else(|| format!("term-{}", ctx.now));
+                    let a = crate::orchestrator::attach(ctx, &cfg, &repo, &id)?;
+                    let brief = crate::orchestrator::dir(ctx, &cfg, &id).join("brief.md");
+                    std::fs::create_dir_all(brief.parent().context("no chat folder")?)?;
+                    let s = |k: &str| {
+                        a.get(k)
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                            .to_string()
+                    };
+                    std::fs::write(&brief, s("brief"))?;
+                    writeln!(out, "brief: {}", brief.display())?;
+                    writeln!(out, "settings: {}", s("settings"))?;
+                    for (k, v) in a
+                        .get("env")
+                        .and_then(serde_json::Value::as_object)
+                        .into_iter()
+                        .flatten()
+                    {
+                        writeln!(out, "{k}={}", v.as_str().unwrap_or_default())?;
+                    }
+                }
                 Cmd::Thread { cmd } => match cmd {
                     ThreadCmd::New { .. } if crate::config::env("DROVER_THREAD").is_some_and(|t| !t.is_empty()) => {
                         gate::refused("USE_HANDOFF", "an orchestrator starts threads with `thread handoff`")?;
@@ -1793,7 +1741,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 } => crate::rename::run(ctx, r, out, (&old, &new), yes)?,
                 Cmd::Wip {
                     cmd: WipCmd::Prune { fleet, dry_run },
-                } => check::prune(ctx, &cfg, r, out, &fleet, dry_run)?,
+                } => check::prune(ctx, &cfg, r, out, &fleet, (dry_run, true))?,
                 Cmd::Secret { cmd } => match cmd {
                     SecretCmd::Request { thread, name, why } => {
                         crate::secret::request(ctx, &cfg, &thread, &name, &why)?;
@@ -1834,18 +1782,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     Some(HostsCmd::Eject { name, root }) => {
                         return crate::roots::eject(ctx, &cfg, r, out, &name, root.as_deref());
                     }
-                    Some(HostsCmd::Destroy { name }) => {
-                        let wip = crate::cloud::stop(ctx, &cfg, r, &name, "destroy", "owner")?;
-                        writeln!(out, "{name}: destroyed; wip {}", wip.join(" "))?;
-                    }
-                    Some(HostsCmd::Bootstrap { name }) => crate::cloud::bootstrap(ctx, &cfg, r, &name, out)?,
-                    Some(HostsCmd::Snapshot { name }) => crate::cloud::snapshot(ctx, &cfg, r, &name)?,
-                    Some(HostsCmd::Keys { cmd: None }) => crate::proxy::list(ctx, out)?,
-                    Some(HostsCmd::Keys {
-                        cmd: Some(KeysCmd::Revoke { id }),
-                    }) => crate::proxy::revoke(ctx, &cfg, &id, out)?,
                 },
-                Cmd::Proxy => crate::proxy::serve(ctx, &cfg, r)?,
                 Cmd::SelfUpdate { dry_run, pause, resume } => {
                     return crate::update::self_update(ctx, &cfg, r, out, (dry_run, pause, resume));
                 }
@@ -1892,7 +1829,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             }
                             None => match crate::drive::retrying(ctx, &events, &s.fleet, s.issue)
                                 .map(|w| (String::new(), w))
-                                .or_else(|| queue::skipped(&events, &st, Some(f), &s.fleet, (s.issue, ctx), &slots))
+                                .or_else(|| queue::skipped(&events, &st, Some(&cfg), &s.fleet, (s.issue, ctx), &slots))
                             {
                                 Some((_, why)) => ("drive", format!("next in the queue, held back: {why}{note}")),
                                 None => ("drive", format!("next in the queue: drive starts it{note}")),
@@ -1981,35 +1918,20 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     lane,
                     yes,
                     orphans,
-                    scheduled,
+                    verbose,
                 } => {
-                    if scheduled {
-                        return check::scheduled(ctx, &cfg, r, out).map(|()| 0);
-                    }
-                    let what = (None, lane.as_deref(), false, !crate::drive::in_act());
+                    let what = (None, lane.as_deref(), !crate::drive::in_act(), orphans, verbose);
                     check::clean_all(ctx, &cfg, r, out, fleet.as_deref(), what, yes)?;
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
                         check::strays(ctx, &cfg, out, yes).and_then(|()| check::secrets_files(ctx, out, yes))?;
                         check::remote_orphans(&cfg, r, out, (orphans && yes, yes))?;
                         for f in cfg.fleet.keys().filter(|f| fleet.as_ref().is_none_or(|x| x == *f)) {
-                            if let Err(e) = check::prune(ctx, &cfg, r, out, f, !yes) {
+                            if let Err(e) = check::prune(ctx, &cfg, r, out, f, (!yes, verbose)) {
                                 writeln!(out, "{f}: wip prune failed: {e:#}")?;
                             }
                         }
                     }
-                }
-                Cmd::Runners { cmd } => {
-                    use crate::runners::Verb;
-                    let (verb, id) = match cmd {
-                        RunnersCmd::Status => (Verb::Status, None),
-                        RunnersCmd::Revive { vm } => (Verb::Revive(vm), None),
-                        RunnersCmd::Add { n, approved } => (Verb::Add(n), approved),
-                        RunnersCmd::Remove { target, approved } => (Verb::Remove(target), approved),
-                        RunnersCmd::Tokens => (Verb::Tokens, None),
-                        RunnersCmd::RetireLocal { approved } => (Verb::RetireLocal, approved),
-                    };
-                    crate::runners::run(ctx, &cfg, r, out, verb, id.as_deref())?;
                 }
                 Cmd::Reclaim { apply } => check::reclaim(ctx, &cfg, r, out, stdin, apply)?,
                 Cmd::Stop { agent } => check::stop(ctx, &cfg, r, out, &agent)?,
@@ -2026,11 +1948,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     let id = format!("{sha}-{verdict}");
                     let _ = crate::drive::kick_once(ctx, r, (&fleet, issue), "verdict", Some(&id));
                 }
-                Cmd::Merge {
-                    fleet,
-                    issue,
-                    owner_override: o,
-                } => gate::merge(ctx, &cfg, r, out, &fleet, issue, o)?,
+                Cmd::Merge { fleet, issue } => gate::merge(ctx, &cfg, r, out, &fleet, issue)?,
                 Cmd::Extend {
                     fleet,
                     issue,
@@ -2059,7 +1977,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     let e = Event::new(ctx.now, &fleet, Some(issue), "fix-done", json!({"why": no_change}));
                     emit(&ctx.state, &cfg, e)?;
                     writeln!(out, "recorded {fleet}#{issue} fix-done: {no_change}")?;
-                    crate::lesson::done(ctx, &cfg, r, out, (&fleet, issue), &no_change)?;
+                    crate::triage::flag_orphans(ctx, &cfg, r, out, (&fleet, issue))?;
+                    crate::jobs::done(ctx, &cfg, r, out, (&fleet, issue), &no_change)?;
                 }
                 Cmd::Turn { state, why } => {
                     let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
@@ -2090,18 +2009,18 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     kick(f, n, "turn");
                 }
                 Cmd::Why { at, json } => crate::why::show(ctx, &cfg, r, out, &at, json)?,
-                Cmd::Lesson {
-                    cmd: Some(LessonCmd::Digest { fleet, days }),
-                    ..
-                } => write!(out, "{}", crate::lesson::digest(ctx, &cfg, r, &fleet, days)?)?,
-                Cmd::Lesson {
-                    cmd: Some(LessonCmd::Apply { fleet, rules }),
-                    ..
-                } => crate::lesson::apply(ctx, &cfg, r, out, &fleet, &crate::repo_path(&rules))?,
-                Cmd::Lesson { fleet, .. } => return crate::lesson::cli(ctx, &cfg, r, out, fleet),
+                Cmd::Lesson(LessonCmd::Digest { fleet, days, min_fails }) => {
+                    let (text, fails) = crate::lesson::digest(ctx, &cfg, r, &fleet, days)?;
+                    write!(out, "{text}")?;
+                    return Ok(i32::from(min_fails.is_some_and(|m| fails >= m)));
+                }
+                Cmd::Lesson(LessonCmd::Apply { fleet, rules }) => {
+                    crate::lesson::apply(ctx, &cfg, r, out, &fleet, &crate::repo_path(&rules))?;
+                }
                 Cmd::Triage(a) => return crate::triage::cli(ctx, &cfg, r, out, a),
-                Cmd::Deps(a) => return crate::deps::cli(ctx, &cfg, r, out, &a.fleet),
                 Cmd::Epic(a) => writeln!(out, "{}", crate::epic::cli(ctx, &cfg, r, a)?)?,
+                Cmd::Job(a) => return crate::jobs::cli(ctx, &cfg, r, out, &a),
+                Cmd::Integration { fleet } => return crate::integration::check(ctx, &cfg, r, out, &fleet),
                 Cmd::Soak(a) => return crate::soak::run(ctx, &cfg, r, out, &a.fleet),
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
@@ -2127,7 +2046,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         return Ok(1);
                     }
                 }
-                Cmd::Cap { fleet } => return crate::overlap::cap_view(ctx, &cfg, r, &fleet, out),
                 Cmd::Hotspots { fleet } => {
                     for name in fleet.map_or_else(|| cfg.fleet.keys().cloned().collect(), |f| vec![f]) {
                         crate::hotspots::run(ctx, &cfg, r, out, &name)?;
@@ -2277,7 +2195,13 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     let Ok(input) = serde_json::from_str::<serde_json::Value>(&buf) else {
         return fail_closed(ctx, out, &serde_json::Value::Null, "its input is not JSON");
     };
-    let term = crate::config::env("SHED").or_else(|| crate::config::env("BERTH"));
+    let both = crate::config::env("DROVER_GUARD").as_deref() == Some("both");
+    if both && (hook::after(&input) || !hook::pre_call(&input)) {
+        return Ok(());
+    }
+    let term = crate::config::env("SHED")
+        .or_else(|| crate::config::env("BERTH"))
+        .filter(|_| !both);
     if let (Some(name), Some(state)) = (term, hook::reported(&input)) {
         let w = r
             .shed()
@@ -2323,60 +2247,23 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         }
         return Ok(());
     }
-    let rules = match hook::lane_rules(ctx, &lane) {
-        Ok(r) => r,
+    let (policy, heavy) = match hook::policy(ctx, r, &lane, reviewer, input.at("cwd").as_str()) {
+        Ok(p) => p,
         Err(cause) => return fail_closed(ctx, out, &input, &cause),
-    };
-    let mut it = lane.split(':');
-    let (fleet, n) = (it.next().unwrap_or_default(), it.next().and_then(|n| n.parse().ok()));
-    let cap = rules.builds
-        && !rules.cap_raise
-        && !n
-            .and_then(|n| crate::gh::cached_title(ctx, fleet, n))
-            .is_some_and(|t| t.starts_with("cap:"));
-    let dir = |p: &PathBuf| p.parent().unwrap_or(p).to_string_lossy().into_owned();
-    let h = home();
-    let mut paths = vec![
-        dir(&ctx.config),
-        dir(&ctx.state),
-        h.join(".config/fleet-operations").to_string_lossy().into(),
-    ];
-    paths.extend(crate::config::env("DROVER_RULES"));
-    let orchestrator = crate::config::env("DROVER_LANE")
-        .is_some_and(|l| l.split(':').nth(2).is_some_and(crate::orchestrator::is_role));
-    let thread = crate::config::env("DROVER_THREAD").unwrap_or_default();
-    let cfg = Config::load(&ctx.config)
-        .ok()
-        .filter(|_| orchestrator && !thread.is_empty() && !thread.contains(['/', '.']));
-    let own = cfg.map(|cfg| {
-        crate::orchestrator::dir(ctx, &cfg, &thread)
-            .to_string_lossy()
-            .into_owned()
-    });
-    let heavy = rules.heavy;
-    let policy = hook::Policy {
-        branches: rules.branches,
-        paths,
-        reviewer: reviewer || rules.reviewer,
-        deny: rules.deny,
-        orchestrator,
-        own,
-        groups: rules.groups,
-        scratch: crate::config::env("DROVER_SCRATCH_TARGET").filter(|s| !s.is_empty()),
-        cap,
-        design: (lane.split(':').nth(2) == Some("design")).then(|| crate::design::scope(ctx, r, &input, fleet, n)),
-        hygiene: rules.hygiene,
     };
     let git = |d: &str, a: &[&str]| {
         runner::ok(r, "git", &[&["-C", d][..], a].concat())
             .ok()
             .map(|s| s.trim().to_string())
     };
-    if let Some(reason) = hook::decide(&input, &policy, &git) {
+    if let Some(reason) = hook::decide(&hook::call(&input), &policy, &git) {
         if policy.deny.iter().any(|d| d.reason() == reason) {
             lane_event(ctx, "hook-denied", json!({"rule": reason}));
         }
         writeln!(out, "{}", hook::deny_json(&input, &reason))?;
+        return Ok(());
+    }
+    if both {
         return Ok(());
     }
     if let Some(v) = heavy.and_then(|h| hook::heavy(&input, &h, &ctx.exe, &git)) {
@@ -2396,6 +2283,31 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     Ok(())
 }
 
+fn run_acp(
+    ctx: &Ctx,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    stdin: &mut dyn Read,
+    probe: Option<&std::path::Path>,
+) -> Result<()> {
+    let mut buf = String::new();
+    let got = stdin
+        .read_to_string(&mut buf)
+        .map_err(|e| format!("its input is unreadable ({e})"));
+    let reason = match got.and_then(|_| crate::acp::answer(ctx, r, &buf, probe)) {
+        Ok(reason) => reason,
+        Err(cause) => {
+            lane_event(ctx, "hook-failed-closed", json!({"cause": cause}));
+            Some(format!("REFUSED HOOK_FAILED_CLOSED: {cause}; fix it, or ask the owner"))
+        }
+    };
+    if let Some(why) = reason.as_ref().filter(|_| probe.is_none()) {
+        lane_event(ctx, "hook-denied", json!({"rule": why, "acp": true}));
+    }
+    writeln!(out, "{}", json!(crate::acp::Verdict::of(reason)))?;
+    Ok(())
+}
+
 fn fail_closed(ctx: &Ctx, out: &mut dyn Write, input: &serde_json::Value, cause: &str) -> Result<()> {
     lane_event(ctx, "hook-failed-closed", json!({"cause": cause}));
     let reason = format!("REFUSED HOOK_FAILED_CLOSED: {cause}; fix it, or ask the owner");
@@ -2410,6 +2322,20 @@ fn coauthor_warn(ctx: &Ctx, r: &dyn Runner, dir: &str, rev: &str) {
     };
     crate::stderr!("drover: warning: a pushed commit carries `{trailer}`; lanes add no AI co-author trailers");
     lane_event(ctx, "coauthor-trailer", json!({"line": trailer}));
+}
+
+fn heavy(ctx: &Ctx, r: &dyn Runner, a: crate::heavy::Args) -> Result<i32> {
+    let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
+    let timeout = |t: &crate::heavy::Ticket, _: &str| {
+        let d = json!({"kind": t.kind, "cmd": t.cmd, "since": t.since});
+        lane_event(ctx, "heavy-timeout", d);
+        None
+    };
+    let fell = |t: &crate::heavy::Ticket| {
+        let d = json!({"kind": t.kind, "cmd": t.cmd, "why": t.here});
+        lane_event(ctx, "heavy-here", d);
+    };
+    a.run(r, &ctx.state.with_file_name("heavy"), lane, fell, timeout)
 }
 
 fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
@@ -2430,8 +2356,8 @@ fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
 }
 
 fn places(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> queue::Places {
-    let st = crate::events::fold(events);
-    let ls = crate::snapshot::lanes(ctx, cfg, (events, &st), &crate::link::sessions(ctx, cfg, r));
+    let sessions = crate::link::sessions(ctx, cfg, r);
+    let ls = crate::events::with_states(events, |st| crate::snapshot::lanes(ctx, cfg, (events, st), &sessions));
     let at = ls.into_iter().map(|l| (l.name, l.place)).collect();
     (at, crate::starts::held_now(ctx, cfg, r))
 }
