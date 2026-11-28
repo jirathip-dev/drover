@@ -157,7 +157,6 @@ impl Session {
     pub fn signed_out(&self) -> bool {
         self.auth().is_some()
     }
-    /// shed ended its turn on the plan's usage limit: `error` (or an exit after `error` or `done`) with a limit note naming its reset.
     pub(crate) fn limit_hit(&self) -> bool {
         let last = match self.life {
             Life::Running(s) => s,
@@ -175,13 +174,11 @@ impl Session {
     }
 }
 
-/// A note naming a limit and its reset (`You've hit your weekly limit · resets 8am`).
 pub(crate) fn limit_text(note: &str) -> bool {
     let n = note.to_lowercase();
     n.contains("limit") && n.contains("resets ")
 }
 
-/// A last status of `error` or `done` whose note is a limit text.
 pub(crate) fn limit_note(last: Status, note: Option<&str>) -> bool {
     matches!(last, Status::Failed | Status::Done) && note.is_some_and(limit_text)
 }
