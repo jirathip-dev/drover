@@ -217,9 +217,9 @@ enum Cmd {
         title: String,
         #[arg(long, help = "The issue body: Problem, Wanted, AC, Notes")]
         body: String,
-        #[arg(long = "mark", value_name = "MARK", value_parser = crate::scope::MARKS)]
+        #[arg(long, value_name = "MARK", value_parser = crate::scope::MARKS)]
         #[arg(help = "Queue it --repro (a bug), --design or --architect")]
-        marks: Vec<String>,
+        mark: Vec<String>,
     },
     #[command(
         about = "Orchestrators and the owner: write an owner-decided amendment into the issue body's `## Amendments`; re-runs the PR's failed spec checks"
@@ -1675,8 +1675,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     fleet,
                     title,
                     body,
-                    marks,
-                } => crate::scope::draft(ctx, &cfg, out, &fleet, (&title, &body), &marks)?,
+                    mark,
+                } => crate::scope::draft(ctx, &cfg, out, &fleet, (&title, &body), &mark)?,
                 Cmd::Amend {
                     fleet,
                     issue,
