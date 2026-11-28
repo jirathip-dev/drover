@@ -1,0 +1,10 @@
+web/src/blocks.ts: function composer: over 60 lines
+web/src/blocks.ts: function draw: complexity over 20
+web/src/blocks.ts: function draw: over 60 lines
+web/src/blocks.ts: function dropdown: over 60 lines
+web/src/blocks.ts: function row: complexity over 20
+web/src/blocks.ts: function same: complexity over 20
+web/src/main.ts: function act: complexity over 20
+web/src/main.ts: function paint: complexity over 20
+web/src/ops.ts: function apply: complexity over 20
+web/src/scene.ts: function: complexity over 20
