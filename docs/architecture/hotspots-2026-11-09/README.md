@@ -18,7 +18,7 @@ What is left, by where the hunks land (every merge's diff on origin/staging, gro
 | file | merges | what collides | fix |
 |---|---|---|---|
 | `crates/core/src/cli.rs` | 99 | 35 merges added an arm to the 985-line `dispatch`; 33 bumped `HELP_AGENT_MAX` and its 40-issue comment | slices 3, 5 |
-| `ci/cap.toml` | 29 (27 raise the number) | one line, 396 conflict events; the note beside it already is one file per raise | slice 2 |
+| ci/cap.toml (deleted in #1845) | 29 (27 raise the number) | one line, 396 conflict events; the note beside it already is one file per raise | slice 2 |
 | `crates/core/src/events.rs` | 57 | 28 hunks on the `PASSIVE` list of event kinds | slice 4 |
 | `crates/core/src/config.rs` | 73 | 44 hunks on `Limits`, its `Default` and `LIMIT_DOCS`: three places per key | slice 6 |
 | `crates/core/src/check.rs`, `spawn.rs`, `drive.rs` | 71, 74, 70 | one function each (543, 659, 362 lines) takes most hunks | slice 7 |
@@ -40,7 +40,7 @@ why = """
 ```
 
 `cap-check`, the removed cap view (#1812), the `cap-near` alert and the page banner read one function, the effective cap at a sha:
-the highest `line_cap` among `ci/cap.toml` and `ci/cap.d/*.toml`.
+the highest `line_cap` among ci/cap.toml (deleted in #1845) and `ci/cap.d/*.toml`.
 
 ```rust
 let cap = overlap::cap_at_sha(r, &dir, &sha)?;   // Cap { lines: 45_400, warn_within: 500, from: "ci/cap.d/2026-11-11-45400.toml" }
@@ -82,7 +82,7 @@ events (one long-lived PR re-pushed against `justfile` 442 times; it is one pair
    `generated` with `generate = "just types"` and delete CI's own stale-types step (one way to check).
 2. **Cap raises as a folder** (`crates/core/src/overlap.rs`, `crates/core/src/hook.rs`, `.drover/arch.toml`,
    `roles/orchestrator/role.md`, `roles/impl.md`, `roles/usage-tail.md`, `docs/architecture.md`): the folder, the one
-   reader, the hook's refusal widened to the folder, `ci/cap.toml` frozen.
+   reader, the hook's refusal widened to the folder, ci/cap.toml (deleted in #1845) frozen.
 3. **Retire the help budget** (`crates/core/src/cli.rs`, `crates/cli/tests/spawn.rs`): delete `HELP_AGENT_MAX` and
    the `<=` assertion; the completeness half of the test stays.
 4. **Passive by flag** (`crates/core/src/events.rs`, `check.rs`, `spawn.rs`): the `passive` field, `.passive()`,

@@ -1384,31 +1384,6 @@ fn a_lanes_git_notes_write_or_notes_push_is_refused() {
 }
 
 #[test]
-fn an_impl_lane_may_edit_the_old_cap_files() {
-    let d = tmpdir("hook-cap");
-    std::fs::write(d.join("fleet.toml"), config()).unwrap();
-    let vars = [("DROVER_LANE", Some("sendmeter:24:impl"))];
-    let call = |tool: &str, ti: Value| {
-        let input = json!({"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": "/w", "tool_input": ti});
-        hook_at(&d, &d, &vars, "impl", &input.to_string())
-    };
-    let bash = |c: &str| call("Bash", json!({"command": c}));
-    assert_eq!(call("Edit", json!({"file_path": "/w/ci/cap.toml"})), "");
-    assert_eq!(
-        call("Write", json!({"file_path": "/w/ci/cap.d/2026-11-14-50000.toml"})),
-        ""
-    );
-    for cmd in [
-        "sed -i '' 's/35500/36000/' ci/cap.toml",
-        "printf x > ci/cap.toml",
-        "git rm -r ci/cap.toml ci/cap.d",
-        "rm -r ci/cap.d",
-    ] {
-        assert_eq!(bash(cmd), "", "{cmd}");
-    }
-}
-
-#[test]
 fn the_stop_hook_asks_for_the_turn_only_in_impl_lanes() {
     let stop = |lane: Option<&str>, role: &str| hook_in(lane, role, &json!({"hook_event_name": "Stop"}));
     for lane in [None, Some("sendmeter:-:orchestrator"), Some("sendmeter:-:conductor")] {
