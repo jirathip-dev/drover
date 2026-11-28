@@ -1,5 +1,6 @@
 more: boolean
 rows[].block: object
+rows[].epic: null
 rows[].fleet: string
 rows[].handoff: null
 rows[].issue: null

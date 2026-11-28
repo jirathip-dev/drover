@@ -6,66 +6,66 @@
     "routes": [
       {
         "count": 1,
-        "max": 7,
-        "p50": 7,
-        "p95": 7,
+        "max": 197,
+        "p50": 197,
+        "p95": 197,
         "route": "/api/v1/host"
       },
       {
         "count": 2,
-        "max": 3,
+        "max": 70,
         "p50": 0,
-        "p95": 3,
+        "p95": 70,
         "route": "/pair"
       },
       {
         "count": 1,
-        "max": 2,
-        "p50": 2,
-        "p95": 2,
-        "route": "/api/v1/chat-about"
-      },
-      {
-        "count": 1,
-        "max": 2,
-        "p50": 2,
-        "p95": 2,
-        "route": "/api/v1/needs"
-      },
-      {
-        "count": 1,
-        "max": 1,
-        "p50": 1,
-        "p95": 1,
-        "route": "/api/v1/lanes"
-      },
-      {
-        "count": 1,
-        "max": 1,
-        "p50": 1,
-        "p95": 1,
-        "route": "/api/v1/queue"
-      },
-      {
-        "count": 1,
-        "max": 1,
-        "p50": 1,
-        "p95": 1,
-        "route": "/api/v1/setup"
-      },
-      {
-        "count": 1,
-        "max": 1,
-        "p50": 1,
-        "p95": 1,
+        "max": 53,
+        "p50": 53,
+        "p95": 53,
         "route": "/api/v1/state"
       },
       {
         "count": 1,
-        "max": 0,
-        "p50": 0,
-        "p95": 0,
+        "max": 30,
+        "p50": 30,
+        "p95": 30,
         "route": "/api/v1/events"
+      },
+      {
+        "count": 1,
+        "max": 29,
+        "p50": 29,
+        "p95": 29,
+        "route": "/api/v1/chat-about"
+      },
+      {
+        "count": 1,
+        "max": 15,
+        "p50": 15,
+        "p95": 15,
+        "route": "/api/v1/queue"
+      },
+      {
+        "count": 1,
+        "max": 6,
+        "p50": 6,
+        "p95": 6,
+        "route": "/api/v1/needs"
+      },
+      {
+        "count": 1,
+        "max": 5,
+        "p50": 5,
+        "p95": 5,
+        "route": "/api/v1/setup"
+      },
+      {
+        "count": 1,
+        "max": 4,
+        "p50": 4,
+        "p95": 4,
+        "route": "/api/v1/lanes"
       },
       {
         "count": 1,
@@ -83,16 +83,16 @@
       "groups": [
         {
           "count": 7,
-          "max": 7,
-          "p50": 1,
-          "p95": 7,
+          "max": 197,
+          "p50": 15,
+          "p95": 197,
           "route": "/api/v1 reads"
         },
         {
           "count": 4,
-          "max": 3,
-          "p50": 1,
-          "p95": 3,
+          "max": 70,
+          "p50": 5,
+          "p95": 70,
           "route": "writes"
         }
       ],
@@ -101,7 +101,7 @@
       "phone_slow": null,
       "queued": 0,
       "rss_mb": 0,
-      "sha": "c0b79c4d0c41158942efb0bb8588abed7b10b357",
+      "sha": "7748e0958cb443824dc2bab96a6687af52b25d2b",
       "slow": null,
       "started": 1000000
     },

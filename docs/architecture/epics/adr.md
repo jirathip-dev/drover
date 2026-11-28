@@ -13,7 +13,7 @@ Open questions: one. The last merge sends the child's push, then the epic's. Kee
 
 Proposed (architect lane, 2026-11-25, staging `c73f4b6f4`). Read `README.md` first, then this, `shapes.md`,
 `boundaries.md`. The owner's decision q3758 asked for the data, the events, the close rule and the contract keys,
-with the block built from the screens kit. `docs/design/epics/` is a draft of the screens, not yet approved; where
+with the block built from the screens kit. the design draft (dropped by the 2026-11-25 amendment) is a draft of the screens, not yet approved; where
 this ADR departs from it is listed below.
 
 ## Question
@@ -136,7 +136,7 @@ The Queue block needs no key: it is a section of rows.
 
 ## Departures from the design draft
 
-| Draft (`docs/design/epics/README.md`) | Here | Why |
+| Draft (the design draft, dropped from the PR by the 2026-11-25 amendment) | Here | Why |
 |---|---|---|
 | The epic's push replaces the last child's | both are sent (the open question) | the child's push leaves before the epic is looked at |
 | Push title `acme-api #24 landed`, body without the fleet | the row's generic push: title `acme-api #24`, body the row's text | no second wording path |

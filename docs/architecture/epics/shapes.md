@@ -125,7 +125,7 @@ dropped, then the `epic-landed`.
 ### The Queue block
 
 No new block type and no new key: a `section` (`epics-<fleet>`, header `epics (N)`) holding one `list` of `row`s,
-as `docs/design/epics/` draws it. Built by `screens_epics.rs` from `QueueCard.epics`:
+as the design draft (dropped by the 2026-11-25 amendment) draws it. Built by `screens_epics.rs` from `QueueCard.epics`:
 
 | Row | id | From |
 |---|---|---|

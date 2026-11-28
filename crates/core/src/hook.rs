@@ -849,6 +849,10 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
                 .into(),
         );
     }
+    let epic = r.first() == Some(&"queue") && r.iter().any(|w| w.split('=').next() == Some("--epic"));
+    if !orchestrator && (r.first() == Some(&"epic") || epic) {
+        return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner changes an epic (#1786)".into());
+    }
     if !orchestrator && r.first() == Some(&"amend") {
         return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover amend` (#574)".into());
     }

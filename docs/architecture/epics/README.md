@@ -9,7 +9,7 @@ links each child's PR, and closes it.
 Slices: one PR, three commits: the list with its verb and the queue flag; the views; the landing and contract keys.
 Open questions: one. The last merge sends the child's push, then the epic's. Keep both (recommended) or only one?
 
-Read on staging `c73f4b6f4`. No product code here. The screens are drawn in `docs/design/epics/`; this folder says
+Read on staging `c73f4b6f4`. No product code here. The screens are drawn in the design draft (dropped by the 2026-11-25 amendment); this folder says
 what feeds them.
 
 | File | What |

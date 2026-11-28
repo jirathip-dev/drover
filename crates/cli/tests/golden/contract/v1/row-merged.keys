@@ -1,4 +1,11 @@
 [].block: object
+[].epic.dropped[]: number
+[].epic.merged[].issue: number
+[].epic.merged[].pr: null
+[].epic.merged[].pr: number
+[].epic.merged[].title: string
+[].epic.title: string
+[].epic: null
 [].fleet: string
 [].handoff: null
 [].issue: number
@@ -12,5 +19,7 @@
 [].seq: number
 [].text: string
 [].to.id: string
+[].to.k = "desk"
 [].to.k = "thread"
+[].to.repo: string
 [].ts: number

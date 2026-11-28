@@ -22,10 +22,13 @@ fn view(ctx: &Ctx, events: &[Event], (subject, row): (&Event, Row)) -> RowView {
         _ => String::new(),
     };
     let handoff = (subject.kind == "thread-handoff").then(|| super::v1::handoff(events, subject, false));
+    let epic = (subject.kind == "epic-landed")
+        .then(|| serde_json::from_value(serde_json::Value::Object(subject.data.clone())));
     RowView {
         block: super::chat::drawn(ctx, events, subject, &row, &id),
         row,
         handoff,
+        epic: epic.and_then(Result::ok),
     }
 }
 

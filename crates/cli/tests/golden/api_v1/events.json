@@ -71,7 +71,7 @@
         "act": "idle",
         "coat": "",
         "data": {
-          "device": "iPhone e142"
+          "device": "iPhone 62aa"
         },
         "fleet": "drover",
         "glyph": "·",
@@ -167,7 +167,7 @@
           "machine": "bazzite",
           "name": "claude B",
           "pane": "drover-setup-claude-B",
-          "via": "web iPhone e142"
+          "via": "web iPhone 62aa"
         },
         "fleet": "",
         "glyph": "·",
